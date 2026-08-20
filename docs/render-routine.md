@@ -26,6 +26,9 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
 2. **Ticks** (if `ticks`): `N = 12` (hours) or `60` (minutes); for `i in 1..N-1`, `x = round(i*L/N)`;
    height `tickMajorH` when `i % (N==60 ? 5 : 3) == 0` else `tickMinorH`; draw that many pixels of `tick`
    colour from the top row down and from the bottom row up.
+2b. **Digits** (if `digits` and not `digitsOnTop`): 3×5 pixel font (`FONT3x5` in render.ts), scale `digitScale`,
+   centred on the major-tick x (hours 1..11, minutes 05..55 / 5..55 per `digitsLeadingZero`), baseline at
+   `y0 + H - 1 - digitBottom`, colour `digitColor`. With `digitsOnTop` the same call happens after step 5.
 3. **Column**: for each row `ry`:
    - `edge = edgeX(ry)`:  `yc = 35.5`, `d = (ry-yc)/yc`,
      `edge = xe + tan(angle)*(ry-yc) + meniscusDepth * |d|^meniscusPow`.

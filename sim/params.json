@@ -38,5 +38,11 @@
   "angleMax": 40,
   "acrossShiftGain": 6,
   "deadzone": 0.02,
-  "brightness": 1
+  "brightness": 1,
+  "digits": true,
+  "digitColor": "#5a5a5a",
+  "digitScale": 1,
+  "digitBottom": 2,
+  "digitsOnTop": false,
+  "digitsLeadingZero": true
 }

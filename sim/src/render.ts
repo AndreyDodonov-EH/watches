@@ -33,7 +33,7 @@ function blend565(a: number, b: number, t: number): number {
 export interface Palette {
   rows: Uint16Array;     // TUBE_HEIGHT_PX colours: body shade per row incl. highlight band
   rowsHi: Uint16Array;   // same but for the "highlight on" region (inset-aware): identical to rows
-  body: number; glass: number; tick: number; bubbleRim: number; bubbleIn: Uint16Array; bg: number;
+  body: number; glass: number; tick: number; digit: number; bubbleRim: number; bubbleIn: Uint16Array; bg: number;
 }
 
 /** Step 0: build the per-row colour LUT. Firmware does this once per param change. */
@@ -58,7 +58,7 @@ export function buildPalette(p: Params, acrossShift = 0): Palette {
   }
   return {
     rows, rowsHi: rows, body: q(scale(body, br)), glass: q(scale(hexToRgb(p.glass), br)),
-    tick: q(scale(hexToRgb(p.tick), br)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn, bg: 0,
+    tick: q(scale(hexToRgb(p.tick), br)), digit: q(scale(hexToRgb(p.digitColor), br)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn, bg: 0,
   };
 }
 
@@ -71,6 +71,35 @@ function hspan(y: number, x0: number, x1: number, c: number): void {
 function px(x: number, y: number, c: number): void {
   if (x < 0 || y < 0 || x >= PANEL_W || y >= PANEL_H) return;
   fb[y * PANEL_W + x] = c;
+}
+
+// 3x5 pixel font, digits 0-9, rows top→bottom, 3 bits each (MSB = left).
+const FONT3x5: number[][] = [
+  [0b111,0b101,0b101,0b101,0b111], [0b010,0b110,0b010,0b010,0b111], [0b111,0b001,0b111,0b100,0b111],
+  [0b111,0b001,0b111,0b001,0b111], [0b101,0b101,0b111,0b001,0b001], [0b111,0b100,0b111,0b001,0b111],
+  [0b111,0b100,0b111,0b101,0b111], [0b111,0b001,0b001,0b001,0b001], [0b111,0b101,0b111,0b101,0b111],
+  [0b111,0b101,0b111,0b001,0b111],
+];
+/** Draw `text` (digits only) centred at x, baseline y (bottom row), pixel scale k. */
+function drawDigits(text: string, xc: number, yBase: number, k: number, c: number): void {
+  const w = text.length * 4 * k - k;           // 3 px glyph + 1 px gap
+  let x = Math.round(xc - w / 2);
+  const yTop = yBase - 5 * k + 1;
+  for (const ch of text) {
+    const g = FONT3x5[ch.charCodeAt(0) - 48]; if (!g) { x += 4 * k; continue; }
+    for (let r = 0; r < 5; r++) for (let col = 0; col < 3; col++) if (g[r] & (4 >> col))
+      for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++) px(x + col * k + dx, yTop + r * k + dy, c);
+    x += 4 * k;
+  }
+}
+function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number): void {
+  const L = TUBE_LENGTH_PX, H = TUBE_HEIGHT_PX;
+  const every = ticksN === 60 ? 5 : 1;
+  for (let i = every; i < ticksN; i += every) {
+    const x = Math.round((i * L) / ticksN);
+    const t = ticksN === 60 && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
+    drawDigits(t, x, y0 + H - 1 - p.digitBottom, Math.round(p.digitScale), pal.digit);
+  }
 }
 
 export interface Fizz { x: number; y: number; v: number; }
@@ -116,6 +145,9 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
       for (let ry = 0; ry < h; ry++) { px(x, y0 + ry, pal.tick); px(x, y0 + H - 1 - ry, pal.tick); }
     }
   }
+
+  // Step 2b: digits engraved behind the liquid
+  if (p.digits && !p.digitsOnTop) drawTubeDigits(y0, p, pal, ticksN);
 
   // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
   const edges = new Float32Array(H);
@@ -191,6 +223,9 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
       px(fx + dx, y0 + fy + dy, inner ? pal.bubbleIn[fy] : c);
     }
   }
+
+  // Step 5b: digits printed on top of the liquid
+  if (p.digits && p.digitsOnTop) drawTubeDigits(y0, p, pal, ticksN);
 
   // Step 6: spirit-level bubble — filled ellipse (darkened body) with 1 px bright rim
   if (p.bubble) {
