@@ -148,7 +148,7 @@ function digitRowColors(p: Params, gh: number, ky: number): Uint16Array {
 }
 function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number, alpha: AlphaFn): void {
   const L = TUBE_LENGTH_PX, H = TUBE_HEIGHT_PX; void pal;
-  const every = ticksN === 60 ? 5 : 1;
+  const every = Math.max(1, Math.round(ticksN === 60 ? p.digitMinuteStep : p.digitHourStep));
   const f = FONTS[Math.max(0, Math.min(FONTS.length - 1, Math.round(p.digitFont)))];
   const minutes = ticksN === 60;
   const kx = minutes ? p.digitScaleXMin : p.digitScaleX, ky = minutes ? p.digitScaleYMin : p.digitScaleY;

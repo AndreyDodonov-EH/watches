@@ -52,6 +52,8 @@ export interface Params {
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
+  digitMinuteStep: number; // label every N minutes (5,10,15,20,30)
+  digitHourStep: number;   // label every N hours (1..6)
   // --- physics (fixed-step 50 Hz) ---
   fillK: number;         // spring stiffness of fill-edge position (1/s^2)
   fillDamp: number;      // damping ratio-ish (1/s)
@@ -112,6 +114,8 @@ export const DEFAULT_PARAMS: Params = {
   digitsOnTop: false,
   liquidTransparency: 0.45,
   digitsLeadingZero: true,
+  digitMinuteStep: 10,
+  digitHourStep: 1,
   fillK: 28,
   fillDamp: 3.5,
   fillSloshGain: 45,
@@ -186,6 +190,8 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   digitBottomMin: { group: 'Digits', min: 0, max: 40, step: 1 },
   digitBottom: { group: 'Digits', min: 0, max: 40, step: 1 },
   digitsOnTop: { group: 'Digits' }, digitsLeadingZero: { group: 'Digits' },
+  digitMinuteStep: { group: 'Digits', min: 5, max: 30, step: 5 },
+  digitHourStep: { group: 'Digits', min: 1, max: 6, step: 1 },
   liquidTransparency: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   fillK: { group: 'Physics', min: 1, max: 400, step: 1 },
   fillDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },

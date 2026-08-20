@@ -53,5 +53,7 @@
   "digitFont": 2,
   "digitScaleXMin": 1.5,
   "digitScaleYMin": 1.25,
-  "digitBottomMin": 2
+  "digitBottomMin": 2,
+  "digitMinuteStep": 10,
+  "digitHourStep": 1
 }
