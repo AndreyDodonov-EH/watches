@@ -1,0 +1,98 @@
+#include "display.h"
+#include <Arduino.h>
+#include <string.h>
+#include "driver/spi_master.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_heap_caps.h"
+#include "esp_lcd_sh8601.h"
+#include "layout.h"
+
+// Pins — from Waveshare demo 03_LVGL_V8_Test and arduino-esp32 variant
+// waveshare_esp32_s3_touch_amoled_191/pins_arduino.h (identical).
+#define PIN_LCD_CS     6
+#define PIN_LCD_PCLK   47
+#define PIN_LCD_D0     18
+#define PIN_LCD_D1     7
+#define PIN_LCD_D2     48
+#define PIN_LCD_D3     5
+#define PIN_LCD_RST    17
+#define LCD_HOST       SPI2_HOST
+
+// Verbatim from Waveshare 03_LVGL_V8_Test.ino
+static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
+  {0x11, (uint8_t []){0x00}, 0, 120},
+  {0x36, (uint8_t []){0xF0}, 1, 0},
+  {0x3A, (uint8_t []){0x55}, 1, 0},  // 16-bit RGB565
+  {0x2A, (uint8_t []){0x00,0x00,0x02,0x17}, 4, 0},
+  {0x2B, (uint8_t []){0x00,0x00,0x00,0xEF}, 4, 0},
+  {0x51, (uint8_t []){0x00}, 1, 10},
+  {0x29, (uint8_t []){0x00}, 0, 10},
+  {0x51, (uint8_t []){0xFF}, 1, 0},
+};
+
+static esp_lcd_panel_io_handle_t io_handle = NULL;
+static esp_lcd_panel_handle_t panel = NULL;
+static SemaphoreHandle_t done_sem = NULL;
+
+// Bounce buffer in internal DMA RAM; frame is streamed in bands from PSRAM.
+#define BAND_ROWS 40
+static uint16_t *band_buf[2];
+
+static bool IRAM_ATTR on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *) {
+  BaseType_t hp = pdFALSE;
+  xSemaphoreGiveFromISR(done_sem, &hp);
+  return hp == pdTRUE;
+}
+
+bool display_init(void) {
+  done_sem = xSemaphoreCreateBinary();
+  for (int i = 0; i < 2; i++) {
+    band_buf[i] = (uint16_t *)heap_caps_malloc(PANEL_W * BAND_ROWS * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!band_buf[i]) { log_e("band buf alloc failed"); return false; }
+  }
+  const spi_bus_config_t buscfg = SH8601_PANEL_BUS_QSPI_CONFIG(PIN_LCD_PCLK, PIN_LCD_D0, PIN_LCD_D1,
+                                                               PIN_LCD_D2, PIN_LCD_D3, PANEL_W * BAND_ROWS * 2);
+  ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
+
+  const esp_lcd_panel_io_spi_config_t io_config = SH8601_PANEL_IO_QSPI_CONFIG(PIN_LCD_CS, on_trans_done, NULL);
+  sh8601_vendor_config_t vendor_config = {
+    .init_cmds = lcd_init_cmds,
+    .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
+    .flags = { .use_qspi_interface = 1 },
+  };
+  ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
+
+  const esp_lcd_panel_dev_config_t panel_config = {
+    .reset_gpio_num = PIN_LCD_RST,
+    .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+    .bits_per_pixel = 16,
+    .vendor_config = &vendor_config,
+  };
+  ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(io_handle, &panel_config, &panel));
+  ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
+  ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+  // Orientation comes from MADCTL (0x36 = 0xF0) in the init sequence; the sh8601
+  // driver does not support swap_xy, so no rotation calls here.
+  ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+  return true;
+}
+
+void display_push_rows(const uint16_t *fb, int y0, int y1) {
+  int b = 0;
+  for (int y = y0; y < y1; y += BAND_ROWS) {
+    int rows = min(BAND_ROWS, y1 - y);
+    memcpy(band_buf[b], fb + (size_t)y * PANEL_W, (size_t)rows * PANEL_W * 2);
+    esp_lcd_panel_draw_bitmap(panel, 0, y, PANEL_W, y + rows, band_buf[b]);
+    // Wait for this transfer before reusing the same bounce buffer two bands later
+    xSemaphoreTake(done_sem, portMAX_DELAY);
+    b ^= 1;
+  }
+}
+
+void display_push_frame(const uint16_t *fb) { display_push_rows(fb, 0, PANEL_H); }
+
+void display_set_brightness(uint8_t v) {
+  esp_lcd_panel_io_tx_param(io_handle, 0x02000000 | (0x51 << 8), &v, 1);
+}
