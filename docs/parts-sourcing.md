@@ -24,13 +24,15 @@ Two tube slots of 44 × 6 mm with a 4 mm gap = 16 mm tall → fits inside the 19
 
 ---
 
-## Status (2026-08-20): measure first, then order
+## Status (2026-08-20)
+
+**Ordered 2026-08-20 — acrylhaus.com, €30.96:** Halbrundstab Ø6 (100639-001), Halbrundstab Ø10 (100639-002), Rundstab Ø8 (100635-002), Rohr Ø8/5 (100629-042), 1 m each. Bar height in `spec/layout.h` / `layout.ts` will be set after comparing 6 / 8 (split Ø8) / 10 mm on the bench. Still wanted: 8 mm half-round — out of stock at architekturbedarf.de (€7.58) and modellbau-profi; re-check in a week.
 
 Decisions so far:
 - **Board:** owned (non-touch SKU 28872, no headers).
 - **Tools:** assumed available at the hardware colleague's bench — Basket C is reference only.
 - **Leather:** does **not** have to be one wide piece. The cuff can be laminated from several narrow strips (e.g. 2–3 × 25–35 mm, or a 50 mm centre strip plus 10–15 mm edge strips) glued/stitched edge-to-edge on a thin lining — that brings the cheap, in-stock 5 cm pre-dyed strips back into play and lets the strip seams double as the slot edges. So width is not a blocker; don't pre-select.
-- **Tubes/rods:** **do not pre-select.** Measure on the real display first (checklist below), then pick the rod width to match.
+- **Tubes/rods:** sampler ordered (above); rod = bar width, firmware layout follows the chosen rod. Height budget: 2·margin + 2·bar + bridge = 19.8 mm; keep bridge ≥ 3 mm leather → bar ≤ 7 mm at 1 mm margins (6 mm → 12/72/72/72/12 px).
 
 ### Measure-first checklist (with the firmware calibration face, serial cmd `c`)
 1. Bar height in mm (spec says 72 px = 6.0 mm; verify with calipers against the glass) → rod width = bar height + 1–2 mm (a lens slightly wider than the bar hides the bar's edges under the curve). 6 mm bar → 7–8 mm rod; if the bars end up 5 mm → 6 mm rod; 7–8 mm → 10 mm rod.

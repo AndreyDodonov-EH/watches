@@ -67,7 +67,8 @@ static float demoSpeed = 1;          // time multiplier (d<N>)
 static double clockSec = 10 * 3600 + 9 * 60 + 30;  // seconds since midnight (until `t` sets it)
 static uint32_t lastPhysUs = 0, frames = 0, fpsT0 = 0;
 static float fps = 0;
-// Tube strips in internal DMA RAM: the panel DMA reads them directly while the other tube renders.
+// Tube strips (owned by display.cpp, internal DMA RAM): the panel DMA reads them directly while the
+// other tube renders.
 static uint16_t *strip[2] = {nullptr, nullptr};
 
 static void renderBoth() {
@@ -269,11 +270,8 @@ void setup() {
   Serial.printf("\nliquid-watch | cpu %lu MHz | psram %u KB | heap %u KB\n",
                 getCpuFrequencyMhz(), ESP.getPsramSize() / 1024, ESP.getFreeHeap() / 1024);
   if (!fb.buf) { Serial.println("FATAL: framebuffer alloc failed"); }
-  for (int i = 0; i < 2; i++) {
-    strip[i] = (uint16_t *)heap_caps_malloc(PANEL_W * TUBE_HEIGHT_PX * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!strip[i]) Serial.printf("FATAL: strip %d alloc failed\n", i);
-  }
   if (!display_init()) Serial.println("display init FAILED");
+  strip[0] = display_strip(0); strip[1] = display_strip(1);
   have_imu = imu_init();
   Serial.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);

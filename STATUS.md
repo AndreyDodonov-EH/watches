@@ -12,7 +12,7 @@ _Last update: 2026-08-20 (session 4, Phase 3: liquid face running on the board)_
 - Commands (from `firmware/`): `pio run` · `pio run -t upload` · `pio device monitor`
 - Display path: Waveshare's `esp_lcd_sh8601` driver (copied verbatim into `firmware/lib/esp_lcd_sh8601/`),
   init sequence verbatim from their `03_LVGL_V8_Test.ino`. Drawing via Adafruit GFX into a 536×240 RGB565
-  framebuffer in PSRAM, pushed in 40-row bands through an internal DMA bounce buffer.
+  framebuffer in PSRAM, staged through two 72-row internal DMA strip buffers (owned by display.cpp).
   Note: the driver does NOT support `esp_lcd_panel_swap_xy` (aborts) — orientation comes from MADCTL (0x36).
   `-DUSB_LEFT=1` (default) uses MADCTL 0x30 = USB-C on the left; 0 gives Waveshare's 0xF0 (USB right).
   Panel wants big-endian RGB565: `PsramCanvas` stores pixels pre-byte-swapped so the push is a plain memcpy
@@ -127,9 +127,10 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
   to `FIELDS` in the generator). The field table is what the later Wi-Fi / GATT / JSON control will use.
 - Pipeline per frame: IMU → `GravityNorm` → `ImuFilter` → `stepTube` ×2 (50 Hz fixed step, catch-up ≤5) →
   `renderTube` into a 72-row strip in **internal DMA RAM** → `display_push_strip_async` (panel DMA reads
-  the strip directly, no bounce copy) while the other tube renders. Two strips = 154 KB internal RAM;
-  free heap after boot ≈ 92 KB — **BLE/Wi-Fi will need to drop to one strip** (or render the second
-  tube into PSRAM) — keep in mind.
+  the strip directly, no bounce copy) while the other tube renders. The two strips (2 × 77 KB, internal DMA
+  RAM) are owned by `display.cpp` (`display_strip(i)`) and also stage the old full-frame pushes, so the
+  Phase 1 bounce buffers are gone: **free internal heap after boot ≈ 175 KB**. Wi-Fi may still want one
+  strip back (see KAIZEN.md / docs/companion-handoff.md).
 - Timing: render 18 ms for both tubes (digits ≈ 6 ms, front-bright ≈ 4, glow ≈ 3, fills ≈ 5), DMA
   overlapped → 40 fps. Stage costs measured with `p…=0` toggles over serial, no rebuild needed.
 - **Pixel check vs the sim**: `python3 firmware/tools/compare-device.py` (board connected) → sends `x`
@@ -138,4 +139,5 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
   Last run: 293 / 77184 px differ, all ≤ 1 LSB (0 above 12/255).
 - Not ported: nothing rendering-wise. Fizz uses `esp_random()`. Clock is software-only (set with `t`).
 - Next: Wi-Fi SoftAP / BLE GATT param control + preset select using `PARAM_FIELDS`; NVS-persist params
-  and clock; real RTC/NTP.
+  and clock; real RTC/NTP. Plan: `docs/companion-handoff.md`. Long-term backlog (power/incremental
+  rendering): `KAIZEN.md`.

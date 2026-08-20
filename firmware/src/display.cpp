@@ -42,9 +42,12 @@ static esp_lcd_panel_io_handle_t io_handle = NULL;
 static esp_lcd_panel_handle_t panel = NULL;
 static SemaphoreHandle_t done_sem = NULL;
 
-// Bounce buffer in internal DMA RAM; frame is streamed in bands from PSRAM.
-#define BAND_ROWS 40
-static uint16_t *band_buf[2];
+// Two tube-strip buffers in internal DMA RAM. The liquid face renders straight into them and the
+// panel DMA reads them directly; full-frame pushes from the PSRAM canvas are staged through them too.
+#define BAND_ROWS 40                 // max rows per DMA transfer (spi max_transfer_sz)
+#define STRIP_ROWS TUBE_HEIGHT_PX
+static uint16_t *strips[2];
+static int pending = 0;
 
 static bool IRAM_ATTR on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *) {
   BaseType_t hp = pdFALSE;
@@ -55,8 +58,8 @@ static bool IRAM_ATTR on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_
 bool display_init(void) {
   done_sem = xSemaphoreCreateCounting(32, 0);
   for (int i = 0; i < 2; i++) {
-    band_buf[i] = (uint16_t *)heap_caps_malloc(PANEL_W * BAND_ROWS * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!band_buf[i]) { log_e("band buf alloc failed"); return false; }
+    strips[i] = (uint16_t *)heap_caps_malloc(PANEL_W * STRIP_ROWS * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!strips[i]) { log_e("band buf alloc failed"); return false; }
   }
   const spi_bus_config_t buscfg = SH8601_PANEL_BUS_QSPI_CONFIG(PIN_LCD_PCLK, PIN_LCD_D0, PIN_LCD_D1,
                                                                PIN_LCD_D2, PIN_LCD_D3, PANEL_W * BAND_ROWS * 2);
@@ -85,26 +88,8 @@ bool display_init(void) {
   return true;
 }
 
-void display_push_rows(const uint16_t *fb, int y0, int y1) {
-  int b = 0;
-  for (int y = y0; y < y1; y += BAND_ROWS) {
-    int rows = min(BAND_ROWS, y1 - y);
-    memcpy(band_buf[b], fb + (size_t)y * PANEL_W, (size_t)rows * PANEL_W * 2);
-    esp_lcd_panel_draw_bitmap(panel, 0, y, PANEL_W, y + rows, band_buf[b]);
-    // Wait for this transfer before reusing the same bounce buffer two bands later
-    xSemaphoreTake(done_sem, portMAX_DELAY);
-    b ^= 1;
-  }
-}
+uint16_t *display_strip(int i) { return strips[i & 1]; }
 
-void display_push_frame(const uint16_t *fb) { display_push_rows(fb, 0, PANEL_H); }
-
-void display_set_brightness(uint8_t v) {
-  esp_lcd_panel_io_tx_param(io_handle, 0x02000000 | (0x51 << 8), &v, 1);
-}
-
-// ---- async strip push: DMA reads directly from an internal-RAM buffer (no bounce copy) ----
-static int pending = 0;
 void display_push_strip_async(const uint16_t *buf, int y0, int rows) {
   for (int y = 0; y < rows; y += BAND_ROWS) {
     int n = min(BAND_ROWS, rows - y);
@@ -115,3 +100,23 @@ void display_push_strip_async(const uint16_t *buf, int y0, int rows) {
 void display_wait_all(void) {
   while (pending > 0) { xSemaphoreTake(done_sem, portMAX_DELAY); pending--; }
 }
+
+// Stage rows of a PSRAM framebuffer through the strips, alternating, up to STRIP_ROWS per chunk.
+void display_push_rows(const uint16_t *fb, int y0, int y1) {
+  display_wait_all();
+  int b = 0;
+  for (int y = y0; y < y1; y += STRIP_ROWS) {
+    int rows = min(STRIP_ROWS, y1 - y);
+    memcpy(strips[b], fb + (size_t)y * PANEL_W, (size_t)rows * PANEL_W * 2);
+    display_push_strip_async(strips[b], y, rows);
+    b ^= 1;
+    display_wait_all();   // simple and safe: the next memcpy may target either strip
+  }
+}
+
+void display_push_frame(const uint16_t *fb) { display_push_rows(fb, 0, PANEL_H); }
+
+void display_set_brightness(uint8_t v) {
+  esp_lcd_panel_io_tx_param(io_handle, 0x02000000 | (0x51 << 8), &v, 1);
+}
+
