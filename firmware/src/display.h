@@ -6,6 +6,8 @@
 // (same command set; init sequence taken verbatim from Waveshare demo).
 bool display_init(void);
 // Push a full 536x240 RGB565 frame (buffer may live in PSRAM). Blocking.
+// NOTE: the panel takes big-endian RGB565; the framebuffer must already hold byte-swapped
+// pixels (PsramCanvas in main.cpp does this), so the copy to DMA memory is a plain memcpy.
 void display_push_frame(const uint16_t *fb);
 // Push a horizontal band [y0, y1) of a full-width framebuffer. y0/y1 must be even.
 void display_push_rows(const uint16_t *fb, int y0, int y1);

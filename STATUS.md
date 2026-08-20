@@ -13,7 +13,12 @@ _Last update: 2026-08-20 (session 1, Phase 1 bring-up)_
 - Display path: Waveshare's `esp_lcd_sh8601` driver (copied verbatim into `firmware/lib/esp_lcd_sh8601/`),
   init sequence verbatim from their `03_LVGL_V8_Test.ino`. Drawing via Adafruit GFX into a 536×240 RGB565
   framebuffer in PSRAM, pushed in 40-row bands through an internal DMA bounce buffer.
-  Note: the driver does NOT support `esp_lcd_panel_swap_xy` (aborts) — orientation comes from MADCTL 0x36=0xF0.
+  Note: the driver does NOT support `esp_lcd_panel_swap_xy` (aborts) — orientation comes from MADCTL (0x36).
+  `-DUSB_LEFT=1` (default) uses MADCTL 0x30 = USB-C on the left; 0 gives Waveshare's 0xF0 (USB right).
+  Panel wants big-endian RGB565: `PsramCanvas` stores pixels pre-byte-swapped so the push is a plain memcpy
+  (swapping at push time cost ~20 % fps). Before the fix the green bars rendered blue.
+- Serial monitor: `pio device monitor` is silent until you send a command (firmware only prints on request);
+  `echo h > /dev/ttyACM0` also works.
 
 ## Pinout (verified from Waveshare demo code AND arduino-esp32 variant `waveshare_esp32_s3_touch_amoled_191`)
 | Function | GPIO |
@@ -44,9 +49,9 @@ face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness,
   a ≈ (-0.19, -0.06, +0.92) g, gyro bias ≈ (-1.4, 0, 0.4) dps. |a| ≈ 0.94 g (slight scale/offset, fine).
 
 ## Open problems / to verify with the user (need eyes on the panel)
-- [ ] Is the calibration face / hello face visible and correctly oriented? (`h` prints "<- LEFT (USB-C here?)"
-      at the top-left). If mirrored/upside-down, change MADCTL (0x36) value in `display.cpp` init cmds.
-- [ ] Confirm which side USB-C should face in the cuff (default: left).
+- [x] Calibration face visible, centred lines OK (user confirmed 2026-08-20). Colour was blue → byte-order fixed.
+- [ ] Re-confirm after rotation fix: `h` face must read "<- LEFT (USB-C here?)" top-left with USB-C on the left.
+- [ ] USB-C side in the cuff: defaulting to LEFT (no cuff yet; flip with `-DUSB_LEFT=0` if that changes).
 - [ ] IMU axis mapping to tube length — needs the board tilted along the tube while streaming `i`.
       Not yet documented.
 - [ ] Colour check of #5DCAA5 on the AMOLED vs monitor (hello face shows R/G/B/liquid/highlight swatches).

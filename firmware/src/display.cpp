@@ -20,10 +20,16 @@
 #define PIN_LCD_RST    17
 #define LCD_HOST       SPI2_HOST
 
-// Verbatim from Waveshare 03_LVGL_V8_Test.ino
+// USB_LEFT=1 (default): landscape with USB-C on the left (180° from Waveshare demo's 0xF0).
+#ifndef USB_LEFT
+#define USB_LEFT 1
+#endif
+#define MADCTL_VAL (USB_LEFT ? 0x30 : 0xF0)
+
+// Verbatim from Waveshare 03_LVGL_V8_Test.ino (except MADCTL value)
 static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
   {0x11, (uint8_t []){0x00}, 0, 120},
-  {0x36, (uint8_t []){0xF0}, 1, 0},
+  {0x36, (uint8_t []){MADCTL_VAL}, 1, 0},   // orientation, see USB_LEFT
   {0x3A, (uint8_t []){0x55}, 1, 0},  // 16-bit RGB565
   {0x2A, (uint8_t []){0x00,0x00,0x02,0x17}, 4, 0},
   {0x2B, (uint8_t []){0x00,0x00,0x00,0xEF}, 4, 0},

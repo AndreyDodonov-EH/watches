@@ -14,7 +14,8 @@
 #define BOOT_MODE 'c'   // default boot face: calibration (handoff: keep available forever)
 #endif
 
-// GFXcanvas16 with the pixel buffer in PSRAM
+// GFXcanvas16 with the pixel buffer in PSRAM. Pixels are stored byte-swapped (panel is
+// big-endian RGB565) so the display push is a straight memcpy; callers use normal RGB565.
 class PsramCanvas : public Adafruit_GFX {
  public:
   uint16_t *buf;
@@ -23,9 +24,10 @@ class PsramCanvas : public Adafruit_GFX {
   }
   void drawPixel(int16_t x, int16_t y, uint16_t c) override {
     if (x < 0 || y < 0 || x >= _width || y >= _height) return;
-    buf[(size_t)y * _width + x] = c;
+    buf[(size_t)y * _width + x] = __builtin_bswap16(c);
   }
   void fillScreen(uint16_t c) override {
+    c = __builtin_bswap16(c);
     uint32_t cc = (uint32_t)c | ((uint32_t)c << 16);
     uint32_t *p = (uint32_t *)buf;
     for (size_t i = 0; i < (size_t)_width * _height / 2; i++) p[i] = cc;
@@ -35,6 +37,7 @@ class PsramCanvas : public Adafruit_GFX {
     if (y < 0) { h += y; y = 0; }
     if (x + w > _width) w = _width - x;
     if (y + h > _height) h = _height - y;
+    c = __builtin_bswap16(c);
     for (int yy = y; yy < y + h; yy++) {
       uint16_t *row = buf + (size_t)yy * _width + x;
       for (int xx = 0; xx < w; xx++) row[xx] = c;
