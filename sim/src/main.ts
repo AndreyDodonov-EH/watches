@@ -1,6 +1,6 @@
 import './style.css';
 import { PANEL_W, PANEL_H, HOURS_TUBE_Y, MINUTES_TUBE_Y, TUBE_HEIGHT_PX, BRIDGE_Y0, BRIDGE_Y1 } from '@spec/layout';
-import { DEFAULT_PARAMS, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
+import { DEFAULT_PARAMS, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, migrateParams, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
 import { renderFrame, blit, stepFizz, fb } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
@@ -9,7 +9,7 @@ import { SerialImu } from './serial';
 
 // ---------- state ----------
 const LS_KEY = 'liquid-watch-params-v2';
-const params: Params = { ...DEFAULT_PARAMS, ...JSON.parse(localStorage.getItem(LS_KEY) ?? '{}') };
+const params: Params = { ...DEFAULT_PARAMS, ...migrateParams(JSON.parse(localStorage.getItem(LS_KEY) ?? '{}')) };
 const overlay = { ...DEFAULT_OVERLAY };
 const hours = newTube(), minutes = newTube();
 const input: TiltInput = { along: 0, across: 0, gyroAlong: 0, gyroAcross: 0 };

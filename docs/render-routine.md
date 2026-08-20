@@ -35,9 +35,9 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
 4. **Highlight inset** (rows of the highlight band only): over the last `highlightInset` px before the edge and
    the first `highlightInset` px from the left, blend the highlight row colour toward the body colour
    (`rows[hiTop+highlightH+1]`) linearly so the highlight does not touch the meniscus / end cap.
-4b. **Ticks + digits**: `N = 12` (hours) or `60` (minutes). Ticks: for `i in 1..N-1`, `x = round(i*L/N)`,
-   height `tickMajorH` when `i % (N==60 ? 5 : 3) == 0` else `tickMinorH`, drawn from the top row down and the
-   bottom row up. Digits: font `FONTS[digitFont]` (3×5, 4×6, 5×7 round, 5×7 seven-segment, 6×8 bold), scaled to a `round(gw*digitScaleX)` × `round(gh*digitScaleY)` box by nearest-neighbour (`src = floor(dst*g/box)`), centred on `x = round(i*L/N)` for `i` in steps of
+4b. **Ticks + digits**: `N = 12` (hours) or `60` (minutes). Ticks (per tube: `tick*H` for hours, `tick*M` for minutes): for `i = step, 2·step, …  < N`, `x = round(i*L/N)`;
+   the n-th tick is major when `tickMajorEvery > 0 && n % tickMajorEvery == 0` → height/colour `tickMajorHeight/Color`,
+   else `tickMinorHeight/Color`; drawn from the top row down (`tickPos` 0 or 2) and/or from the bottom row up (1 or 2). Digits: font `FONTS[digitFont]` (3×5, 4×6, 5×7 round, 5×7 seven-segment, 6×8 bold), scaled to a `round(gw*digitScaleX)` × `round(gh*digitScaleY)` box by nearest-neighbour (`src = floor(dst*g/box)`), centred on `x = round(i*L/N)` for `i` in steps of
    `digitHourStep` (hours) / `digitMinuteStep` (minutes), `0 < i < N`, baseline `y0+H-1-digitBottom` (minutes tube uses `digitScaleXMin/YMin/digitBottomMin`), glyph rows coloured by a `digitColor→digitColor2` gradient,
    optional 1 px `digitShadowColor` copy offset (+1,+1) drawn first. Every pixel of both is written with
    opacity `a`: `a = 1` outside the liquid (`x >= edge(ry)`), `a = liquidTransparency` inside

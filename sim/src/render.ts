@@ -33,7 +33,7 @@ function blend565(a: number, b: number, t: number): number {
 export interface Palette {
   rows: Uint16Array;     // TUBE_HEIGHT_PX colours: body shade per row incl. highlight band
   rowsHi: Uint16Array;   // same but for the "highlight on" region (inset-aware): identical to rows
-  body: number; glass: number; tick: number; digit: number; bubbleRim: number; bubbleIn: Uint16Array; bg: number;
+  body: number; glass: number; digit: number; bubbleRim: number; bubbleIn: Uint16Array; bg: number;
 }
 
 /** Step 0: build the per-row colour LUT. Firmware does this once per param change. */
@@ -58,7 +58,7 @@ export function buildPalette(p: Params, acrossShift = 0): Palette {
   }
   return {
     rows, rowsHi: rows, body: q(scale(body, br)), glass: q(scale(hexToRgb(p.glass), br)),
-    tick: q(scale(hexToRgb(p.tick), br)), digit: q(scale(hexToRgb(p.digitColor), br)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn, bg: 0,
+    digit: q(scale(hexToRgb(p.digitColor), br)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn, bg: 0,
   };
 }
 
@@ -265,12 +265,25 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
   const inside = (x: number, y: number): boolean => { const ry = y - y0; return ry >= 0 && ry < H && x < edges[ry]; };
   const tickAlpha: AlphaFn = (x, y) => (inside(x, y) ? p.liquidTransparency : 1);
   const digitAlpha: AlphaFn = p.digitsOnTop ? () => 1 : tickAlpha;
-  if (p.ticks) {
-    const majorEvery = ticksN === 60 ? 5 : ticksN === 12 ? 3 : 1;
-    for (let i = 1; i < ticksN; i++) {
-      const x = Math.round((i * L) / ticksN);
-      const h = i % majorEvery === 0 ? p.tickMajorH : p.tickMinorH;
-      for (let ry = 0; ry < h; ry++) { pxa(x, y0 + ry, pal.tick, tickAlpha(x, y0 + ry)); pxa(x, y0 + H - 1 - ry, pal.tick, tickAlpha(x, y0 + H - 1 - ry)); }
+  {
+    const minutes = ticksN === 60;
+    const on = minutes ? p.ticksM : p.ticksH;
+    if (on) {
+      const step = Math.max(1, Math.round(minutes ? p.tickStepM : p.tickStepH));
+      const majorEvery = Math.round(minutes ? p.tickMajorEveryM : p.tickMajorEveryH);
+      const hMin = minutes ? p.tickMinorHeightM : p.tickMinorHeightH, hMaj = minutes ? p.tickMajorHeightM : p.tickMajorHeightH;
+      const cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), p.brightness));
+      const cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), p.brightness));
+      const pos = Math.round(minutes ? p.tickPosM : p.tickPosH);
+      for (let i = step, n = 1; i < ticksN; i += step, n++) {
+        const x = Math.round((i * L) / ticksN);
+        const major = majorEvery > 0 && n % majorEvery === 0;
+        const h = major ? hMaj : hMin, c = major ? cMaj : cMin;
+        for (let ry = 0; ry < h; ry++) {
+          if (pos !== 1) pxa(x, y0 + ry, c, tickAlpha(x, y0 + ry));
+          if (pos !== 0) pxa(x, y0 + H - 1 - ry, c, tickAlpha(x, y0 + H - 1 - ry));
+        }
+      }
     }
   }
   if (p.digits) drawTubeDigits(y0, p, pal, ticksN, digitAlpha);

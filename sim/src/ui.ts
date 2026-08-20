@@ -1,5 +1,5 @@
 // Minimal control panel generated from PARAM_META. No framework.
-import { DEFAULT_PARAMS, PARAM_META, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, PRESET_USER_V1, type Params } from './params';
+import { DEFAULT_PARAMS, PARAM_META, migrateParams, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, PRESET_USER_V1, type Params } from './params';
 
 export interface UiHooks { onChange: () => void; }
 
@@ -62,7 +62,7 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   });
   btn('Copy JSON', () => { navigator.clipboard.writeText(JSON.stringify(p, null, 2)); });
   const file = document.createElement('input'); file.type = 'file'; file.accept = '.json'; file.style.display = 'none';
-  file.onchange = async () => { const f = file.files?.[0]; if (!f) return; apply(JSON.parse(await f.text())); };
+  file.onchange = async () => { const f = file.files?.[0]; if (!f) return; apply(migrateParams(JSON.parse(await f.text()))); };
   btn('Import JSON', () => file.click());
   bar.appendChild(file);
   root.prepend(bar);

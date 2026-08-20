@@ -7,7 +7,6 @@ export interface Params {
   liquidHi: string;      // specular highlight strip
   liquidLo: string;      // bottom shade (cylinder shading)
   glass: string;         // empty part of the tube (very dark; 0 = off for AMOLED power)
-  tick: string;          // tick-mark colour
   bubbleRim: string;
   // --- shape ---
   highlightH: number;    // px, height of highlight strip at top of column
@@ -32,10 +31,24 @@ export interface Params {
   fizzCount: number;
   fizzSize: number;      // px (1..3)
   fizzSpeed: number;     // px/s upward drift
-  // --- ticks ---
-  ticks: boolean;
-  tickMajorH: number;    // px
-  tickMinorH: number;    // px
+  // --- ticks, hours tube (units = hours) ---
+  ticksH: boolean;
+  tickStepH: number;       // minor tick every N hours
+  tickMajorEveryH: number; // every N-th minor tick is major (0 = none)
+  tickMinorHeightH: number;// px
+  tickMajorHeightH: number;// px
+  tickColorH: string;      // minor
+  tickMajorColorH: string;
+  tickPosH: number;        // 0 top, 1 bottom, 2 both
+  // --- ticks, minutes tube (units = minutes) ---
+  ticksM: boolean;
+  tickStepM: number;
+  tickMajorEveryM: number;
+  tickMinorHeightM: number;
+  tickMajorHeightM: number;
+  tickColorM: string;
+  tickMajorColorM: string;
+  tickPosM: number;
   // --- digits along the bottom of the tube (3x5 pixel font) ---
   digits: boolean;
   digitColor: string;    // top of glyph
@@ -80,7 +93,6 @@ export const DEFAULT_PARAMS: Params = {
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
   glass: '#000000',
-  tick: '#303030',
   bubbleRim: '#b0c7a9',
   highlightH: 30,
   highlightInset: 0,
@@ -102,9 +114,8 @@ export const DEFAULT_PARAMS: Params = {
   fizzCount: 10,
   fizzSize: 2,
   fizzSpeed: 14,
-  ticks: true,
-  tickMajorH: 6,
-  tickMinorH: 3,
+  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 3, tickMajorHeightH: 6, tickColorH: '#303030', tickMajorColorH: '#484848', tickPosH: 2,
+  ticksM: true, tickStepM: 1, tickMajorEveryM: 5, tickMinorHeightM: 3, tickMajorHeightM: 6, tickColorM: '#303030', tickMajorColorM: '#484848', tickPosM: 2,
   digits: true,
   digitColor: '#9a9a9a',
   digitColor2: '#4a4a4a',
@@ -163,10 +174,23 @@ export const PRESET_MINT: Partial<Params> = {
 
 export type ParamKey = keyof Params;
 
+/** Map keys from older exports (shared tick settings, digitScale, digitFontBig) onto the current schema. */
+export function migrateParams(o: Record<string, unknown>): Partial<Params> {
+  const r: Record<string, unknown> = { ...o };
+  if ('ticks' in r) { r.ticksH = r.ticksM = r.ticks; delete r.ticks; }
+  if ('tickMajorH' in r) { r.tickMajorHeightH = r.tickMajorHeightM = r.tickMajorH; delete r.tickMajorH; }
+  if ('tickMinorH' in r) { r.tickMinorHeightH = r.tickMinorHeightM = r.tickMinorH; delete r.tickMinorH; }
+  if ('tick' in r) { r.tickColorH = r.tickColorM = r.tickMajorColorH = r.tickMajorColorM = r.tick; delete r.tick; }
+  if ('digitScale' in r) { r.digitScaleX = r.digitScaleY = r.digitScaleXMin = r.digitScaleYMin = r.digitScale; delete r.digitScale; }
+  if ('digitFontBig' in r) { r.digitFont = r.digitFontBig ? 2 : 0; delete r.digitFontBig; }
+  for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
+  return r as Partial<Params>;
+}
+
 /** UI metadata: [min, max, step] for numeric params; grouping for the panel. */
 export const PARAM_META: Record<string, { group: string; label?: string; min?: number; max?: number; step?: number }> = {
   liquid: { group: 'Colour' }, liquidHi: { group: 'Colour' }, liquidLo: { group: 'Colour' },
-  glass: { group: 'Colour' }, tick: { group: 'Colour' }, bubbleRim: { group: 'Colour' },
+  glass: { group: 'Colour' }, bubbleRim: { group: 'Colour' },
   brightness: { group: 'Colour', min: 0.1, max: 1, step: 0.01 },
   highlightH: { group: 'Shape', min: 0, max: 30, step: 1 },
   highlightInset: { group: 'Shape', min: 0, max: 40, step: 1 },
@@ -188,9 +212,22 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   fizzCount: { group: 'Bubble', min: 0, max: 60, step: 1 },
   fizzSize: { group: 'Bubble', min: 1, max: 4, step: 1 },
   fizzSpeed: { group: 'Bubble', min: 0, max: 60, step: 1 },
-  ticks: { group: 'Ticks' },
-  tickMajorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
-  tickMinorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
+  ticksH: { group: 'Ticks · hours', label: 'show ticks' },
+  tickStepH: { group: 'Ticks · hours', label: 'minor every N h', min: 1, max: 6, step: 1 },
+  tickMajorEveryH: { group: 'Ticks · hours', label: 'major every N minors', min: 0, max: 12, step: 1 },
+  tickMinorHeightH: { group: 'Ticks · hours', label: 'minor height', min: 0, max: 36, step: 1 },
+  tickMajorHeightH: { group: 'Ticks · hours', label: 'major height', min: 0, max: 36, step: 1 },
+  tickColorH: { group: 'Ticks · hours', label: 'minor colour' },
+  tickMajorColorH: { group: 'Ticks · hours', label: 'major colour' },
+  tickPosH: { group: 'Ticks · hours', label: 'position (0 top · 1 bottom · 2 both)', min: 0, max: 2, step: 1 },
+  ticksM: { group: 'Ticks · minutes', label: 'show ticks' },
+  tickStepM: { group: 'Ticks · minutes', label: 'minor every N min', min: 1, max: 30, step: 1 },
+  tickMajorEveryM: { group: 'Ticks · minutes', label: 'major every N minors', min: 0, max: 30, step: 1 },
+  tickMinorHeightM: { group: 'Ticks · minutes', label: 'minor height', min: 0, max: 36, step: 1 },
+  tickMajorHeightM: { group: 'Ticks · minutes', label: 'major height', min: 0, max: 36, step: 1 },
+  tickColorM: { group: 'Ticks · minutes', label: 'minor colour' },
+  tickMajorColorM: { group: 'Ticks · minutes', label: 'major colour' },
+  tickPosM: { group: 'Ticks · minutes', label: 'position (0 top · 1 bottom · 2 both)', min: 0, max: 2, step: 1 },
   liquidTransparency: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   // digits — shared
   digits: { group: 'Digits', label: 'show digits' },
