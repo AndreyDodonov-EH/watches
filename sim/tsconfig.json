@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "strict": true,
     "noUnusedLocals": true,
+    "types": ["vite/client"],
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,

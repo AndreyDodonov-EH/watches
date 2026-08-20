@@ -6,7 +6,7 @@ import { renderFrame, blit, stepFizz, fb, loadSprites } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
 import { DEFAULT_VIEW, loadSession, saveSession } from './persist';
 import { buildPanel } from './ui';
-loadSprites('assets/');
+loadSprites(`${import.meta.env.BASE_URL}assets/`);
 import { SerialImu } from './serial';
 
 // ---------- state ----------
