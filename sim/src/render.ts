@@ -138,6 +138,18 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
     } else if (frac >= 0.5) px(xi, y0 + ry, pal.rows[ry]);
   }
 
+  // Step 3a: front brightening — last `frontBright` px before the edge lerp toward the highlight colour (per row).
+  if (p.frontBright > 0) {
+    const hiC = q(scale(hexToRgb(p.liquidHi), p.brightness));
+    for (let ry = 0; ry < H; ry++) {
+      const ex = edges[ry]; const xi = Math.floor(ex);
+      for (let k = 1; k <= p.frontBright; k++) {
+        const x = xi - k; if (x < 0) break;
+        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(pal.rows[ry], hiC, t * t * 0.85));
+      }
+    }
+  }
+
   // Step 3b: edge glow — a few px past the edge fade from (body*glowStrength) to glass. Ported as a short span of LUT colours.
   if (p.edgeGlow > 0 && p.glowStrength > 0) {
     for (let ry = 0; ry < H; ry++) {

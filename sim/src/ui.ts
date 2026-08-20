@@ -1,5 +1,5 @@
 // Minimal control panel generated from PARAM_META. No framework.
-import { DEFAULT_PARAMS, PARAM_META, PRESET_MINT, PRESET_NEON, type Params } from './params';
+import { DEFAULT_PARAMS, PARAM_META, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
 
 export interface UiHooks { onChange: () => void; }
 
@@ -53,6 +53,7 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   const apply = (src: Partial<Params>) => { Object.assign(p, src); refresh(); hooks.onChange(); };
   btn('Mint (spec)', () => apply(PRESET_MINT));
   btn('Neon (ref photo)', () => apply(PRESET_NEON));
+  btn('Concept art', () => apply(PRESET_CONCEPT));
   btn('Reset all', () => apply(structuredClone(DEFAULT_PARAMS)));
   btn('Export JSON', () => {
     const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });

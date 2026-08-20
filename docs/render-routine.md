@@ -32,6 +32,7 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
    - left cap `x0 = 0` (or circle cut if `cornerR > 0`).
    - `hspan(y0+ry, x0, floor(edge), rows[ry])`.
    - Edge AA (`edgeSoft` px): pixel `floor(edge)+k` = `blend(glass, rows[ry], frac-k)`.
+   - **Front brightening** (`frontBright` px before the edge): pixel `xi-k` = `blend(rows[ry], hi, (1-k/frontBright)^2 * 0.85)`.
    - **Glow** (`edgeGlow` px after the edge): pixel `k` = `blend(glass, rows[ry], (1-k/edgeGlow)^2 * glowStrength)`.
 4. **Highlight inset** (rows of the highlight band only): over the last `highlightInset` px before the edge and
    the first `highlightInset` px from the left, blend the highlight row colour toward the body colour

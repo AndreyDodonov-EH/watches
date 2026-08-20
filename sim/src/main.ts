@@ -1,6 +1,6 @@
 import './style.css';
 import { PANEL_W, PANEL_H, HOURS_TUBE_Y, MINUTES_TUBE_Y, TUBE_HEIGHT_PX, BRIDGE_Y0, BRIDGE_Y1 } from '@spec/layout';
-import { DEFAULT_PARAMS, PRESET_MINT, PRESET_NEON, type Params } from './params';
+import { DEFAULT_PARAMS, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
 import { PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
 import { renderFrame, blit, stepFizz, fb } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
@@ -153,6 +153,7 @@ const panelUi = buildPanel($('panel'), params, { onChange: () => { localStorage.
   const u = new URLSearchParams(location.search);
   if (u.get('preset') === 'neon') Object.assign(params, PRESET_NEON);
   if (u.get('preset') === 'mint') Object.assign(params, PRESET_MINT);
+  if (u.get('preset') === 'concept') Object.assign(params, PRESET_CONCEPT);
   for (const [k, v] of u) if (k.startsWith('p.')) {
     const key = k.slice(2) as keyof Params; const cur = (params as any)[key];
     (params as any)[key] = typeof cur === 'boolean' ? v === '1' || v === 'true' : typeof cur === 'number' ? parseFloat(v) : v;

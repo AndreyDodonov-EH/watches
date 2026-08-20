@@ -16,6 +16,7 @@ export interface Params {
   meniscusDepth: number; // px, how far the liquid climbs the wall at top/bottom vs centre (>0 concave)
   meniscusPow: number;   // curve exponent (2 = parabola)
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
+  frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
   edgeGlow: number;      // px, dim glow fading out past the fill edge (0 = off)
   glowStrength: number;  // 0..1 brightness of the glow at the edge
   cornerR: number;       // px, rounding of the column's left end (tube end cap)
@@ -63,6 +64,7 @@ export const DEFAULT_PARAMS: Params = {
   meniscusDepth: 6,
   meniscusPow: 2,
   edgeSoft: 1.5,
+  frontBright: 0,
   edgeGlow: 10,
   glowStrength: 0.35,
   cornerR: 0,
@@ -97,6 +99,11 @@ export const PRESET_NEON: Partial<Params> = {
   liquid: '#39ff14', liquidHi: '#b6ffa0', liquidLo: '#158f08', bubbleRim: '#d8ffcc', glass: '#061006',
   fizz: true,
 };
+/** Concept-art preset (images/concept-cuff.jpg): rounded ends, convex bright front, neon. */
+export const PRESET_CONCEPT: Partial<Params> = {
+  ...PRESET_NEON, meniscusDepth: -14, meniscusPow: 2.2, cornerR: 36, frontBright: 16, edgeGlow: 18, glowStrength: 0.45,
+  highlightH: 14, highlightInset: 30, bubble: false, fizz: true, fizzCount: 10, fizzSize: 2, shadeDepth: 0.7,
+};
 export const PRESET_MINT: Partial<Params> = {
   liquid: '#5dcaa5', liquidHi: '#9fe1cb', liquidLo: '#1f6b52', bubbleRim: '#bff5dc', glass: '#000000',
   fizz: false,
@@ -115,6 +122,7 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   meniscusDepth: { group: 'Shape', min: -12, max: 20, step: 0.5 },
   meniscusPow: { group: 'Shape', min: 1, max: 4, step: 0.1 },
   edgeSoft: { group: 'Shape', min: 0, max: 4, step: 0.1 },
+  frontBright: { group: 'Shape', min: 0, max: 40, step: 1 },
   edgeGlow: { group: 'Shape', min: 0, max: 40, step: 1 },
   glowStrength: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   cornerR: { group: 'Shape', min: 0, max: 36, step: 1 },
