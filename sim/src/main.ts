@@ -20,7 +20,7 @@ let timeMode: 'real' | 'demo' | 'set' = 'real';
 let demoSpeed = 60;                             // demo seconds per real second
 let demoClock = Date.now();
 let setClock = { h: 10, m: 9 };
-let scale = 2;
+let scale = 0.5;
 let showGrid = false;
 let paused = false;
 
@@ -30,7 +30,7 @@ app.innerHTML = `
 <header>
   <h1>Liquid Watch — sim</h1>
   <div class="top">
-    <label>scale <select id="scale"><option value="0.33">0.33 (≈ real size @96 dpi)</option><option value="0.5">0.5</option><option value="0.75">0.75</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></label>
+    <label>scale <select id="scale"><option value="0.33">0.33 (≈ real size @96 dpi)</option><option value="0.5" selected>0.5</option><option value="0.75">0.75</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
     <label><input type="checkbox" id="ovl" checked> leather cuff</label>
     <label>leather <select id="leather"><option>brown</option><option>black</option><option>none</option></select></label>
     <label>lens <input type="range" id="lens" min="0" max="1" step="0.05" value="0.6"></label>
