@@ -34,6 +34,7 @@ app.innerHTML = `
     <label>leather <select id="leather"><option>brown</option><option>black</option><option>none</option></select></label>
     <label>lens <input type="range" id="lens" min="0" max="1" step="0.05" value="0.6"></label>
     <label>lens curve <input type="range" id="lenscurve" min="0.3" max="3" step="0.05" value="1"></label>
+    <label><input type="checkbox" id="lenssmooth"> lens smooth</label>
     <label>gloss <input type="range" id="gloss" min="0" max="1" step="0.05" value="0.55"></label>
     <label>slot inset <input type="range" id="inset" min="0" max="40" step="1" value="10"></label>
     <label><input type="checkbox" id="grid"> layout grid</label>
@@ -92,6 +93,7 @@ $('ovl').oninput = (e) => { overlay.enabled = (e.target as HTMLInputElement).che
 $('leather').oninput = (e) => { overlay.leather = (e.target as HTMLSelectElement).value as any; applyOverlay(ovlDom, overlay); };
 $('lens').oninput = (e) => { overlay.lens = +(e.target as HTMLInputElement).value; };
 $('lenscurve').oninput = (e) => { overlay.lensCurve = +(e.target as HTMLInputElement).value; };
+$('lenssmooth').oninput = (e) => { overlay.lensSmooth = (e.target as HTMLInputElement).checked; };
 $('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay); };
 $('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay); };
 $('grid').oninput = (e) => { showGrid = (e.target as HTMLInputElement).checked; drawGrid(); };
@@ -171,6 +173,7 @@ const panelUi = buildPanel($('panel'), params, { onChange: () => { localStorage.
   if (u.has('scale')) { scale = +u.get('scale')!; $<HTMLSelectElement>('scale').value = String(scale); }
   if (u.has('cuff')) { overlay.enabled = u.get('cuff') === '1'; $<HTMLInputElement>('ovl').checked = overlay.enabled; }
   if (u.has('lenscurve')) { overlay.lensCurve = +u.get('lenscurve')!; $<HTMLInputElement>('lenscurve').value = String(overlay.lensCurve); }
+  if (u.has('lenssmooth')) { overlay.lensSmooth = u.get('lenssmooth') === '1'; $<HTMLInputElement>('lenssmooth').checked = overlay.lensSmooth; }
   if (u.has('lens')) { overlay.lens = +u.get('lens')!; $<HTMLInputElement>('lens').value = String(overlay.lens); }
   if (u.has('leather')) { overlay.leather = u.get('leather') as any; $<HTMLSelectElement>('leather').value = overlay.leather; }
   if (u.has('grid')) { showGrid = u.get('grid') === '1'; $<HTMLInputElement>('grid').checked = showGrid; drawGrid(); }
