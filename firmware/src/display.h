@@ -12,3 +12,8 @@ void display_push_frame(const uint16_t *fb);
 // Push a horizontal band [y0, y1) of a full-width framebuffer. y0/y1 must be even.
 void display_push_rows(const uint16_t *fb, int y0, int y1);
 void display_set_brightness(uint8_t v);   // 0..255 (cmd 0x51)
+// Queue a push of `rows` full-width rows starting at panel row y0, read by DMA straight from
+// `buf` (must be internal DMA-capable RAM, byte-swapped pixels). Returns immediately; call
+// display_wait_all() before `buf` is modified again. Not to be mixed with display_push_rows in flight.
+void display_push_strip_async(const uint16_t *buf, int y0, int rows);
+void display_wait_all(void);

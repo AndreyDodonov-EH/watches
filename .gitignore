@@ -3,3 +3,4 @@ firmware/.vscode/
 node_modules/
 dist/
 *.log
+firmware/.compare/

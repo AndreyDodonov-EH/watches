@@ -117,6 +117,8 @@ interface ScaledGlyph { w: number; h: number; c: Uint16Array; a: Uint8Array; } /
 export const SPRITE_SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge'];
 const sprites: (SpriteSheet | null)[] = SPRITE_SHEETS.map(() => null);
 const scaledCache = new Map<string, ScaledGlyph[]>();
+/** Inject a decoded sheet directly (headless tests / node reference renders). */
+export function setSprite(i: number, sheet: SpriteSheet): void { sprites[i] = sheet; scaledCache.clear(); }
 export function loadSprites(base: string): void {
   SPRITE_SHEETS.forEach((n, i) => loadSprite(base + n + '.png').then(sh => { sprites[i] = sh; scaledCache.clear(); })
     .catch(e => console.warn('digit sprite not loaded', n, e)));

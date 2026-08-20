@@ -53,7 +53,7 @@ static bool IRAM_ATTR on_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_
 }
 
 bool display_init(void) {
-  done_sem = xSemaphoreCreateBinary();
+  done_sem = xSemaphoreCreateCounting(32, 0);
   for (int i = 0; i < 2; i++) {
     band_buf[i] = (uint16_t *)heap_caps_malloc(PANEL_W * BAND_ROWS * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!band_buf[i]) { log_e("band buf alloc failed"); return false; }
@@ -101,4 +101,17 @@ void display_push_frame(const uint16_t *fb) { display_push_rows(fb, 0, PANEL_H);
 
 void display_set_brightness(uint8_t v) {
   esp_lcd_panel_io_tx_param(io_handle, 0x02000000 | (0x51 << 8), &v, 1);
+}
+
+// ---- async strip push: DMA reads directly from an internal-RAM buffer (no bounce copy) ----
+static int pending = 0;
+void display_push_strip_async(const uint16_t *buf, int y0, int rows) {
+  for (int y = 0; y < rows; y += BAND_ROWS) {
+    int n = min(BAND_ROWS, rows - y);
+    esp_lcd_panel_draw_bitmap(panel, 0, y0 + y, PANEL_W, y0 + y + n, buf + (size_t)y * PANEL_W);
+    pending++;
+  }
+}
+void display_wait_all(void) {
+  while (pending > 0) { xSemaphoreTake(done_sem, portMAX_DELAY); pending--; }
 }

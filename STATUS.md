@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-20 (session 2, Phase 2 simulator started)_
+_Last update: 2026-08-20 (session 4, Phase 3: liquid face running on the board)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -37,9 +37,13 @@ _Last update: 2026-08-20 (session 2, Phase 2 simulator started)_
 RTC: the demos contain no external RTC driver — assume ESP32-S3 internal RTC only (verify on schematic in `vendor/waveshare/` if needed).
 
 ## What is flashed on the board right now
-`firmware/` @ this commit. Boots into the **calibration face** (two #5DCAA5 rectangles at the spec tube
-coordinates with white centre-lines). Serial commands @115200: `h` hello/orientation test, `c` calibration
-face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness, `r` reboot.
+`firmware/` @ this commit. Boots into the **liquid face** (`l`) = 1:1 port of the sim renderer + physics
+with `presets/1.json` baked in, driven by the live IMU at 50 Hz; **~40 fps**. Serial commands @115200
+(newline-terminated): `l` liquid, `c` calibration face, `h` hello, `f` fps bench, `s` status line,
+`i` IMU CSV stream, `t HH:MM[:SS]` set clock (no RTC battery — defaults to 10:09:30 at boot),
+`d<N>` demo speed (×N, `d0` freeze, `d1` real), `p<name>=<value>` set ANY param live by its sim name
+(`pliquid=#39ff14`, `pfizz=0`, `pmeniscusDepth=-10`), `p?` dump params as JSON (sim-importable), `p!` reset
+to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
 
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.
@@ -110,3 +114,28 @@ face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness,
   tube. Flick button = decaying ~150 ms raw gyro pulse (a single-sample kick died in the deadzone). Drop-end realism: `meniscusTiltGain` (tilt into the end bulges the meniscus, away flattens) and `meniscusAsym` (bottom-cling: mild at rest, gone when end-down — cap fills round, max when end-up — draining tail clings to the bottom wall), both driven by the smoothed `edgeLight` tilt, formula in docs/render-routine.md step 3.
 - Open: user sign-off on the look; final palette; leather texture asset (`sim/public/assets/leather-tile.jpg`,
   CSS falls back to procedural noise if missing).
+
+## Phase 3 — firmware liquid face (2026-08-20, session 4)
+- `firmware/src/render.cpp` / `physics.cpp` are line-for-line ports of `sim/src/render.ts` / `physics.ts`
+  (incl. JS `Math.round` semantics, all 5 bitmap fonts, sprite digits box-filtered **on device** from the
+  RGBA sheets embedded in flash — `gen/sprites_gen.h`, 294 KB — so `digitFont`/scale/tint stay live params).
+  Only deliberate deviation: per-pixel blends (`blend565`, `throughLiquid`) are integer fixed-point
+  (t in 1/256, luma in 1/1000) → ±1 LSB on gradient pixels, verified 0 pixels off by >12/255.
+- `Params` is a runtime struct generated from the sim preset: `python3 firmware/tools/gen_params.py presets/1.json`
+  → `src/gen/params_gen.h` (struct + `PARAM_FIELDS` name/type/offset table + `PRESET_1`; first file given
+  becomes `PRESET_DEFAULT`). Re-run after exporting a new preset or adding a key to `params.ts` (also add it
+  to `FIELDS` in the generator). The field table is what the later Wi-Fi / GATT / JSON control will use.
+- Pipeline per frame: IMU → `GravityNorm` → `ImuFilter` → `stepTube` ×2 (50 Hz fixed step, catch-up ≤5) →
+  `renderTube` into a 72-row strip in **internal DMA RAM** → `display_push_strip_async` (panel DMA reads
+  the strip directly, no bounce copy) while the other tube renders. Two strips = 154 KB internal RAM;
+  free heap after boot ≈ 92 KB — **BLE/Wi-Fi will need to drop to one strip** (or render the second
+  tube into PSRAM) — keep in mind.
+- Timing: render 18 ms for both tubes (digits ≈ 6 ms, front-bright ≈ 4, glow ≈ 3, fills ≈ 5), DMA
+  overlapped → 40 fps. Stage costs measured with `p…=0` toggles over serial, no rebuild needed.
+- **Pixel check vs the sim**: `python3 firmware/tools/compare-device.py` (board connected) → sends `x`
+  (dumps TubeState + both strips), renders the same state headless through the real `render.ts`
+  (`sim/tools/render-ref.ts`, fizz off), writes `firmware/.compare/{device,ref,diff}.png` + mismatch count.
+  Last run: 293 / 77184 px differ, all ≤ 1 LSB (0 above 12/255).
+- Not ported: nothing rendering-wise. Fizz uses `esp_random()`. Clock is software-only (set with `t`).
+- Next: Wi-Fi SoftAP / BLE GATT param control + preset select using `PARAM_FIELDS`; NVS-persist params
+  and clock; real RTC/NTP.
