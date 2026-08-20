@@ -1,0 +1,2 @@
+- Even if hour has passed, edge might be before it, example is 06:01
+- Empty space at the top and bottom of the real screen? Move tubes further away from one another?
