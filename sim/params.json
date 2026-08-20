@@ -41,12 +41,14 @@
   "brightness": 1,
   "digits": true,
   "digitColor": "#9a9a9a",
-  "digitScale": 1,
   "digitBottom": 2,
   "digitsOnTop": false,
   "digitsLeadingZero": true,
   "digitColor2": "#4a4a4a",
   "digitShadow": true,
   "digitShadowColor": "#101010",
-  "liquidTransparency": 0.45
+  "liquidTransparency": 0.45,
+  "digitScaleX": 2,
+  "digitScaleY": 1,
+  "digitFontBig": false
 }
