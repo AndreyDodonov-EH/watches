@@ -65,6 +65,12 @@ export interface Params {
   angleMax: number;      // deg clamp
   acrossShiftGain: number; // px vertical shift of highlight per g of across-tube tilt
   deadzone: number;      // g, ignore tiny accelerations
+  // --- IMU conditioning (applied to board / phone input before the springs; ported to firmware) ---
+  accelLpHz: number;     // low-pass cutoff for accel (gravity direction), Hz
+  gyroHpHz: number;      // high-pass cutoff for gyro: removes bias and slow rotations, keeps flicks
+  gyroDeadzone: number;  // dps, ignore gyro below this after filtering
+  gyroMax: number;       // dps, clamp
+  inputGain: number;     // overall multiplier on tilt input (0.1..2)
   // --- display ---
   brightness: number;    // 0..1 global multiplier (emulates cmd 0x51)
 }
@@ -118,14 +124,19 @@ export const DEFAULT_PARAMS: Params = {
   digitHourStep: 1,
   fillK: 28,
   fillDamp: 3.5,
-  fillSloshGain: 45,
+  fillSloshGain: 25,
   angleK: 35,
   angleDamp: 4,
-  angleTiltGain: 35,
-  angleGyroGain: 0.08,
+  angleTiltGain: 20,
+  angleGyroGain: 0.03,
   angleMax: 40,
   acrossShiftGain: 6,
   deadzone: 0.02,
+  accelLpHz: 3,
+  gyroHpHz: 0.7,
+  gyroDeadzone: 10,
+  gyroMax: 400,
+  inputGain: 1,
   brightness: 1,
 };
 
@@ -203,4 +214,9 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   angleMax: { group: 'Physics', min: 0, max: 80, step: 1 },
   acrossShiftGain: { group: 'Physics', min: 0, max: 30, step: 0.5 },
   deadzone: { group: 'Physics', min: 0, max: 0.2, step: 0.005 },
+  accelLpHz: { group: 'IMU filter', min: 0.2, max: 25, step: 0.1 },
+  gyroHpHz: { group: 'IMU filter', min: 0, max: 5, step: 0.05 },
+  gyroDeadzone: { group: 'IMU filter', min: 0, max: 60, step: 1 },
+  gyroMax: { group: 'IMU filter', min: 50, max: 1000, step: 10 },
+  inputGain: { group: 'IMU filter', min: 0.1, max: 2, step: 0.05 },
 };

@@ -30,11 +30,11 @@
   "tickMinorH": 3,
   "fillK": 28,
   "fillDamp": 3.5,
-  "fillSloshGain": 45,
+  "fillSloshGain": 25,
   "angleK": 35,
   "angleDamp": 4,
-  "angleTiltGain": 35,
-  "angleGyroGain": 0.08,
+  "angleTiltGain": 20,
+  "angleGyroGain": 0.03,
   "angleMax": 40,
   "acrossShiftGain": 6,
   "deadzone": 0.02,
@@ -55,5 +55,10 @@
   "digitScaleYMin": 1.25,
   "digitBottomMin": 2,
   "digitMinuteStep": 10,
-  "digitHourStep": 1
+  "digitHourStep": 1,
+  "accelLpHz": 3,
+  "gyroHpHz": 0.7,
+  "gyroDeadzone": 10,
+  "gyroMax": 400,
+  "inputGain": 1
 }

@@ -16,7 +16,7 @@ main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px
 #gridc { pointer-events: none; }
 .controls { margin-top: 16px; display: flex; gap: 16px; flex-wrap: wrap; }
 fieldset { border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; width: 340px; flex: none; }
-.mono { font-family: monospace; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 1.4em; }
+.mono { font-family: monospace; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: clip; height: 1.4em; font-variant-numeric: tabular-nums; }
 legend { color: var(--muted); padding: 0 4px; }
 fieldset label { display: flex; gap: 6px; align-items: center; }
 fieldset input[type=range] { flex: 1; }

@@ -1,7 +1,7 @@
 import './style.css';
 import { PANEL_W, PANEL_H, HOURS_TUBE_Y, MINUTES_TUBE_Y, TUBE_HEIGHT_PX, BRIDGE_Y0, BRIDGE_Y1 } from '@spec/layout';
 import { DEFAULT_PARAMS, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
-import { PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
+import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
 import { renderFrame, blit, stepFizz, fb } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
 import { buildPanel } from './ui';
@@ -13,6 +13,7 @@ const params: Params = { ...DEFAULT_PARAMS, ...JSON.parse(localStorage.getItem(L
 const overlay = { ...DEFAULT_OVERLAY };
 const hours = newTube(), minutes = newTube();
 const input: TiltInput = { along: 0, across: 0, gyroAlong: 0, gyroAcross: 0 };
+const imuFilter = new ImuFilter();
 const manual = { along: 0, across: 0 };        // sliders / drag
 let inputSource: 'manual' | 'device' | 'serial' = 'manual';
 let timeMode: 'real' | 'demo' | 'set' = 'real';
@@ -203,9 +204,11 @@ function currentDate(): Date {
 }
 function physics(dt: number) {
   // choose input
-  if (inputSource === 'manual') { input.along = manual.along; input.across = manual.across; input.gyroAcross = 0; }
-  else if (inputSource === 'device') { input.along = dev.along; input.across = dev.across; input.gyroAcross = dev.gyroAcross; }
-  else { Object.assign(input, serial.last); }
+  if (inputSource === 'manual') { input.along = manual.along; input.across = manual.across; input.gyroAcross = 0; imuFilter.reset(); }
+  else {
+    const raw = inputSource === 'device' ? { along: dev.along, across: dev.across, gyroAlong: 0, gyroAcross: dev.gyroAcross } : serial.last;
+    Object.assign(input, imuFilter.step(raw, params, dt));
+  }
   if (shakeT > 0) { // ~2.5 Hz wrist shake that dies out over SHAKE_T seconds
     shakeT -= dt; const env = Math.pow(shakeT / SHAKE_T, 1.5);
     input.along += Math.sin((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 0.9 * env;
@@ -233,7 +236,7 @@ function frame(now: number) {
   }
   const d = currentDate();
   $('clock').textContent = d.toTimeString().slice(0, 8);
-  $('imuraw').textContent = serial.connected ? `imu: ${serial.raw}` : '';
+  $('imuraw').textContent = inputSource === 'manual' ? '' : `in: along ${input.along.toFixed(2)} across ${input.across.toFixed(2)} gyro ${input.gyroAcross.toFixed(0)}` + (serial.connected ? ` | raw ${serial.raw}` : '');
 }
 requestAnimationFrame(frame);
 

@@ -60,3 +60,28 @@ export function fillLevels(d: Date): { hours: number; minutes: number } {
   const h = d.getHours() % 12, m = d.getMinutes(), s = d.getSeconds() + d.getMilliseconds() / 1000;
   return { hours: (h + (m + s / 60) / 60) / 12, minutes: (m + s / 60) / 60 };
 }
+
+/** IMU conditioning: accel low-pass (gravity), gyro high-pass + deadzone + clamp (transients only).
+ *  One-pole filters; same maths goes into the firmware. */
+export class ImuFilter {
+  private lpAlong = 0; private lpAcross = 0;
+  private hpPrevIn = 0; private hpPrevOut = 0;
+  private init = false;
+  reset(): void { this.init = false; this.hpPrevIn = this.hpPrevOut = 0; }
+  step(raw: TiltInput, p: Params, dt = PHYS_DT): TiltInput {
+    if (!this.init) { this.lpAlong = raw.along; this.lpAcross = raw.across; this.hpPrevIn = raw.gyroAcross; this.init = true; }
+    const a = 1 - Math.exp(-2 * Math.PI * p.accelLpHz * dt);
+    this.lpAlong += (raw.along - this.lpAlong) * a;
+    this.lpAcross += (raw.across - this.lpAcross) * a;
+    let g: number;
+    if (p.gyroHpHz <= 0) g = raw.gyroAcross;
+    else {
+      const rc = 1 / (2 * Math.PI * p.gyroHpHz), k = rc / (rc + dt);
+      g = k * (this.hpPrevOut + raw.gyroAcross - this.hpPrevIn);
+      this.hpPrevIn = raw.gyroAcross; this.hpPrevOut = g;
+    }
+    g = Math.abs(g) < p.gyroDeadzone ? 0 : g - Math.sign(g) * p.gyroDeadzone;
+    g = Math.max(-p.gyroMax, Math.min(p.gyroMax, g));
+    return { along: this.lpAlong * p.inputGain, across: this.lpAcross * p.inputGain, gyroAlong: raw.gyroAlong, gyroAcross: g * p.inputGain };
+  }
+}

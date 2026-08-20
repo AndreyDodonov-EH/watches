@@ -60,4 +60,7 @@ Input per tube frame: `along` (g, + = right end down), `across` (g), `gyroAcross
 - `acrossShift += (across*acrossShiftGain - acrossShift) * min(1, 8*dt)`.
 Semi-implicit Euler (`vel += a*dt; pos += vel*dt`).
 Fill targets: `hours = (h%12 + (m + s/60)/60)/12`, `minutes = (m + s/60)/60`.
+IMU conditioning (`ImuFilter`, before the springs): accel one-pole low-pass at `accelLpHz`
+(`a = 1-exp(-2π f dt)`); gyro one-pole high-pass at `gyroHpHz` (`k = rc/(rc+dt)`, `y = k(y_prev + x - x_prev)`)
+→ removes bias and slow rotation, then deadzone `gyroDeadzone` dps and clamp `±gyroMax`; all × `inputGain`.
 IMU → tube frame: `along = IMU_ALONG_TUBE_SIGN * a[IMU_AXIS_ALONG_TUBE] / |a|`, etc. (see `spec/layout.h`).
