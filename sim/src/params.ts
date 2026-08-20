@@ -38,7 +38,10 @@ export interface Params {
   tickMinorH: number;    // px
   // --- digits along the bottom of the tube (3x5 pixel font) ---
   digits: boolean;
-  digitColor: string;
+  digitColor: string;    // top of glyph
+  digitColor2: string;   // bottom of glyph (vertical gradient → metallic look; set equal for flat)
+  digitShadow: boolean;  // 1 px darker copy offset down-right (emboss)
+  digitShadowColor: string;
   digitScale: number;    // 1 or 2 (pixel multiplier)
   digitBottom: number;   // px from the tube's bottom edge to the digit baseline
   digitsOnTop: boolean;  // true = printed on the glass (over the liquid); false = engraved behind the liquid
@@ -89,7 +92,10 @@ export const DEFAULT_PARAMS: Params = {
   tickMajorH: 6,
   tickMinorH: 3,
   digits: true,
-  digitColor: '#5a5a5a',
+  digitColor: '#9a9a9a',
+  digitColor2: '#4a4a4a',
+  digitShadow: true,
+  digitShadowColor: '#101010',
   digitScale: 1,
   digitBottom: 2,
   digitsOnTop: false,
@@ -158,7 +164,8 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   ticks: { group: 'Ticks' },
   tickMajorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
   tickMinorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
-  digits: { group: 'Digits' }, digitColor: { group: 'Digits' },
+  digits: { group: 'Digits' }, digitColor: { group: 'Digits' }, digitColor2: { group: 'Digits' },
+  digitShadow: { group: 'Digits' }, digitShadowColor: { group: 'Digits' },
   digitScale: { group: 'Digits', min: 1, max: 3, step: 1 },
   digitBottom: { group: 'Digits', min: 0, max: 40, step: 1 },
   digitsOnTop: { group: 'Digits' }, digitsLeadingZero: { group: 'Digits' },

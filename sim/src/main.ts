@@ -33,6 +33,7 @@ app.innerHTML = `
     <label><input type="checkbox" id="ovl" checked> leather cuff</label>
     <label>leather <select id="leather"><option>brown</option><option>black</option><option>none</option></select></label>
     <label>lens <input type="range" id="lens" min="0" max="1" step="0.05" value="0.6"></label>
+    <label>lens curve <input type="range" id="lenscurve" min="0.3" max="3" step="0.05" value="1"></label>
     <label>gloss <input type="range" id="gloss" min="0" max="1" step="0.05" value="0.55"></label>
     <label>slot inset <input type="range" id="inset" min="0" max="40" step="1" value="10"></label>
     <label><input type="checkbox" id="grid"> layout grid</label>
@@ -58,6 +59,7 @@ app.innerHTML = `
         <label><input type="radio" name="src" value="manual" checked> sliders / drag on panel</label>
         <label><input type="radio" name="src" value="device"> device orientation (phone)</label>
         <label><input type="radio" name="src" value="serial"> board via Web Serial <button id="serialbtn">connect</button> <span id="serialst"></span></label>
+        <div id="imuraw" class="mono"></div>
         <label>along <input type="range" id="along" min="-1" max="1" step="0.01" value="0"> <output id="alongv">0</output> g</label>
         <label>across <input type="range" id="across" min="-1" max="1" step="0.01" value="0"> <output id="acrossv">0</output> g</label>
         <button id="center">centre</button> <button id="flick">flick →</button> <button id="flickl">← flick</button> <button id="shake">shake</button>
@@ -89,6 +91,7 @@ $('scale').oninput = (e) => { scale = +(e.target as HTMLSelectElement).value; se
 $('ovl').oninput = (e) => { overlay.enabled = (e.target as HTMLInputElement).checked; applyOverlay(ovlDom, overlay); setScale(); };
 $('leather').oninput = (e) => { overlay.leather = (e.target as HTMLSelectElement).value as any; applyOverlay(ovlDom, overlay); };
 $('lens').oninput = (e) => { overlay.lens = +(e.target as HTMLInputElement).value; };
+$('lenscurve').oninput = (e) => { overlay.lensCurve = +(e.target as HTMLInputElement).value; };
 $('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay); };
 $('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay); };
 $('grid').oninput = (e) => { showGrid = (e.target as HTMLInputElement).checked; drawGrid(); };
@@ -167,6 +170,7 @@ const panelUi = buildPanel($('panel'), params, { onChange: () => { localStorage.
   if (u.has('demo')) { demoSpeed = +u.get('demo')!; timeMode = 'demo'; (document.querySelector('input[name=tm][value=demo]') as HTMLInputElement).checked = true; }
   if (u.has('scale')) { scale = +u.get('scale')!; $<HTMLSelectElement>('scale').value = String(scale); }
   if (u.has('cuff')) { overlay.enabled = u.get('cuff') === '1'; $<HTMLInputElement>('ovl').checked = overlay.enabled; }
+  if (u.has('lenscurve')) { overlay.lensCurve = +u.get('lenscurve')!; $<HTMLInputElement>('lenscurve').value = String(overlay.lensCurve); }
   if (u.has('lens')) { overlay.lens = +u.get('lens')!; $<HTMLInputElement>('lens').value = String(overlay.lens); }
   if (u.has('leather')) { overlay.leather = u.get('leather') as any; $<HTMLSelectElement>('leather').value = overlay.leather; }
   if (u.has('grid')) { showGrid = u.get('grid') === '1'; $<HTMLInputElement>('grid').checked = showGrid; drawGrid(); }
@@ -225,7 +229,8 @@ function frame(now: number) {
     frames = 0; fpsT = now;
   }
   const d = currentDate();
-  $('clock').textContent = d.toTimeString().slice(0, 8) + (serial.connected ? `  imu: ${serial.raw}` : '');
+  $('clock').textContent = d.toTimeString().slice(0, 8);
+  $('imuraw').textContent = serial.connected ? `imu: ${serial.raw}` : '';
 }
 requestAnimationFrame(frame);
 

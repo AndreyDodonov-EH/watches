@@ -81,24 +81,42 @@ const FONT3x5: number[][] = [
   [0b111,0b101,0b111,0b001,0b111],
 ];
 /** Draw `text` (digits only) centred at x, baseline y (bottom row), pixel scale k. */
-function drawDigits(text: string, xc: number, yBase: number, k: number, c: number): void {
+function drawDigits(text: string, xc: number, yBase: number, k: number, rowColors: Uint16Array, shadow: number): void {
   const w = text.length * 4 * k - k;           // 3 px glyph + 1 px gap
-  let x = Math.round(xc - w / 2);
+  const x0 = Math.round(xc - w / 2);
   const yTop = yBase - 5 * k + 1;
-  for (const ch of text) {
-    const g = FONT3x5[ch.charCodeAt(0) - 48]; if (!g) { x += 4 * k; continue; }
-    for (let r = 0; r < 5; r++) for (let col = 0; col < 3; col++) if (g[r] & (4 >> col))
-      for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++) px(x + col * k + dx, yTop + r * k + dy, c);
-    x += 4 * k;
+  // rowColors has 5*k entries (one per glyph pixel-row) → metallic vertical gradient; shadow < 0 = none
+  for (let pass = shadow >= 0 ? 0 : 1; pass < 2; pass++) {
+    const off = pass === 0 ? 1 : 0;
+    let x = x0;
+    for (const ch of text) {
+      const g = FONT3x5[ch.charCodeAt(0) - 48]; if (!g) { x += 4 * k; continue; }
+      for (let r = 0; r < 5; r++) for (let col = 0; col < 3; col++) if (g[r] & (4 >> col))
+        for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++)
+          px(x + col * k + dx + off, yTop + r * k + dy + off, pass === 0 ? shadow : rowColors[r * k + dy]);
+      x += 4 * k;
+    }
   }
 }
+function digitRowColors(p: Params): Uint16Array {
+  const k = Math.round(p.digitScale), n = 5 * k, out = new Uint16Array(n);
+  const a = hexToRgb(p.digitColor), b = hexToRgb(p.digitColor2);
+  for (let i = 0; i < n; i++) {
+    // metallic: bright top, darker middle-low, slight kick back up at the very bottom
+    const t = n === 1 ? 0 : i / (n - 1); const u = t < 0.8 ? t / 0.8 : 1 - (t - 0.8) / 0.2 * 0.35;
+    out[i] = q(scale(mix(a, b, u), p.brightness));
+  }
+  return out;
+}
 function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number): void {
-  const L = TUBE_LENGTH_PX, H = TUBE_HEIGHT_PX;
+  const L = TUBE_LENGTH_PX, H = TUBE_HEIGHT_PX; void pal;
   const every = ticksN === 60 ? 5 : 1;
+  const rows = digitRowColors(p);
+  const shadow = p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness)) : -1;
   for (let i = every; i < ticksN; i += every) {
     const x = Math.round((i * L) / ticksN);
     const t = ticksN === 60 && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
-    drawDigits(t, x, y0 + H - 1 - p.digitBottom, Math.round(p.digitScale), pal.digit);
+    drawDigits(t, x, y0 + H - 1 - p.digitBottom, Math.round(p.digitScale), rows, shadow);
   }
 }
 

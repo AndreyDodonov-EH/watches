@@ -40,9 +40,12 @@
   "deadzone": 0.02,
   "brightness": 1,
   "digits": true,
-  "digitColor": "#5a5a5a",
+  "digitColor": "#9a9a9a",
   "digitScale": 1,
   "digitBottom": 2,
   "digitsOnTop": false,
-  "digitsLeadingZero": true
+  "digitsLeadingZero": true,
+  "digitColor2": "#4a4a4a",
+  "digitShadow": true,
+  "digitShadowColor": "#101010"
 }

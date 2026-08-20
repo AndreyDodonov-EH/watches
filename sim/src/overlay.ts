@@ -5,13 +5,14 @@ import { PANEL_W, PANEL_H, TUBE_HEIGHT_PX, HOURS_TUBE_Y, MINUTES_TUBE_Y } from '
 
 export interface OverlayOpts {
   enabled: boolean;
-  lens: number;      // 0 = none, 1 = strong barrel magnification
+  lens: number;      // 0 = none, 1 = strong centre magnification
+  lensCurve: number; // 0.3..3: how sharply magnification falls off toward the edges (low = gentle/uniform, high = only the centre is magnified)
   slotInset: number; // px of tube hidden under leather at each end
   slotPad: number;   // px the slot is taller than the tube (negative = leather covers tube edge)
   gloss: number;     // 0..1 opacity of the acrylic highlight
   leather: 'brown' | 'black' | 'none';
 }
-export const DEFAULT_OVERLAY: OverlayOpts = { enabled: true, lens: 0.6, slotInset: 10, slotPad: -2, gloss: 0.55, leather: 'brown' };
+export const DEFAULT_OVERLAY: OverlayOpts = { enabled: true, lens: 0.6, lensCurve: 1, slotInset: 10, slotPad: -2, gloss: 0.55, leather: 'brown' };
 
 /** Lens-distort the two tube strips from `src` canvas into `dst` canvas (same size). */
 export function drawLens(src: HTMLCanvasElement, dst: HTMLCanvasElement, o: OverlayOpts): void {
@@ -23,10 +24,12 @@ export function drawLens(src: HTMLCanvasElement, dst: HTMLCanvasElement, o: Over
   const H = TUBE_HEIGHT_PX;
   for (const y0 of [HOURS_TUBE_Y, MINUTES_TUBE_Y]) {
     ctx.clearRect(0, y0, PANEL_W, H);
-    // Destination row yd maps to source row ys = yc + sign*|d|^(1+lens) * (H/2): centre magnified, edges compressed.
+    // Destination row yd → source row. Blend of identity and a power curve: the centre is magnified by
+    // 1/(1-lens) (slope at 0 = 1-lens), the power `1+lensCurve*2` sets how abruptly the edges compress.
     for (let yd = 0; yd < H; yd++) {
       const d = (yd + 0.5 - H / 2) / (H / 2);               // -1..1
-      const s = Math.sign(d) * Math.pow(Math.abs(d), 1 + o.lens * 1.5);
+      const u = Math.abs(d);
+      const s = Math.sign(d) * ((1 - o.lens) * u + o.lens * Math.pow(u, 1 + o.lensCurve * 2));
       const ys = H / 2 + s * (H / 2);
       // sample a 1px-tall band centred at ys, with sub-pixel offset via fractional source y
       ctx.drawImage(src, 0, y0 + Math.max(0, Math.min(H - 1, ys - 0.5)), PANEL_W, 1, 0, y0 + yd, PANEL_W, 1);
