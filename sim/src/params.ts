@@ -44,7 +44,8 @@ export interface Params {
   digitShadowColor: string;
   digitScale: number;    // 1 or 2 (pixel multiplier)
   digitBottom: number;   // px from the tube's bottom edge to the digit baseline
-  digitsOnTop: boolean;  // true = printed on the glass (over the liquid); false = engraved behind the liquid
+  digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
+  liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
   // --- physics (fixed-step 50 Hz) ---
   fillK: number;         // spring stiffness of fill-edge position (1/s^2)
@@ -99,6 +100,7 @@ export const DEFAULT_PARAMS: Params = {
   digitScale: 1,
   digitBottom: 2,
   digitsOnTop: false,
+  liquidTransparency: 0.45,
   digitsLeadingZero: true,
   fillK: 28,
   fillDamp: 3.5,
@@ -169,6 +171,7 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   digitScale: { group: 'Digits', min: 1, max: 3, step: 1 },
   digitBottom: { group: 'Digits', min: 0, max: 40, step: 1 },
   digitsOnTop: { group: 'Digits' }, digitsLeadingZero: { group: 'Digits' },
+  liquidTransparency: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   fillK: { group: 'Physics', min: 1, max: 400, step: 1 },
   fillDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },
   fillSloshGain: { group: 'Physics', min: 0, max: 200, step: 1 },

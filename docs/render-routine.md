@@ -23,12 +23,7 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
 `xe = fillTarget*L + fillPos` is the fill-edge centre.
 
 1. **Background**: fill rows `y0..y0+H-1`, x `0..L` with `glass` (pure black by default).
-2. **Ticks** (if `ticks`): `N = 12` (hours) or `60` (minutes); for `i in 1..N-1`, `x = round(i*L/N)`;
-   height `tickMajorH` when `i % (N==60 ? 5 : 3) == 0` else `tickMinorH`; draw that many pixels of `tick`
-   colour from the top row down and from the bottom row up.
-2b. **Digits** (if `digits` and not `digitsOnTop`): 3×5 pixel font (`FONT3x5` in render.ts), scale `digitScale`,
-   centred on the major-tick x (hours 1..11, minutes 05..55 / 5..55 per `digitsLeadingZero`), baseline at
-   `y0 + H - 1 - digitBottom`, colour `digitColor`. With `digitsOnTop` the same call happens after step 5.
+2. _(ticks and digits moved to step 4b — they are drawn after the column so they can show through it)_
 3. **Column**: for each row `ry`:
    - `edge = edgeX(ry)`:  `yc = 35.5`, `d = (ry-yc)/yc`,
      `edge = xe + tan(angle)*(ry-yc) + meniscusDepth * |d|^meniscusPow`.
@@ -40,6 +35,13 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
 4. **Highlight inset** (rows of the highlight band only): over the last `highlightInset` px before the edge and
    the first `highlightInset` px from the left, blend the highlight row colour toward the body colour
    (`rows[hiTop+highlightH+1]`) linearly so the highlight does not touch the meniscus / end cap.
+4b. **Ticks + digits**: `N = 12` (hours) or `60` (minutes). Ticks: for `i in 1..N-1`, `x = round(i*L/N)`,
+   height `tickMajorH` when `i % (N==60 ? 5 : 3) == 0` else `tickMinorH`, drawn from the top row down and the
+   bottom row up. Digits: 3×5 font (`FONT3x5`), scale `digitScale`, centred on the major-tick x (hours 1..11,
+   minutes 05..55), baseline `y0+H-1-digitBottom`, glyph rows coloured by a `digitColor→digitColor2` gradient,
+   optional 1 px `digitShadowColor` copy offset (+1,+1) drawn first. Every pixel of both is written with
+   opacity `a`: `a = 1` outside the liquid (`x >= edge(ry)`), `a = liquidTransparency` inside
+   (`digitsOnTop` forces `a = 1` for digits). `pixel = blend(existing, colour, a)`.
 5. **Fizz** (optional, `fizz`): `fizzCount` dots of size `fizzSize` px at (`fx = x*(xe-6)`, `fy`) drawn in
    `bubbleRim` colour (3×3+ get a `bubbleIn` centre); they drift up `fizzSpeed` px/s and wrap.
    Only drawn when inside the liquid (`fx < edgeX(fy) - 2`).

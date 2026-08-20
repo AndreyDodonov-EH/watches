@@ -47,5 +47,6 @@
   "digitsLeadingZero": true,
   "digitColor2": "#4a4a4a",
   "digitShadow": true,
-  "digitShadowColor": "#101010"
+  "digitShadowColor": "#101010",
+  "liquidTransparency": 0.45
 }

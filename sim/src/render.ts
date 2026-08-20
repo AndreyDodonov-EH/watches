@@ -68,6 +68,12 @@ function hspan(y: number, x0: number, x1: number, c: number): void {
   if (x1 <= x0) return;
   fb.fill(c, y * PANEL_W + x0, y * PANEL_W + x1);
 }
+/** Blend colour c over the existing pixel with opacity t (1 = replace). */
+function pxa(x: number, y: number, c: number, t: number): void {
+  if (x < 0 || y < 0 || x >= PANEL_W || y >= PANEL_H) return;
+  const i = y * PANEL_W + x;
+  fb[i] = t >= 1 ? c : blend565(fb[i], c, t);
+}
 function px(x: number, y: number, c: number): void {
   if (x < 0 || y < 0 || x >= PANEL_W || y >= PANEL_H) return;
   fb[y * PANEL_W + x] = c;
@@ -81,7 +87,8 @@ const FONT3x5: number[][] = [
   [0b111,0b101,0b111,0b001,0b111],
 ];
 /** Draw `text` (digits only) centred at x, baseline y (bottom row), pixel scale k. */
-function drawDigits(text: string, xc: number, yBase: number, k: number, rowColors: Uint16Array, shadow: number): void {
+type AlphaFn = (x: number, y: number) => number;
+function drawDigits(text: string, xc: number, yBase: number, k: number, rowColors: Uint16Array, shadow: number, alpha: AlphaFn): void {
   const w = text.length * 4 * k - k;           // 3 px glyph + 1 px gap
   const x0 = Math.round(xc - w / 2);
   const yTop = yBase - 5 * k + 1;
@@ -93,7 +100,7 @@ function drawDigits(text: string, xc: number, yBase: number, k: number, rowColor
       const g = FONT3x5[ch.charCodeAt(0) - 48]; if (!g) { x += 4 * k; continue; }
       for (let r = 0; r < 5; r++) for (let col = 0; col < 3; col++) if (g[r] & (4 >> col))
         for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++)
-          px(x + col * k + dx + off, yTop + r * k + dy + off, pass === 0 ? shadow : rowColors[r * k + dy]);
+          { const xx = x + col * k + dx + off, yy = yTop + r * k + dy + off; pxa(xx, yy, pass === 0 ? shadow : rowColors[r * k + dy], alpha(xx, yy)); }
       x += 4 * k;
     }
   }
@@ -108,7 +115,7 @@ function digitRowColors(p: Params): Uint16Array {
   }
   return out;
 }
-function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number): void {
+function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number, alpha: AlphaFn): void {
   const L = TUBE_LENGTH_PX, H = TUBE_HEIGHT_PX; void pal;
   const every = ticksN === 60 ? 5 : 1;
   const rows = digitRowColors(p);
@@ -116,7 +123,7 @@ function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number): vo
   for (let i = every; i < ticksN; i += every) {
     const x = Math.round((i * L) / ticksN);
     const t = ticksN === 60 && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
-    drawDigits(t, x, y0 + H - 1 - p.digitBottom, Math.round(p.digitScale), rows, shadow);
+    drawDigits(t, x, y0 + H - 1 - p.digitBottom, Math.round(p.digitScale), rows, shadow, alpha);
   }
 }
 
@@ -153,19 +160,6 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
   // Step 1: glass background (empty tube) — whole strip
   if (pal.glass !== 0) for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.glass);
   else for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, 0);
-
-  // Step 2: tick marks (behind the liquid) — faint, minor every 1/ticksN, major every 1/(ticksN/ (ticksN===60?5:... )))
-  if (p.ticks) {
-    const majorEvery = ticksN === 60 ? 5 : ticksN === 12 ? 3 : 1;
-    for (let i = 1; i < ticksN; i++) {
-      const x = Math.round((i * L) / ticksN);
-      const h = i % majorEvery === 0 ? p.tickMajorH : p.tickMinorH;
-      for (let ry = 0; ry < h; ry++) { px(x, y0 + ry, pal.tick); px(x, y0 + H - 1 - ry, pal.tick); }
-    }
-  }
-
-  // Step 2b: digits engraved behind the liquid
-  if (p.digits && !p.digitsOnTop) drawTubeDigits(y0, p, pal, ticksN);
 
   // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
   const edges = new Float32Array(H);
@@ -231,6 +225,21 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
     }
   }
 
+  // Step 4b: ticks and digits. Outside the liquid: opaque. Inside: blended by liquidTransparency
+  // (digitsOnTop forces opaque digits). Uses `edges` from step 3 to test inside/outside per row.
+  const inside = (x: number, y: number): boolean => { const ry = y - y0; return ry >= 0 && ry < H && x < edges[ry]; };
+  const tickAlpha: AlphaFn = (x, y) => (inside(x, y) ? p.liquidTransparency : 1);
+  const digitAlpha: AlphaFn = p.digitsOnTop ? () => 1 : tickAlpha;
+  if (p.ticks) {
+    const majorEvery = ticksN === 60 ? 5 : ticksN === 12 ? 3 : 1;
+    for (let i = 1; i < ticksN; i++) {
+      const x = Math.round((i * L) / ticksN);
+      const h = i % majorEvery === 0 ? p.tickMajorH : p.tickMinorH;
+      for (let ry = 0; ry < h; ry++) { pxa(x, y0 + ry, pal.tick, tickAlpha(x, y0 + ry)); pxa(x, y0 + H - 1 - ry, pal.tick, tickAlpha(x, y0 + H - 1 - ry)); }
+    }
+  }
+  if (p.digits) drawTubeDigits(y0, p, pal, ticksN, digitAlpha);
+
   // Step 5: fizz dots (inside liquid only)
   if (p.fizz) for (const f of fizz[idx]) {
     const fx = Math.round(f.x * (xe - 6)), fy = Math.round(f.y);
@@ -241,9 +250,6 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
       px(fx + dx, y0 + fy + dy, inner ? pal.bubbleIn[fy] : c);
     }
   }
-
-  // Step 5b: digits printed on top of the liquid
-  if (p.digits && p.digitsOnTop) drawTubeDigits(y0, p, pal, ticksN);
 
   // Step 6: spirit-level bubble — filled ellipse (darkened body) with 1 px bright rim
   if (p.bubble) {
