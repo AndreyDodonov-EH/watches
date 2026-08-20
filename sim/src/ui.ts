@@ -1,5 +1,5 @@
 // Minimal control panel generated from PARAM_META. No framework.
-import { DEFAULT_PARAMS, PARAM_META, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
+import { DEFAULT_PARAMS, PARAM_META, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, PRESET_USER_V1, type Params } from './params';
 
 export interface UiHooks { onChange: () => void; }
 
@@ -51,6 +51,7 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   const bar = document.createElement('div'); bar.className = 'bar';
   const btn = (t: string, f: () => void) => { const b = document.createElement('button'); b.textContent = t; b.onclick = f; bar.appendChild(b); };
   const apply = (src: Partial<Params>) => { Object.assign(p, src); refresh(); hooks.onChange(); };
+  btn('User v1', () => apply(PRESET_USER_V1));
   btn('Mint (spec)', () => apply(PRESET_MINT));
   btn('Neon (ref photo)', () => apply(PRESET_NEON));
   btn('Concept art', () => apply(PRESET_CONCEPT));

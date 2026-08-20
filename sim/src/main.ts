@@ -8,7 +8,7 @@ import { buildPanel } from './ui';
 import { SerialImu } from './serial';
 
 // ---------- state ----------
-const LS_KEY = 'liquid-watch-params-v1';
+const LS_KEY = 'liquid-watch-params-v2';
 const params: Params = { ...DEFAULT_PARAMS, ...JSON.parse(localStorage.getItem(LS_KEY) ?? '{}') };
 const overlay = { ...DEFAULT_OVERLAY };
 const hours = newTube(), minutes = newTube();
@@ -29,7 +29,7 @@ app.innerHTML = `
 <header>
   <h1>Liquid Watch — sim</h1>
   <div class="top">
-    <label>scale <select id="scale"><option>1</option><option selected>2</option><option>3</option></select></label>
+    <label>scale <select id="scale"><option value="0.33">0.33 (≈ real size @96 dpi)</option><option value="0.5">0.5</option><option value="0.75">0.75</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></label>
     <label><input type="checkbox" id="ovl" checked> leather cuff</label>
     <label>leather <select id="leather"><option>brown</option><option>black</option><option>none</option></select></label>
     <label>lens <input type="range" id="lens" min="0" max="1" step="0.05" value="0.6"></label>
@@ -82,6 +82,7 @@ const setScale = () => {
   const padX = overlay.enabled ? LEATHER_PAD_X : 0, padY = overlay.enabled ? LEATHER_PAD_Y : 0;
   viewport.style.width = `${(PANEL_W + 2 * padX) * scale}px`; viewport.style.height = `${(PANEL_H + 2 * padY) * scale}px`;
   wrap.style.transform = `translate(${padX * scale}px, ${padY * scale}px) scale(${scale})`;
+  wrap.classList.toggle('smooth', scale < 2); // pixelated upscale only at ≥2; bilinear when shrinking
 };
 setScale();
 $('scale').oninput = (e) => { scale = +(e.target as HTMLSelectElement).value; setScale(); };
@@ -106,7 +107,8 @@ let kick = 0;
 $('flick').onclick = () => { kick = 400; };
 $('flickl').onclick = () => { kick = -400; };
 let shakeT = 0;
-$('shake').onclick = () => { shakeT = 1.2; };
+const SHAKE_T = 2.5;
+$('shake').onclick = () => { shakeT = SHAKE_T; };
 
 // drag on panel = tilt
 let dragging = false;
@@ -197,7 +199,11 @@ function physics(dt: number) {
   if (inputSource === 'manual') { input.along = manual.along; input.across = manual.across; input.gyroAcross = 0; }
   else if (inputSource === 'device') { input.along = dev.along; input.across = dev.across; input.gyroAcross = dev.gyroAcross; }
   else { Object.assign(input, serial.last); }
-  if (shakeT > 0) { shakeT -= dt; input.along += Math.sin(shakeT * 40) * 0.8; }
+  if (shakeT > 0) { // ~2.5 Hz wrist shake that dies out over SHAKE_T seconds
+    shakeT -= dt; const env = Math.pow(shakeT / SHAKE_T, 1.5);
+    input.along += Math.sin((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 0.9 * env;
+    input.gyroAcross += Math.cos((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 120 * env;
+  }
   if (kick !== 0) { input.gyroAcross += kick; kick = 0; }
   if (timeMode === 'demo') demoClock += dt * 1000 * demoSpeed;
   const f = fillLevels(currentDate());
