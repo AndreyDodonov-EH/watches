@@ -2,6 +2,7 @@
 // Export/import as JSON from the control panel; the exported file is the contract for Phase 3 (spec/params.h).
 
 export interface Params {
+  v: number;             // params schema version (not shown in the UI); bumped when a key changes meaning
   // --- colours (hex "#rrggbb"); quantised to RGB565 before drawing ---
   liquid: string;        // body colour
   liquidHi: string;      // specular highlight strip
@@ -34,21 +35,25 @@ export interface Params {
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
-  tickMajorEveryH: number; // every N-th minor tick is major (0 = none)
+  tickMajorEveryH: number; // major tick every N hours (0 = none) — in units, not "every N-th minor"
   tickMinorHeightH: number;// px
   tickMajorHeightH: number;// px
+  tickMajorWidthH: number; // px, majors are drawn this wide (minors are always 1 px)
   tickColorH: string;      // minor
   tickMajorColorH: string;
   tickPosH: number;        // 0 top, 1 bottom, 2 both
   // --- ticks, minutes tube (units = minutes) ---
   ticksM: boolean;
   tickStepM: number;
-  tickMajorEveryM: number;
+  tickMajorEveryM: number; // major tick every N minutes (0 = none)
   tickMinorHeightM: number;
   tickMajorHeightM: number;
+  tickMajorWidthM: number;
   tickColorM: string;
   tickMajorColorM: string;
   tickPosM: number;
+  ticksOnTop: boolean;   // like digitsOnTop, for both tubes' ticks: printed on the glass in front of the
+                         // liquid (opaque) instead of seen through it by liquidTransparency/markContrast
   // --- digits along the bottom of the tube (3x5 pixel font) ---
   digits: boolean;
   digitColor: string;    // top of glyph
@@ -66,6 +71,7 @@ export interface Params {
   digitBottom: number;   // hours tube: px from the tube's bottom edge to the digit baseline
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
+  markContrast: number;  // min luma difference a tick/digit must keep from the liquid behind it (0 = off)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
   digitMinuteStep: number; // label every N minutes (5,10,15,20,30)
   digitHourStep: number;   // label every N hours (1..6)
@@ -87,10 +93,18 @@ export interface Params {
   gyroMax: number;       // dps, clamp
   inputGain: number;     // overall multiplier on tilt input (0.1..2)
   // --- display ---
+  // brightness is the panel-wide dimmer; the three below are per-layer trims on top of it, so the
+  // liquid can glow while the printed scale sits back in the shadow at the bottom wall of the tube.
   brightness: number;    // 0..1 global multiplier (emulates cmd 0x51)
+  liquidBright: number;  // liquid only: body / highlight / shade, and the bubble + fizz derived from them
+  tickBright: number;    // tick ladder only
+  digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
+export const PARAMS_VERSION = 2;
+
 export const DEFAULT_PARAMS: Params = {
+  v: PARAMS_VERSION,
   liquid: '#346a2a',
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
@@ -116,8 +130,9 @@ export const DEFAULT_PARAMS: Params = {
   fizzCount: 10,
   fizzSize: 2,
   fizzSpeed: 14,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 3, tickMajorHeightH: 6, tickColorH: '#303030', tickMajorColorH: '#484848', tickPosH: 2,
-  ticksM: true, tickStepM: 1, tickMajorEveryM: 5, tickMinorHeightM: 3, tickMajorHeightM: 6, tickColorM: '#303030', tickMajorColorM: '#484848', tickPosM: 2,
+  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 4, tickMajorHeightH: 9, tickMajorWidthH: 2, tickColorH: '#4a4a4a', tickMajorColorH: '#c8c8c8', tickPosH: 2,
+  ticksM: true, tickStepM: 1, tickMajorEveryM: 5, tickMinorHeightM: 4, tickMajorHeightM: 9, tickMajorWidthM: 2, tickColorM: '#4a4a4a', tickMajorColorM: '#c8c8c8', tickPosM: 2,
+  ticksOnTop: false,
   digits: true,
   digitColor: '#9a9a9a',
   digitColor2: '#4a4a4a',
@@ -134,6 +149,7 @@ export const DEFAULT_PARAMS: Params = {
   digitBottom: 2,
   digitsOnTop: false,
   liquidTransparency: 0.45,
+  markContrast: 48,
   digitsLeadingZero: true,
   digitMinuteStep: 10,
   digitHourStep: 1,
@@ -153,6 +169,9 @@ export const DEFAULT_PARAMS: Params = {
   gyroMax: 400,
   inputGain: 1,
   brightness: 1,
+  liquidBright: 1,
+  tickBright: 1,
+  digitBright: 1,
 };
 
 /** Neon preset close to images/reference-liquid.jpg */
@@ -181,13 +200,22 @@ export type ParamKey = keyof Params;
 /** Map keys from older exports (shared tick settings, digitScale, digitFontBig) onto the current schema. */
 export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   const r: Record<string, unknown> = { ...o };
+  const from = typeof r.v === 'number' ? r.v : 1;
   if ('ticks' in r) { r.ticksH = r.ticksM = r.ticks; delete r.ticks; }
   if ('tickMajorH' in r) { r.tickMajorHeightH = r.tickMajorHeightM = r.tickMajorH; delete r.tickMajorH; }
   if ('tickMinorH' in r) { r.tickMinorHeightH = r.tickMinorHeightM = r.tickMinorH; delete r.tickMinorH; }
   if ('tick' in r) { r.tickColorH = r.tickColorM = r.tickMajorColorH = r.tickMajorColorM = r.tick; delete r.tick; }
   if ('digitScale' in r) { r.digitScaleX = r.digitScaleY = r.digitScaleXMin = r.digitScaleYMin = r.digitScale; delete r.digitScale; }
   if ('digitFontBig' in r) { r.digitFont = r.digitFontBig ? 2 : 0; delete r.digitFontBig; }
+  if (from < 2) {
+    // v1 counted "major every N-th minor tick"; v2 counts units (hours / minutes).
+    for (const [every, step] of [['tickMajorEveryH', 'tickStepH'], ['tickMajorEveryM', 'tickStepM']] as const) {
+      const e = r[every], k = r[step] ?? 1;
+      if (typeof e === 'number' && typeof k === 'number') r[every] = e * k;
+    }
+  }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
+  r.v = PARAMS_VERSION;
   return r as Partial<Params>;
 }
 
@@ -195,7 +223,10 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
 export const PARAM_META: Record<string, { group: string; label?: string; min?: number; max?: number; step?: number }> = {
   liquid: { group: 'Colour' }, liquidHi: { group: 'Colour' }, liquidLo: { group: 'Colour' },
   glass: { group: 'Colour' }, bubbleRim: { group: 'Colour' },
-  brightness: { group: 'Colour', min: 0.1, max: 1, step: 0.01 },
+  brightness: { group: 'Colour', label: 'brightness (panel)', min: 0.1, max: 1, step: 0.01 },
+  liquidBright: { group: 'Colour', label: '· liquid trim', min: 0, max: 2, step: 0.01 },
+  tickBright: { group: 'Colour', label: '· ticks trim', min: 0, max: 2, step: 0.01 },
+  digitBright: { group: 'Colour', label: '· digits trim', min: 0, max: 2, step: 0.01 },
   highlightH: { group: 'Shape', min: 0, max: 30, step: 1 },
   highlightInset: { group: 'Shape', min: 0, max: 40, step: 1 },
   shadeDepth: { group: 'Shape', min: 0, max: 1, step: 0.01 },
@@ -218,21 +249,25 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   fizzSpeed: { group: 'Bubble', min: 0, max: 60, step: 1 },
   ticksH: { group: 'Ticks · hours', label: 'show ticks' },
   tickStepH: { group: 'Ticks · hours', label: 'minor every N h', min: 1, max: 6, step: 1 },
-  tickMajorEveryH: { group: 'Ticks · hours', label: 'major every N minors', min: 0, max: 12, step: 1 },
+  tickMajorEveryH: { group: 'Ticks · hours', label: 'major every N h (0 = none)', min: 0, max: 12, step: 1 },
   tickMinorHeightH: { group: 'Ticks · hours', label: 'minor height', min: 0, max: 36, step: 1 },
   tickMajorHeightH: { group: 'Ticks · hours', label: 'major height', min: 0, max: 36, step: 1 },
+  tickMajorWidthH: { group: 'Ticks · hours', label: 'major width', min: 1, max: 5, step: 1 },
   tickColorH: { group: 'Ticks · hours', label: 'minor colour' },
   tickMajorColorH: { group: 'Ticks · hours', label: 'major colour' },
   tickPosH: { group: 'Ticks · hours', label: 'position (0 top · 1 bottom · 2 both)', min: 0, max: 2, step: 1 },
   ticksM: { group: 'Ticks · minutes', label: 'show ticks' },
   tickStepM: { group: 'Ticks · minutes', label: 'minor every N min', min: 1, max: 30, step: 1 },
-  tickMajorEveryM: { group: 'Ticks · minutes', label: 'major every N minors', min: 0, max: 30, step: 1 },
+  tickMajorEveryM: { group: 'Ticks · minutes', label: 'major every N min (0 = none)', min: 0, max: 30, step: 1 },
   tickMinorHeightM: { group: 'Ticks · minutes', label: 'minor height', min: 0, max: 36, step: 1 },
   tickMajorHeightM: { group: 'Ticks · minutes', label: 'major height', min: 0, max: 36, step: 1 },
+  tickMajorWidthM: { group: 'Ticks · minutes', label: 'major width', min: 1, max: 5, step: 1 },
   tickColorM: { group: 'Ticks · minutes', label: 'minor colour' },
   tickMajorColorM: { group: 'Ticks · minutes', label: 'major colour' },
   tickPosM: { group: 'Ticks · minutes', label: 'position (0 top · 1 bottom · 2 both)', min: 0, max: 2, step: 1 },
   liquidTransparency: { group: 'Shape', min: 0, max: 1, step: 0.01 },
+  ticksOnTop: { group: 'Shape', label: 'ticks on top of liquid' },
+  markContrast: { group: 'Shape', label: 'mark contrast in liquid', min: 0, max: 120, step: 2 },
   // digits — shared
   digits: { group: 'Digits', label: 'show digits' },
   digitFont: { group: 'Digits', label: 'font (0 3x5 · 1 4x6 · 2 5x7 · 3 7-seg · 4 6x8 bold · images: 5 steel · 6 brass · 7 copper)', min: 0, max: 7, step: 1 },

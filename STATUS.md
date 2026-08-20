@@ -71,8 +71,25 @@ face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness,
 - Time: real / demo (×N) / set HH:MM. Leather-cuff overlay with slot inset, acrylic-vial lens remap and gloss
   (presentation only, not ported). Layout-grid toggle shows the bridge zone.
 - All tunables in `sim/src/params.ts` (`DEFAULT_PARAMS`), live panel, presets Mint (spec) / Neon (ref photo
-  `images/reference-liquid.jpg`), export/import JSON, persisted in localStorage. Current defaults: `sim/params.json`.
-- URL params for reproducible states: `?preset=neon&t=10:09&along=0.3&settle=1&cuff=0&grid=1&scale=3&p.<key>=<v>`.
+  `images/reference-liquid.jpg`), export/import JSON. Current defaults: `sim/params.json`.
+- Brightness is layered: `brightness` = panel dimmer (0x51), plus per-layer trims `liquidBright` /
+  `tickBright` / `digitBright` in the Colour group. Dimming the digits sits them in the shadow at the bottom
+  wall of the tube; the trim also scales that layer's `markContrast` floor, so the shadow survives over the
+  liquid. `glass` follows the panel dimmer only.
+- **Autosave** (`sim/src/persist.ts`): every edit — params *and* view state (zoom, cuff/lens/gloss, layout grid,
+  pause, time mode, tilt) — is written to `localStorage['liquid-watch-session-v1']`, debounced 250 ms, flushed on
+  pagehide. One delegated `input` listener on `#app` covers every control. Nothing is lost on reload, so
+  **Export JSON is only for checkpointing a finished look into `sim/params.json`**, and it still exports params
+  only — view state never pollutes the firmware contract. `reset view` button restores the view defaults.
+  Caveat: a stored value always beats a changed `DEFAULT_PARAMS`, so after editing defaults in code open
+  **`?fresh=1`** to see them (it ignores the store without clearing it). Input source (device / serial) is not
+  persisted — those need a user gesture.
+- Scale (ticks + labels) is laid out as one unit: labels are measured first and the tick pass leaves a
+  gap under each number; majors are longer, wider (`tickMajorWidth*`) and placed every N **units**
+  (`tickMajorEvery*` counts hours/minutes, migrated from the old "every N-th minor" via `params.v`);
+  marks inside the liquid keep a minimum luma distance from it (`markContrast`) so the ladder survives
+  the highlight band, or are printed in front of it entirely (`ticksOnTop` / `digitsOnTop`). Contract in `docs/render-routine.md` step 4b.
+- URL params, applied on top of the restored session: `?fresh=1&preset=neon&t=10:09&along=0.3&across=0&settle=1&cuff=0&lens=0.6&lenscurve=1&lenssmooth=1&leather=black&grid=1&scale=3&demo=120&p.<key>=<v>`.
 - Parts sourcing research: `docs/parts-sourcing.md` (board is 57.5 × 24.5 mm; 8×4 mm acrylic half-round rod recommended).
 - Open: user sign-off on the look; final palette; leather texture asset (`sim/public/assets/leather-tile.jpg`,
   CSS falls back to procedural noise if missing).

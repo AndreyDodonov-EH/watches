@@ -1,29 +1,29 @@
 import './style.css';
 import { PANEL_W, PANEL_H, HOURS_TUBE_Y, MINUTES_TUBE_Y, TUBE_HEIGHT_PX, BRIDGE_Y0, BRIDGE_Y1 } from '@spec/layout';
-import { DEFAULT_PARAMS, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, migrateParams, type Params } from './params';
+import { PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
 import { renderFrame, blit, stepFizz, fb, loadSprites } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
+import { DEFAULT_VIEW, loadSession, saveSession } from './persist';
 import { buildPanel } from './ui';
 loadSprites('assets/');
 import { SerialImu } from './serial';
 
 // ---------- state ----------
-const LS_KEY = 'liquid-watch-params-v2';
-const params: Params = { ...DEFAULT_PARAMS, ...migrateParams(JSON.parse(localStorage.getItem(LS_KEY) ?? '{}')) };
-const overlay = { ...DEFAULT_OVERLAY };
+// Params *and* view state are restored from localStorage and saved again on every edit (persist.ts).
+// `?fresh=1` ignores the store and starts from the code defaults — use it after DEFAULT_PARAMS changes.
+const url = new URLSearchParams(location.search);
+const session = loadSession(url.get('fresh') === '1');
+const params: Params = session.params;
+const overlay = session.view.overlay;
+const manual = session.view.manual;             // sliders / drag
+const setClock = session.view.setClock;
+let { scale, showGrid, paused, timeMode, demoSpeed } = session.view;  // demoSpeed = demo s per real s
 const hours = newTube(), minutes = newTube();
 const input: TiltInput = { along: 0, across: 0, gyroAlong: 0, gyroAcross: 0 };
 const imuFilter = new ImuFilter();
-const manual = { along: 0, across: 0 };        // sliders / drag
-let inputSource: 'manual' | 'device' | 'serial' = 'manual';
-let timeMode: 'real' | 'demo' | 'set' = 'real';
-let demoSpeed = 60;                             // demo seconds per real second
+let inputSource: 'manual' | 'device' | 'serial' = 'manual'; // not persisted: device/serial need a gesture
 let demoClock = Date.now();
-let setClock = { h: 10, m: 9 };
-let scale = 0.5;
-let showGrid = false;
-let paused = false;
 
 // ---------- DOM ----------
 const app = document.getElementById('app')!;
@@ -41,6 +41,7 @@ app.innerHTML = `
     <label>slot inset <input type="range" id="inset" min="0" max="40" step="1" value="10"></label>
     <label><input type="checkbox" id="grid"> layout grid</label>
     <label><input type="checkbox" id="pause"> pause</label>
+    <button id="resetview">reset view</button>
     <span id="fps"></span>
   </div>
 </header>
@@ -53,9 +54,9 @@ app.innerHTML = `
     </div></div>
     <div class="controls">
       <fieldset><legend>Time</legend>
-        <label><input type="radio" name="tm" value="real" checked> real</label>
-        <label><input type="radio" name="tm" value="demo"> demo ×<input type="number" id="demospeed" value="60" min="1" max="3600" style="width:5em"></label>
-        <label><input type="radio" name="tm" value="set"> set <input type="number" id="seth" value="10" min="0" max="23" style="width:3.5em">:<input type="number" id="setm" value="9" min="0" max="59" style="width:3.5em"></label>
+        <label><input type="radio" id="tm-real" name="tm" value="real" checked> real</label>
+        <label><input type="radio" id="tm-demo" name="tm" value="demo"> demo ×<input type="number" id="demospeed" value="60" min="1" max="3600" style="width:5em"></label>
+        <label><input type="radio" id="tm-set" name="tm" value="set"> set <input type="number" id="seth" value="10" min="0" max="23" style="width:3.5em">:<input type="number" id="setm" value="9" min="0" max="59" style="width:3.5em"></label>
         <span id="clock"></span>
       </fieldset>
       <fieldset><legend>Tilt input</legend>
@@ -82,6 +83,13 @@ const img = fbctx.createImageData(PANEL_W, PANEL_H);
 const ovlDom = buildOverlayDom(wrap);
 applyOverlay(ovlDom, overlay);
 
+// ---------- persistence ----------
+// One delegated listener covers every control on the page (top bar, time, tilt, params panel);
+// programmatic changes (presets, import, drag-tilt, reset) call save() explicitly.
+const save = (): void => saveSession({ params, view: { scale, showGrid, paused, timeMode, demoSpeed, setClock, manual, overlay } });
+app.addEventListener('input', save);
+app.addEventListener('change', save);
+
 const viewport = $('viewport');
 const setScale = () => {
   const padX = overlay.enabled ? LEATHER_PAD_X : 0, padY = overlay.enabled ? LEATHER_PAD_Y : 0;
@@ -105,11 +113,36 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name=src]')) 
 $('demospeed').oninput = (e) => { demoSpeed = +(e.target as HTMLInputElement).value; };
 $('seth').oninput = (e) => { setClock.h = +(e.target as HTMLInputElement).value; };
 $('setm').oninput = (e) => { setClock.m = +(e.target as HTMLInputElement).value; };
+$('resetview').onclick = () => {
+  Object.assign(overlay, DEFAULT_OVERLAY); Object.assign(manual, DEFAULT_VIEW.manual); Object.assign(setClock, DEFAULT_VIEW.setClock);
+  ({ scale, showGrid, paused, timeMode, demoSpeed } = DEFAULT_VIEW);
+  syncView(); save();
+};
 const alongS = $<HTMLInputElement>('along'), acrossS = $<HTMLInputElement>('across');
 const syncSliders = () => { alongS.value = String(manual.along); acrossS.value = String(manual.across); $('alongv').textContent = manual.along.toFixed(2); $('acrossv').textContent = manual.across.toFixed(2); };
 alongS.oninput = () => { manual.along = +alongS.value; syncSliders(); };
 acrossS.oninput = () => { manual.across = +acrossS.value; syncSliders(); };
-$('center').onclick = () => { manual.along = 0; manual.across = 0; syncSliders(); };
+$('center').onclick = () => { manual.along = 0; manual.across = 0; syncSliders(); save(); };
+
+/** Push the whole view state into the DOM + derived layers. Inverse of what `save()` collects. */
+function syncView(): void {
+  $<HTMLSelectElement>('scale').value = String(scale);
+  $<HTMLInputElement>('ovl').checked = overlay.enabled;
+  $<HTMLSelectElement>('leather').value = overlay.leather;
+  $<HTMLInputElement>('lens').value = String(overlay.lens);
+  $<HTMLInputElement>('lenscurve').value = String(overlay.lensCurve);
+  $<HTMLInputElement>('lenssmooth').checked = overlay.lensSmooth;
+  $<HTMLInputElement>('gloss').value = String(overlay.gloss);
+  $<HTMLInputElement>('inset').value = String(overlay.slotInset);
+  $<HTMLInputElement>('grid').checked = showGrid;
+  $<HTMLInputElement>('pause').checked = paused;
+  $<HTMLInputElement>('demospeed').value = String(demoSpeed);
+  $<HTMLInputElement>('seth').value = String(setClock.h);
+  $<HTMLInputElement>('setm').value = String(setClock.m);
+  $<HTMLInputElement>(`tm-${timeMode}`).checked = true;
+  syncSliders();
+  applyOverlay(ovlDom, overlay); setScale(); drawGrid();
+}
 let kick = 0;
 $('flick').onclick = () => { kick = 400; };
 $('flickl').onclick = () => { kick = -400; };
@@ -120,7 +153,7 @@ $('shake').onclick = () => { shakeT = SHAKE_T; };
 // drag on panel = tilt
 let dragging = false;
 wrap.addEventListener('pointerdown', (e) => { dragging = true; wrap.setPointerCapture(e.pointerId); });
-wrap.addEventListener('pointerup', () => { dragging = false; });
+wrap.addEventListener('pointerup', () => { dragging = false; save(); });
 wrap.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   const r = wrap.getBoundingClientRect();
@@ -154,35 +187,33 @@ $('serialbtn').onclick = async () => {
 serial.onStatus = (s) => { $('serialst').textContent = s; };
 
 // params panel
-const panelUi = buildPanel($('panel'), params, { onChange: () => { localStorage.setItem(LS_KEY, JSON.stringify(params)); } });
+const panelUi = buildPanel($('panel'), params, { onChange: save });
 
-// URL params for reproducible states / screenshots:
-//   ?preset=neon|mint&along=0.3&across=0&t=10:09&demo=120&scale=3&cuff=0&lens=0.6&grid=1&p.liquid=%2339ff14&p.bubble=0
+// URL params, applied on top of the restored session — for reproducible states / screenshots:
+//   ?fresh=1 (ignore the saved session) &preset=neon|mint|concept &t=10:09 &demo=120 &settle=1
+//   &along=0.3 &across=0 &scale=3 &cuff=0 &lens=0.6 &lenscurve=1 &lenssmooth=1 &leather=black &grid=1
+//   &p.<paramKey>=<value>   e.g. &p.liquid=%2339ff14&p.bubble=0
 {
-  const u = new URLSearchParams(location.search);
-  if (u.get('preset') === 'neon') Object.assign(params, PRESET_NEON);
-  if (u.get('preset') === 'mint') Object.assign(params, PRESET_MINT);
-  if (u.get('preset') === 'concept') Object.assign(params, PRESET_CONCEPT);
+  const u = url;
+  const preset = { neon: PRESET_NEON, mint: PRESET_MINT, concept: PRESET_CONCEPT }[u.get('preset') ?? ''];
+  if (preset) Object.assign(params, preset);
   for (const [k, v] of u) if (k.startsWith('p.')) {
     const key = k.slice(2) as keyof Params; const cur = (params as any)[key];
     (params as any)[key] = typeof cur === 'boolean' ? v === '1' || v === 'true' : typeof cur === 'number' ? parseFloat(v) : v;
   }
-  if (u.has('along')) { manual.along = +u.get('along')!; }
-  if (u.has('across')) { manual.across = +u.get('across')!; }
-  syncSliders();
-  if (u.has('t')) { const [h, m] = u.get('t')!.split(':').map(Number); setClock = { h, m }; timeMode = 'set'; $<HTMLInputElement>('seth').value = String(h); $<HTMLInputElement>('setm').value = String(m); (document.querySelector('input[name=tm][value=set]') as HTMLInputElement).checked = true; }
-  if (u.has('demo')) { demoSpeed = +u.get('demo')!; timeMode = 'demo'; (document.querySelector('input[name=tm][value=demo]') as HTMLInputElement).checked = true; }
-  if (u.has('scale')) { scale = +u.get('scale')!; $<HTMLSelectElement>('scale').value = String(scale); }
-  if (u.has('cuff')) { overlay.enabled = u.get('cuff') === '1'; $<HTMLInputElement>('ovl').checked = overlay.enabled; }
-  if (u.has('lenscurve')) { overlay.lensCurve = +u.get('lenscurve')!; $<HTMLInputElement>('lenscurve').value = String(overlay.lensCurve); }
-  if (u.has('lenssmooth')) { overlay.lensSmooth = u.get('lenssmooth') === '1'; $<HTMLInputElement>('lenssmooth').checked = overlay.lensSmooth; }
-  if (u.has('lens')) { overlay.lens = +u.get('lens')!; $<HTMLInputElement>('lens').value = String(overlay.lens); }
-  if (u.has('leather')) { overlay.leather = u.get('leather') as any; $<HTMLSelectElement>('leather').value = overlay.leather; }
-  if (u.has('grid')) { showGrid = u.get('grid') === '1'; $<HTMLInputElement>('grid').checked = showGrid; drawGrid(); }
-  if (u.has('settle')) { // pre-run physics so springs are at rest for screenshots
-    for (let i = 0; i < 250; i++) physics(PHYS_DT);
-  }
-  panelUi.refresh(); applyOverlay(ovlDom, overlay); setScale();
+  if (u.has('along')) manual.along = +u.get('along')!;
+  if (u.has('across')) manual.across = +u.get('across')!;
+  if (u.has('t')) { const [h, m] = u.get('t')!.split(':').map(Number); setClock.h = h; setClock.m = m; timeMode = 'set'; }
+  if (u.has('demo')) { demoSpeed = +u.get('demo')!; timeMode = 'demo'; }
+  if (u.has('scale')) scale = +u.get('scale')!;
+  if (u.has('cuff')) overlay.enabled = u.get('cuff') === '1';
+  if (u.has('lens')) overlay.lens = +u.get('lens')!;
+  if (u.has('lenscurve')) overlay.lensCurve = +u.get('lenscurve')!;
+  if (u.has('lenssmooth')) overlay.lensSmooth = u.get('lenssmooth') === '1';
+  if (u.has('leather')) overlay.leather = u.get('leather') as typeof overlay.leather;
+  if (u.has('grid')) showGrid = u.get('grid') === '1';
+  if (u.has('settle')) for (let i = 0; i < 250; i++) physics(PHYS_DT); // springs at rest for screenshots
+  panelUi.refresh(); syncView();
 }
 
 function drawGrid() {

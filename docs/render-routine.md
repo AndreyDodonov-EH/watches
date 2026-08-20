@@ -35,20 +35,58 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
 4. **Highlight inset** (rows of the highlight band only): over the last `highlightInset` px before the edge and
    the first `highlightInset` px from the left, blend the highlight row colour toward the body colour
    (`rows[hiTop+highlightH+1]`) linearly so the highlight does not touch the meniscus / end cap.
-4b. **Ticks + digits**: `N = 12` (hours) or `60` (minutes). Ticks (per tube: `tick*H` for hours, `tick*M` for minutes): for `i = step, 2·step, …  < N`, `x = round(i*L/N)`;
-   the n-th tick is major when `tickMajorEvery > 0 && n % tickMajorEvery == 0` → height/colour `tickMajorHeight/Color`,
-   else `tickMinorHeight/Color`; drawn from the top row down (`tickPos` 0 or 2) and/or from the bottom row up (1 or 2). Digits: font `FONTS[digitFont]` (3×5, 4×6, 5×7 round, 5×7 seven-segment, 6×8 bold), scaled to a `round(gw*digitScaleX)` × `round(gh*digitScaleY)` box by nearest-neighbour (`src = floor(dst*g/box)`), centred on `x = round(i*L/N)` for `i` in steps of
-   `digitHourStep` (hours) / `digitMinuteStep` (minutes), `0 < i < N`, baseline `y0+H-1-digitBottom` (minutes tube uses `digitScaleXMin/YMin/digitBottomMin`), glyph rows coloured by a `digitColor→digitColor2` gradient,
-   optional 1 px `digitShadowColor` copy offset (+1,+1) drawn first. Every pixel of both is written with
-   opacity `a`: `a = 1` outside the liquid (`x >= edge(ry)`), `a = liquidTransparency` inside
-   (`digitsOnTop` forces `a = 1` for digits). `pixel = blend(existing, colour, a)`.
+4b. **Scale = tick ladder + labels** (`N = 12` hours / `60` minutes). The labels are **laid out first**
+   (measured, not drawn) so the tick pass can leave a gap under each number instead of drawing a line
+   through it; then ticks are drawn, then the labels.
+
+   _Label layout_ (per tube; hours use `digitScaleX/Y`, `digitBottom`, minutes `digitScaleXMin/YMin`, `digitBottomMin`):
+   font `FONTS[digitFont]` (3×5, 4×6, 5×7 round, 5×7 seven-segment, 6×8 bold) scaled to
+   `bw = round(gw*scaleX)` × `bh = round(gh*scaleY)` by nearest-neighbour (`src = floor(dst*g/box)`),
+   inter-glyph gap `max(1, round(scaleX))`, box centred on `x = round(i*L/N)` for `i` in steps of
+   `digitHourStep` / `digitMinuteStep`, `0 < i < N`; rows `yTop..yBase` with `yBase = y0+H-1-digitBottom`,
+   `yTop = yBase-bh+1`; glyph rows coloured by a `digitColor→digitColor2` gradient, optional 1 px
+   `digitShadowColor` copy offset (+1,+1) drawn first (which also widens/deepens the box by 1 px).
+
+   _Ticks_ (per tube: `tick*H` for hours, `tick*M` for minutes): for `i = step, 2·step, … < N`, `x = round(i*L/N)`;
+   tick `i` is **major** when `tickMajorEvery > 0 && i % tickMajorEvery == 0` — note this counts **units**
+   (hours / minutes), not "every n-th minor tick", so majors stay put when `tickStep` changes.
+   (A major can only land where a minor exists, so keep `tickMajorEvery` a multiple of `tickStep`.)
+   Major → `tickMajorHeight` rows, `tickMajorWidth` px wide (centred on `x`), colour `tickMajorColor`;
+   minor → `tickMinorHeight` rows, always 1 px, `tickColor`. Drawn from the top row down (`tickPos` 0 or 2)
+   and/or from the bottom row up (1 or 2). A tick is **skipped on the side where it would hit a label** —
+   i.e. when its column is within `[x0-1, x1+1]` of a label box *and* its rows overlap `[yTop, yBase]`.
+
+   _Compositing_ (both ticks and labels, every pixel): outside the liquid (`x >= edge(ry)`) the colour is
+   written as-is. Inside, it is seen through the liquid:
+   `c = blend(liquid[ry], colour, liquidTransparency)`, and then, if `|luma(c) - luma(liquid[ry])| < floor`,
+   `c` is pushed away from the liquid's luma (down by scaling, up by blending toward white) until it clears
+   the floor. `floor = markContrast * tickBright` for ticks and `markContrast * digitBright` for labels —
+   scaling it by the layer's trim is what lets a dimmed layer actually stay dim over the liquid instead of
+   being pushed back up to legibility. Without that floor a mid-grey tick vanishes into the highlight band, which covers most of
+   the upper half of the tube. `ticksOnTop` (ticks, both tubes) and `digitsOnTop` (labels) skip the whole
+   liquid path and write the colour as-is everywhere — the mark is printed on the glass *in front of* the
+   liquid rather than seen through it, so the ladder keeps one appearance across liquid and empty glass.
+   Image-glyph coverage `a_img` (0..1) multiplies the final write.
+   **Firmware:** the liquid behind a mark is always the per-row LUT colour, so the blend + contrast push
+   collapses into one extra `H`-entry table per mark colour (minor, major, each digit gradient row), rebuilt
+   only when params change — no per-pixel luma maths at run time.
+
    **Image digits** (`digitFont` ≥ 5: 5 steel, 6 brass steampunk, 7 copper gauge): glyphs come from a 64 px-high RGBA sheet
    (`sim/public/assets/digits-*.png` + `.json` with per-glyph widths, produced from the AI sheets in `images/digits/` by
    `sim/tools/make-digit-sprites.py`). The glyph box is the same nominal 5×7 em: `bw = round(5*scaleX)`, `bh = round(7*scaleY)`;
    each glyph is box-filtered to `round(width_d * bw/cellW)` × `bh`, proportional spacing with gap `round(bw/5)`, optional
-   multiply-tint `digitTint` × `digitTintAmount` (turns the greyscale steel sheet bronze/gold), then `brightness`. Coverage `a_img`
-   (0..1) multiplies the liquid alpha above. **Firmware:** the box-filter runs offline — generate one `RGB565 + A8` table per
-   (sheet, hours box, minutes box) from `params.json` and blit it with the same `pxa()`; ~2-4 KB per table, no runtime scaling.
+   multiply-tint `digitTint` × `digitTintAmount` (turns the greyscale steel sheet bronze/gold), then `brightness`.
+   **Firmware:** the box-filter runs offline — generate one `RGB565 + A8` table per
+   (sheet, hours box, minutes box) from `params.json` and blit it the same way; ~2-4 KB per table, no runtime scaling.
+4c. **Brightness**: `brightness` is the panel-wide dimmer (it stands in for display command 0x51) and
+   multiplies everything. On top of it each layer has its own trim, applied wherever that layer's colours
+   are quantised: `liquidBright` on `liquid` / `liquidHi` / `liquidLo` — hence on the row LUT, the front
+   brightening, the edge glow, and the bubble + fizz colours derived from the LUT; `tickBright` on
+   `tickColor` / `tickMajorColor`; `digitBright` on the `digitColor→digitColor2` gradient, the emboss
+   `digitShadowColor` and the image-sheet glyphs. `glass` takes the panel dimmer only, so the empty part of
+   the tube does not drift when the liquid is boosted. Products are clamped to 0..255 before the RGB565
+   quantise, so a trim above 1 saturates the highlight band toward white rather than wrapping.
+   **Firmware:** all of this is LUT-build time, not per-pixel.
 5. **Fizz** (optional, `fizz`): `fizzCount` dots of size `fizzSize` px at (`fx = x*(xe-6)`, `fy`) drawn in
    `bubbleRim` colour (3×3+ get a `bubbleIn` centre); they drift up `fizzSpeed` px/s and wrap.
    Only drawn when inside the liquid (`fx < edgeX(fy) - 2`).

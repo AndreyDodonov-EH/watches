@@ -24,7 +24,22 @@ Two tube slots of 44 × 6 mm with a 4 mm gap = 16 mm tall → fits inside the 19
 
 ---
 
-## ✅ Verified picks — ready to order (checked live 2026-08-20, EU/DE shipping)
+## Status (2026-08-20): measure first, then order
+
+Decisions so far:
+- **Board:** owned (non-touch SKU 28872, no headers).
+- **Tools:** assumed available at the hardware colleague's bench — Basket C is reference only.
+- **Leather:** does **not** have to be one wide piece. The cuff can be laminated from several narrow strips (e.g. 2–3 × 25–35 mm, or a 50 mm centre strip plus 10–15 mm edge strips) glued/stitched edge-to-edge on a thin lining — that brings the cheap, in-stock 5 cm pre-dyed strips back into play and lets the strip seams double as the slot edges. So width is not a blocker; don't pre-select.
+- **Tubes/rods:** **do not pre-select.** Measure on the real display first (checklist below), then pick the rod width to match.
+
+### Measure-first checklist (with the firmware calibration face, serial cmd `c`)
+1. Bar height in mm (spec says 72 px = 6.0 mm; verify with calipers against the glass) → rod width = bar height + 1–2 mm (a lens slightly wider than the bar hides the bar's edges under the curve). 6 mm bar → 7–8 mm rod; if the bars end up 5 mm → 6 mm rod; 7–8 mm → 10 mm rod.
+2. Gap between bars (spec 4.0 mm) → decides whether two separate rods fit side-by-side (need gap ≥ ~1.5 mm after the rods' flats) or whether one wider rod / a bezel bar is needed.
+3. Distance from bar edges to the glass edge and to the board outline → how much leather margin exists beside the slots.
+4. Bar length (44.2 mm) → rod cut length = bar length + 2–4 mm.
+5. Only then order from the verified optics sources below (acrylhaus has 6 / 10 mm half-round and Ø8 round in stock; 8 × 4 is out of stock everywhere in DE at the moment).
+
+## ✅ Verified sources (checked live 2026-08-20, EU/DE shipping) — for when the measurements are in
 
 Every link below was fetched and showed the product with price on 2026-08-20. Amazon.de / eBay.de / Etsy / AliExpress blocked automated checks, so entries from those shops further down are *unverified*.
 
@@ -41,7 +56,7 @@ acrylhaus does **not** carry 8 × 4 half-round. The exact 8 × 4 profile is curr
 
 Alt Ø8 round rod with free cut-to-length: dabenmo.de PLEXIGLAS Rundstab Ø8 €8.73 — https://www.dabenmo.de/PLEXIGLAS-Acrylglas-Rundstab-farblos-klar/SW10011.46
 
-### Basket B — leather (⚠ 50 mm picks below are too narrow for the across-band orientation; see **Basket B2 — ≥65 mm** for the valid ones)
+### Basket B — leather, 5 cm strips (fine if the cuff is laminated from several strips)
 
 | Qty | Item | URL | Price |
 |---|---|---|---|
@@ -52,7 +67,24 @@ Alt Ø8 round rod with free cut-to-length: dabenmo.de PLEXIGLAS Rundstab Ø8 €
 
 No verified EU source for a **brown 50 mm ready-made snap cuff** — make it from the strip. (axymore.de has a 5.7 cm black one at €13.99: https://axymore.de/lederarmband-breit-in-schwarz-mit-druckknopfer.html ; leatherpunk.com US 2" brown $32.90.)
 
-### Basket C — tools & glue (schuhbedarf.de + one punch)
+### Basket B2 — leather ≥ 65 mm, single-piece option (verified 2026-08-20)
+
+| Qty | Item | URL | Price |
+|---|---|---|---|
+| 1 | **lederriemen.com Blankleder natur — 7 cm × 3.0–3.5 mm × 120 cm** (direct variant link), natural veg-tan, Made in Germany, in stock, next-day DE | https://lederriemen.com/index.php?a=1802 (configurator: https://lederriemen.com/Lederriemen-Blankleder-natur ) | €21.50 |
+| alt | same, **8 cm × 3.0–3.5 mm × 120 cm**, in stock | https://lederriemen.com/index.php?a=1865 | €24.30 |
+| alt | **ledermacher.de Premium Blankleder Zuschnitt 21 × 30 cm, 3.0–3.5 mm**, natural, in stock — one sheet = a 70 × 220 mm cuff + offcuts; add a 1.3–1.5 mm sheet (€11.45) for a lining/pocket layer | https://www.ledermacher.de/premium-blankleder-zuschnitt-21x30-cm | €11.45 |
+| alt | schuhbedarf.de Punzierleder Stück 20 × 30 cm, 3.0–3.5 mm (same shop as snaps + glue → one parcel) | https://schuhbedarf.de/leder/punzierleder/punzierleder-stuecke-20-x-30-cm-blankleder-dickleder-3-0-3-5-mm.html | €14.99 |
+| alt | leder-hobby.de Blankleder Riemen, widths to 150 mm (70/80 mm available), 2.8–3.2 or 3.0–3.5 mm, cut to order — price only in configurator | https://www.leder-hobby.de/Blankleder-Riemen | from €3.69 |
+| alt | marketender.de Blankleder 3.0–3.5 mm cut-to-size, **pre-dyed braun** available, €104/m² (≈€6 for 20 × 30) | https://www.marketender.de/Material-Werkzeug/Leder/Blankleder-3-0-3-5mm-im-Zuschnitt.html | ~€6–10 |
+
+Widths 6–10 cm at lederriemen.com come only in 120 cm (fine: 4–5 cuffs per strip). lederriemen "Classic" pre-dyed only goes to 5 cm, so wide = natural/undyed → dye with Fiebing's or leave natural.
+
+**Ready-made wide snap cuffs:** nothing plain at 65–80 mm in stock in the EU. Closest: leatherpunk.com (US) "Plain Brown 2 3/8" wristband" = **60 mm**, $34.90 (https://www.leatherpunk.com/products/brown238-plain); eBay.de 322142246641 "Lederarmband 60 mm Braun Druckknopf" €26.95 (unverified). 60 mm means the board ends sit ~1 mm inside the edge — too tight. Make the cuff from the strip/sheet.
+
+Cheapest one-parcel route: **schuhbedarf.de** — 20 × 30 cm 3 mm sheet €14.99 + snap kit €3.99 + Kövulfix €9.99 = €29, free shipping > €30 (add a second sheet or a hole punch).
+
+### Basket C — tools & glue (reference only; colleague has equipment)
 
 | Qty | Item | URL | Price |
 |---|---|---|---|
@@ -80,11 +112,11 @@ A 6 mm slot punch is €36+ — for a one-off, drill/punch Ø6 holes at both slo
 | | |
 |---|---|
 | Optics (acrylhaus, 4 items) | €31 |
-| Leather strip (lederriemen Classic) | €18 |
+| Leather, 7 cm strip (lederriemen natur) or 21×30 sheet (ledermacher) | €12–22 |
 | Snaps + glue (schuhbedarf) | €14 |
 | Slot punch (optional) | €36 |
 | Battery ×2 (batteryzone) | €9 |
-| **Total** | **≈ €72 without punch / €108 with**, plus shipping (~€15 across 4 shops) |
+| **Total** | **≈ €66–76 without punch / €102–112 with**, plus shipping (~€15 across 3–4 shops) |
 
 ---
 
@@ -196,8 +228,8 @@ Board space behind PCB ≈ 57 × 24 mm; keep cell ≤ 50 × 22 mm. Candidates (c
 ## Open questions for the user
 
 1. ~~Board~~ — owned (non-touch 28872, no headers).
-2. Confirm wrist circumference and cuff width: 65 mm (minimum, 3.75 mm leather beside the board ends) vs 70–75 mm (comfortable margin, room for a stitched edge).
-3. Rod profile preference: 8 × 4 half-round is out of stock everywhere in DE — OK to prototype with Ø6 and Ø10 half-round + Ø8 round (all acrylhaus) and pick after seeing them?
+2. Cuff construction: one ≥65 mm piece vs laminated narrow strips (leaning strips). Wrist circumference still needed.
+3. Rod profile: decide **after** measuring the bars on the real display (see checklist at top).
 4. Should the rods' ends glow (light-pipe) or be masked black?
 5. Battery: PKCELL/Pi Hut is out (UK-only shipping). batteryzone.de 502035 (20 mm wide, 10–18 days, PCM unconfirmed) vs eckstein JST-PH 503035 with PCM + re-terminate?
 6. Is a 3D-printed bezel acceptable (visible as a thin black frame in the slots) or must it be pure leather + acrylic?
