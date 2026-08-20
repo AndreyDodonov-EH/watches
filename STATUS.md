@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-20 (session 1, Phase 1 bring-up)_
+_Last update: 2026-08-20 (session 2, Phase 2 simulator started)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -61,3 +61,18 @@ face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness,
 ## Next step
 **Phase 1 complete** (calibration face confirmed visually by user, IMU streamed + axes mapped, fps recorded).
 → Phase 2: browser-based liquid simulation (Vite + TS + Canvas), `spec/layout.ts` mirroring `spec/layout.h`.
+
+## Phase 2 — browser simulator (`sim/`)
+- Vite + TS, no framework. `cd sim && npm install && npm run dev` → http://localhost:5173
+- Renders into a real RGB565 `Uint16Array` framebuffer (exact 565 quantisation) using only row spans /
+  pixels / a per-row colour LUT, so the routine ports 1:1 (documented in `docs/render-routine.md`).
+- Fixed-step 50 Hz physics (`sim/src/physics.ts`), decoupled from rAF rendering. IMU axes mapped via `spec/layout.ts`.
+- Inputs: sliders / drag on the panel, phone DeviceOrientation, **Web Serial to the board's `i` stream** (Chrome).
+- Time: real / demo (×N) / set HH:MM. Leather-cuff overlay with slot inset, acrylic-vial lens remap and gloss
+  (presentation only, not ported). Layout-grid toggle shows the bridge zone.
+- All tunables in `sim/src/params.ts` (`DEFAULT_PARAMS`), live panel, presets Mint (spec) / Neon (ref photo
+  `images/reference-liquid.jpg`), export/import JSON, persisted in localStorage. Current defaults: `sim/params.json`.
+- URL params for reproducible states: `?preset=neon&t=10:09&along=0.3&settle=1&cuff=0&grid=1&scale=3&p.<key>=<v>`.
+- Parts sourcing research: `docs/parts-sourcing.md` (board is 57.5 × 24.5 mm; 8×4 mm acrylic half-round rod recommended).
+- Open: user sign-off on the look; final palette; leather texture asset (`sim/public/assets/leather-tile.jpg`,
+  CSS falls back to procedural noise if missing).
