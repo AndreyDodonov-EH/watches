@@ -79,31 +79,42 @@ function px(x: number, y: number, c: number): void {
   fb[y * PANEL_W + x] = c;
 }
 
-// 3x5 pixel font, digits 0-9, rows top→bottom, 3 bits each (MSB = left).
-const FONT3x5: number[][] = [
+// Bitmap digit fonts 0-9; rows top→bottom, w bits per row (MSB = left). Selected by params.digitFont.
+interface Font { w: number; h: number; g: number[][]; name: string }
+const FONT_3x5: Font = { name: '3x5', w: 3, h: 5, g: [
   [0b111,0b101,0b101,0b101,0b111], [0b010,0b110,0b010,0b010,0b111], [0b111,0b001,0b111,0b100,0b111],
   [0b111,0b001,0b111,0b001,0b111], [0b101,0b101,0b111,0b001,0b001], [0b111,0b100,0b111,0b001,0b111],
   [0b111,0b100,0b111,0b101,0b111], [0b111,0b001,0b001,0b001,0b001], [0b111,0b101,0b111,0b101,0b111],
-  [0b111,0b101,0b111,0b001,0b111],
-];
-/** Draw `text` (digits only) centred at x, baseline y (bottom row), pixel scale k. */
-// 5x7 pixel font, digits 0-9, 5 bits per row (MSB = left).
-const FONT5x7: number[][] = [
-  [0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110],
-  [0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],
-  [0b01110,0b10001,0b00001,0b00010,0b00100,0b01000,0b11111],
-  [0b11111,0b00010,0b00100,0b00010,0b00001,0b10001,0b01110],
-  [0b00010,0b00110,0b01010,0b10010,0b11111,0b00010,0b00010],
-  [0b11111,0b10000,0b11110,0b00001,0b00001,0b10001,0b01110],
-  [0b00110,0b01000,0b10000,0b11110,0b10001,0b10001,0b01110],
-  [0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],
-  [0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],
-  [0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
-];
+  [0b111,0b101,0b111,0b001,0b111] ] };
+const FONT_4x6: Font = { name: '4x6 narrow', w: 4, h: 6, g: [
+  [0b0110,0b1001,0b1001,0b1001,0b1001,0b0110], [0b0010,0b0110,0b0010,0b0010,0b0010,0b0111],
+  [0b0110,0b1001,0b0001,0b0010,0b0100,0b1111], [0b1110,0b0001,0b0110,0b0001,0b1001,0b0110],
+  [0b0010,0b0110,0b1010,0b1111,0b0010,0b0010], [0b1111,0b1000,0b1110,0b0001,0b1001,0b0110],
+  [0b0110,0b1000,0b1110,0b1001,0b1001,0b0110], [0b1111,0b0001,0b0010,0b0100,0b0100,0b0100],
+  [0b0110,0b1001,0b0110,0b1001,0b1001,0b0110], [0b0110,0b1001,0b1001,0b0111,0b0001,0b0110] ] };
+const FONT_5x7: Font = { name: '5x7 round', w: 5, h: 7, g: [
+  [0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110], [0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],
+  [0b01110,0b10001,0b00001,0b00010,0b00100,0b01000,0b11111], [0b11111,0b00010,0b00100,0b00010,0b00001,0b10001,0b01110],
+  [0b00010,0b00110,0b01010,0b10010,0b11111,0b00010,0b00010], [0b11111,0b10000,0b11110,0b00001,0b00001,0b10001,0b01110],
+  [0b00110,0b01000,0b10000,0b11110,0b10001,0b10001,0b01110], [0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],
+  [0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110], [0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100] ] };
+const FONT_7SEG: Font = { name: '5x7 seven-segment', w: 5, h: 7, g: [
+  [0b11111,0b10001,0b10001,0b10001,0b10001,0b10001,0b11111], [0b00001,0b00001,0b00001,0b00001,0b00001,0b00001,0b00001],
+  [0b11111,0b00001,0b00001,0b11111,0b10000,0b10000,0b11111], [0b11111,0b00001,0b00001,0b11111,0b00001,0b00001,0b11111],
+  [0b10001,0b10001,0b10001,0b11111,0b00001,0b00001,0b00001], [0b11111,0b10000,0b10000,0b11111,0b00001,0b00001,0b11111],
+  [0b11111,0b10000,0b10000,0b11111,0b10001,0b10001,0b11111], [0b11111,0b00001,0b00001,0b00001,0b00001,0b00001,0b00001],
+  [0b11111,0b10001,0b10001,0b11111,0b10001,0b10001,0b11111], [0b11111,0b10001,0b10001,0b11111,0b00001,0b00001,0b11111] ] };
+const FONT_6x8B: Font = { name: '6x8 bold', w: 6, h: 8, g: [
+  [0b011110,0b110011,0b110011,0b110011,0b110011,0b110011,0b110011,0b011110], [0b001100,0b011100,0b001100,0b001100,0b001100,0b001100,0b001100,0b111111],
+  [0b011110,0b110011,0b000011,0b000110,0b001100,0b011000,0b110000,0b111111], [0b111110,0b000011,0b000011,0b011110,0b000011,0b000011,0b110011,0b011110],
+  [0b000110,0b001110,0b011110,0b110110,0b111111,0b000110,0b000110,0b000110], [0b111111,0b110000,0b110000,0b111110,0b000011,0b000011,0b110011,0b011110],
+  [0b011110,0b110000,0b110000,0b111110,0b110011,0b110011,0b110011,0b011110], [0b111111,0b000011,0b000110,0b001100,0b011000,0b011000,0b011000,0b011000],
+  [0b011110,0b110011,0b110011,0b011110,0b110011,0b110011,0b110011,0b011110], [0b011110,0b110011,0b110011,0b011111,0b000011,0b000011,0b000011,0b011110] ] };
+export const FONTS: Font[] = [FONT_3x5, FONT_4x6, FONT_5x7, FONT_7SEG, FONT_6x8B];
 type AlphaFn = (x: number, y: number) => number;
-function drawDigits(text: string, xc: number, yBase: number, kx: number, ky: number, big: boolean,
+function drawDigits(text: string, xc: number, yBase: number, kx: number, ky: number, f: Font,
   rowColors: Uint16Array, shadow: number, alpha: AlphaFn): void {
-  const font = big ? FONT5x7 : FONT3x5, gw = big ? 5 : 3, gh = big ? 7 : 5, msb = 1 << (gw - 1);
+  const font = f.g, gw = f.w, gh = f.h, msb = 1 << (gw - 1);
   // Glyph box in device pixels (nearest-neighbour scaled); gap = 1 source column.
   const bw = Math.max(1, Math.round(gw * kx)), bh = Math.max(1, Math.round(gh * ky)), gap = Math.max(1, Math.round(kx));
   const w = text.length * (bw + gap) - gap;
@@ -125,8 +136,8 @@ function drawDigits(text: string, xc: number, yBase: number, kx: number, ky: num
     }
   }
 }
-function digitRowColors(p: Params): Uint16Array {
-  const n = Math.max(1, Math.round((p.digitFontBig ? 7 : 5) * p.digitScaleY)), out = new Uint16Array(n);
+function digitRowColors(p: Params, gh: number, ky: number): Uint16Array {
+  const n = Math.max(1, Math.round(gh * ky)), out = new Uint16Array(n);
   const a = hexToRgb(p.digitColor), b = hexToRgb(p.digitColor2);
   for (let i = 0; i < n; i++) {
     // metallic: bright top, darker middle-low, slight kick back up at the very bottom
@@ -138,12 +149,16 @@ function digitRowColors(p: Params): Uint16Array {
 function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number, alpha: AlphaFn): void {
   const L = TUBE_LENGTH_PX, H = TUBE_HEIGHT_PX; void pal;
   const every = ticksN === 60 ? 5 : 1;
-  const rows = digitRowColors(p);
+  const f = FONTS[Math.max(0, Math.min(FONTS.length - 1, Math.round(p.digitFont)))];
+  const minutes = ticksN === 60;
+  const kx = minutes ? p.digitScaleXMin : p.digitScaleX, ky = minutes ? p.digitScaleYMin : p.digitScaleY;
+  const bottom = minutes ? p.digitBottomMin : p.digitBottom;
+  const rows = digitRowColors(p, f.h, ky);
   const shadow = p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness)) : -1;
   for (let i = every; i < ticksN; i += every) {
     const x = Math.round((i * L) / ticksN);
     const t = ticksN === 60 && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
-    drawDigits(t, x, y0 + H - 1 - p.digitBottom, p.digitScaleX, p.digitScaleY, p.digitFontBig, rows, shadow, alpha);
+    drawDigits(t, x, y0 + H - 1 - bottom, kx, ky, f, rows, shadow, alpha);
   }
 }
 

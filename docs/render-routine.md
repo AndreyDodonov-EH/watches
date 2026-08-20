@@ -37,8 +37,8 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
    (`rows[hiTop+highlightH+1]`) linearly so the highlight does not touch the meniscus / end cap.
 4b. **Ticks + digits**: `N = 12` (hours) or `60` (minutes). Ticks: for `i in 1..N-1`, `x = round(i*L/N)`,
    height `tickMajorH` when `i % (N==60 ? 5 : 3) == 0` else `tickMinorH`, drawn from the top row down and the
-   bottom row up. Digits: 3×5 font (`FONT3x5`) or 5×7 (`FONT5x7`, `digitFontBig`), scaled to a `round(gw*digitScaleX)` × `round(gh*digitScaleY)` box by nearest-neighbour (`src = floor(dst*g/box)`), centred on the major-tick x (hours 1..11,
-   minutes 05..55), baseline `y0+H-1-digitBottom`, glyph rows coloured by a `digitColor→digitColor2` gradient,
+   bottom row up. Digits: font `FONTS[digitFont]` (3×5, 4×6, 5×7 round, 5×7 seven-segment, 6×8 bold), scaled to a `round(gw*digitScaleX)` × `round(gh*digitScaleY)` box by nearest-neighbour (`src = floor(dst*g/box)`), centred on the major-tick x (hours 1..11,
+   minutes 05..55), baseline `y0+H-1-digitBottom` (minutes tube uses `digitScaleXMin/YMin/digitBottomMin`), glyph rows coloured by a `digitColor→digitColor2` gradient,
    optional 1 px `digitShadowColor` copy offset (+1,+1) drawn first. Every pixel of both is written with
    opacity `a`: `a = 1` outside the liquid (`x >= edge(ry)`), `a = liquidTransparency` inside
    (`digitsOnTop` forces `a = 1` for digits). `pixel = blend(existing, colour, a)`.

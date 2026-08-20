@@ -49,6 +49,9 @@
   "digitShadowColor": "#101010",
   "liquidTransparency": 0.45,
   "digitScaleX": 2,
-  "digitScaleY": 1,
-  "digitFontBig": false
+  "digitScaleY": 1.5,
+  "digitFont": 2,
+  "digitScaleXMin": 1.5,
+  "digitScaleYMin": 1.25,
+  "digitBottomMin": 2
 }

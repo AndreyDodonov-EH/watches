@@ -42,10 +42,13 @@ export interface Params {
   digitColor2: string;   // bottom of glyph (vertical gradient → metallic look; set equal for flat)
   digitShadow: boolean;  // 1 px darker copy offset down-right (emboss)
   digitShadowColor: string;
-  digitScaleX: number;   // horizontal scale (0.5..6, fractional OK — nearest-neighbour)
-  digitScaleY: number;   // vertical scale (0.5..6) — keep lower than X to counter the vial's vertical stretch
-  digitFontBig: boolean; // false = 3x5 font, true = 5x7 font (rounder, better at large scales)
-  digitBottom: number;   // px from the tube's bottom edge to the digit baseline
+  digitFont: number;     // 0 = 3x5, 1 = 4x6 narrow, 2 = 5x7 round, 3 = 5x7 seven-segment, 4 = 6x8 bold
+  digitScaleX: number;   // hours tube: horizontal scale (0.5..6, fractional OK — nearest-neighbour)
+  digitScaleY: number;   // hours tube: vertical scale — keep lower than X to counter the vial's vertical stretch
+  digitScaleXMin: number; // minutes tube
+  digitScaleYMin: number;
+  digitBottomMin: number; // minutes tube baseline (px from bottom edge)
+  digitBottom: number;   // hours tube: px from the tube's bottom edge to the digit baseline
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
@@ -99,9 +102,12 @@ export const DEFAULT_PARAMS: Params = {
   digitColor2: '#4a4a4a',
   digitShadow: true,
   digitShadowColor: '#101010',
+  digitFont: 2,
   digitScaleX: 2,
-  digitScaleY: 1,
-  digitFontBig: false,
+  digitScaleY: 1.5,
+  digitScaleXMin: 1.5,
+  digitScaleYMin: 1.25,
+  digitBottomMin: 2,
   digitBottom: 2,
   digitsOnTop: false,
   liquidTransparency: 0.45,
@@ -172,9 +178,12 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   tickMinorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
   digits: { group: 'Digits' }, digitColor: { group: 'Digits' }, digitColor2: { group: 'Digits' },
   digitShadow: { group: 'Digits' }, digitShadowColor: { group: 'Digits' },
+  digitFont: { group: 'Digits', min: 0, max: 4, step: 1 },
   digitScaleX: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
   digitScaleY: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
-  digitFontBig: { group: 'Digits' },
+  digitScaleXMin: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
+  digitScaleYMin: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
+  digitBottomMin: { group: 'Digits', min: 0, max: 40, step: 1 },
   digitBottom: { group: 'Digits', min: 0, max: 40, step: 1 },
   digitsOnTop: { group: 'Digits' }, digitsLeadingZero: { group: 'Digits' },
   liquidTransparency: { group: 'Shape', min: 0, max: 1, step: 0.01 },
