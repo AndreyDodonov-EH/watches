@@ -42,8 +42,8 @@ export interface Params {
   digitColor2: string;   // bottom of glyph (vertical gradient → metallic look; set equal for flat)
   digitShadow: boolean;  // 1 px darker copy offset down-right (emboss)
   digitShadowColor: string;
-  digitScaleX: number;   // horizontal pixel multiplier (1..4)
-  digitScaleY: number;   // vertical pixel multiplier (1..4) — keep lower than X to counter the vial's vertical stretch
+  digitScaleX: number;   // horizontal scale (0.5..6, fractional OK — nearest-neighbour)
+  digitScaleY: number;   // vertical scale (0.5..6) — keep lower than X to counter the vial's vertical stretch
   digitFontBig: boolean; // false = 3x5 font, true = 5x7 font (rounder, better at large scales)
   digitBottom: number;   // px from the tube's bottom edge to the digit baseline
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
@@ -172,8 +172,8 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   tickMinorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
   digits: { group: 'Digits' }, digitColor: { group: 'Digits' }, digitColor2: { group: 'Digits' },
   digitShadow: { group: 'Digits' }, digitShadowColor: { group: 'Digits' },
-  digitScaleX: { group: 'Digits', min: 1, max: 4, step: 1 },
-  digitScaleY: { group: 'Digits', min: 1, max: 4, step: 1 },
+  digitScaleX: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
+  digitScaleY: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
   digitFontBig: { group: 'Digits' },
   digitBottom: { group: 'Digits', min: 0, max: 40, step: 1 },
   digitsOnTop: { group: 'Digits' }, digitsLeadingZero: { group: 'Digits' },

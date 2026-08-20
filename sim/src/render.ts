@@ -104,24 +104,29 @@ type AlphaFn = (x: number, y: number) => number;
 function drawDigits(text: string, xc: number, yBase: number, kx: number, ky: number, big: boolean,
   rowColors: Uint16Array, shadow: number, alpha: AlphaFn): void {
   const font = big ? FONT5x7 : FONT3x5, gw = big ? 5 : 3, gh = big ? 7 : 5, msb = 1 << (gw - 1);
-  const w = text.length * (gw + 1) * kx - kx;  // glyph + 1 px gap
+  // Glyph box in device pixels (nearest-neighbour scaled); gap = 1 source column.
+  const bw = Math.max(1, Math.round(gw * kx)), bh = Math.max(1, Math.round(gh * ky)), gap = Math.max(1, Math.round(kx));
+  const w = text.length * (bw + gap) - gap;
   const x0 = Math.round(xc - w / 2);
-  const yTop = yBase - gh * ky + 1;
-  // rowColors has gh*ky entries (one per glyph pixel-row) → metallic vertical gradient; shadow < 0 = none
+  const yTop = yBase - bh + 1;
   for (let pass = shadow >= 0 ? 0 : 1; pass < 2; pass++) {
     const off = pass === 0 ? 1 : 0;
     let x = x0;
     for (const ch of text) {
-      const g = font[ch.charCodeAt(0) - 48]; if (!g) { x += (gw + 1) * kx; continue; }
-      for (let r = 0; r < gh; r++) for (let col = 0; col < gw; col++) if (g[r] & (msb >> col))
-        for (let dy = 0; dy < ky; dy++) for (let dx = 0; dx < kx; dx++)
-          { const xx = x + col * kx + dx + off, yy = yTop + r * ky + dy + off; pxa(xx, yy, pass === 0 ? shadow : rowColors[r * ky + dy], alpha(xx, yy)); }
-      x += (gw + 1) * kx;
+      const g = font[ch.charCodeAt(0) - 48]; if (!g) { x += bw + gap; continue; }
+      for (let dy = 0; dy < bh; dy++) {
+        const r = Math.min(gh - 1, Math.floor((dy * gh) / bh)), row = g[r];
+        for (let dx = 0; dx < bw; dx++) {
+          const col = Math.min(gw - 1, Math.floor((dx * gw) / bw));
+          if (row & (msb >> col)) { const xx = x + dx + off, yy = yTop + dy + off; pxa(xx, yy, pass === 0 ? shadow : rowColors[dy], alpha(xx, yy)); }
+        }
+      }
+      x += bw + gap;
     }
   }
 }
 function digitRowColors(p: Params): Uint16Array {
-  const n = (p.digitFontBig ? 7 : 5) * Math.round(p.digitScaleY), out = new Uint16Array(n);
+  const n = Math.max(1, Math.round((p.digitFontBig ? 7 : 5) * p.digitScaleY)), out = new Uint16Array(n);
   const a = hexToRgb(p.digitColor), b = hexToRgb(p.digitColor2);
   for (let i = 0; i < n; i++) {
     // metallic: bright top, darker middle-low, slight kick back up at the very bottom
@@ -138,7 +143,7 @@ function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number, alp
   for (let i = every; i < ticksN; i += every) {
     const x = Math.round((i * L) / ticksN);
     const t = ticksN === 60 && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
-    drawDigits(t, x, y0 + H - 1 - p.digitBottom, Math.round(p.digitScaleX), Math.round(p.digitScaleY), p.digitFontBig, rows, shadow, alpha);
+    drawDigits(t, x, y0 + H - 1 - p.digitBottom, p.digitScaleX, p.digitScaleY, p.digitFontBig, rows, shadow, alpha);
   }
 }
 
