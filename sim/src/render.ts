@@ -111,6 +111,74 @@ const FONT_6x8B: Font = { name: '6x8 bold', w: 6, h: 8, g: [
   [0b011110,0b110000,0b110000,0b111110,0b110011,0b110011,0b110011,0b011110], [0b111111,0b000011,0b000110,0b001100,0b011000,0b011000,0b011000,0b011000],
   [0b011110,0b110011,0b110011,0b011110,0b110011,0b110011,0b110011,0b011110], [0b011110,0b110011,0b110011,0b011111,0b000011,0b000011,0b000011,0b011110] ] };
 export const FONTS: Font[] = [FONT_3x5, FONT_4x6, FONT_5x7, FONT_7SEG, FONT_6x8B];
+export const SPRITE_FONT = FONTS.length; // digitFont value that selects the image-based glyphs
+
+/** Image-based glyph sheet (AI-generated metal digits, see tools/make-digit-sprites.py).
+ *  Firmware equivalent: one pre-scaled RGB565+A8 table per tube size, generated offline. */
+export interface SpriteSheet { cellW: number; cellH: number; widths: number[]; data: Uint8ClampedArray; w: number; h: number; }
+interface ScaledGlyph { w: number; h: number; c: Uint16Array; a: Uint8Array; } // a = 0..255 coverage
+/** Sheet names in digitFont order starting at SPRITE_FONT (files live in public/assets/<name>.png[.json]). */
+export const SPRITE_SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge'];
+const sprites: (SpriteSheet | null)[] = SPRITE_SHEETS.map(() => null);
+const scaledCache = new Map<string, ScaledGlyph[]>();
+export function loadSprites(base: string): void {
+  SPRITE_SHEETS.forEach((n, i) => loadSprite(base + n + '.png').then(sh => { sprites[i] = sh; scaledCache.clear(); })
+    .catch(e => console.warn('digit sprite not loaded', n, e)));
+}
+function loadSprite(url: string): Promise<SpriteSheet> {
+  return Promise.all([
+    fetch(url + '.json').then(r => r.json()),
+    new Promise<HTMLImageElement>((ok, err) => { const im = new Image(); im.onload = () => ok(im); im.onerror = err; im.src = url; }),
+  ]).then(([meta, im]) => {
+    const cv = document.createElement('canvas'); cv.width = im.width; cv.height = im.height;
+    const ctx = cv.getContext('2d')!; ctx.drawImage(im, 0, 0);
+    return { cellW: meta.cellW, cellH: meta.cellH, widths: meta.widths, data: ctx.getImageData(0, 0, im.width, im.height).data, w: im.width, h: im.height };
+  });
+}
+/** Box-filter the sheet glyph d into bw x bh device pixels (once per size; firmware ships the result). */
+function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number, tint: [number, number, number], tintAmt: number): ScaledGlyph[] | null {
+  const sprite = sprites[sheet]; if (!sprite) return null;
+  const key = `${sheet}:${bw}x${bh}@${brightness}/${tint}/${tintAmt}`; const hit = scaledCache.get(key); if (hit) return hit;
+  const out: ScaledGlyph[] = [];
+  // tint = multiply by colour (greyscale sheets become bronze/gold/etc.), blended by tintAmt
+  const tm = (v: number, ch: number) => v * (1 - tintAmt) + v * (tint[ch] / 255) * tintAmt;
+  const sy = bh / sprite.cellH;
+  for (let d = 0; d < 10; d++) {
+    const gw = Math.max(1, Math.round(sprite.widths[d] * bw / sprite.cellW));
+    const sx = gw / sprite.cellW, cx0 = d * sprite.cellW + (sprite.cellW - sprite.widths[d]) / 2;
+    const c = new Uint16Array(gw * bh), a = new Uint8Array(gw * bh);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < gw; x++) {
+      const X0 = Math.floor(cx0 + x / sx), X1 = Math.max(X0 + 1, Math.floor(cx0 + (x + 1) / sx));
+      const Y0 = Math.floor(y / sy), Y1 = Math.max(Y0 + 1, Math.floor((y + 1) / sy));
+      let r = 0, g = 0, b = 0, al = 0, n = 0;
+      for (let Y = Y0; Y < Y1; Y++) for (let X = X0; X < X1; X++) {
+        const i = (Y * sprite.w + X) * 4, pa = sprite.data[i + 3];
+        r += sprite.data[i] * pa; g += sprite.data[i + 1] * pa; b += sprite.data[i + 2] * pa; al += pa; n++;
+      }
+      const k = y * gw + x;
+      if (al > 0) { c[k] = q(scale([tm(r / al, 0), tm(g / al, 1), tm(b / al, 2)], brightness)); a[k] = Math.round(al / n); }
+    }
+    out.push({ w: gw, h: bh, c, a });
+  }
+  scaledCache.set(key, out);
+  return out;
+}
+function drawSpriteDigits(text: string, xc: number, yBase: number, bw: number, bh: number, p: Params, alpha: AlphaFn): boolean {
+  const gl = scaledGlyphs(Math.round(p.digitFont) - SPRITE_FONT, bw, bh, p.brightness, hexToRgb(p.digitTint), p.digitTintAmount); if (!gl) return false;
+  const gap = Math.max(1, Math.round(bw / 5));
+  let w = -gap; for (const ch of text) w += (gl[ch.charCodeAt(0) - 48]?.w ?? bw) + gap;
+  let x = Math.round(xc - w / 2); const yTop = yBase - bh + 1;
+  for (const ch of text) {
+    const g = gl[ch.charCodeAt(0) - 48]; if (!g) { x += bw + gap; continue; }
+    for (let dy = 0; dy < g.h; dy++) for (let dx = 0; dx < g.w; dx++) {
+      const a = g.a[dy * g.w + dx]; if (!a) continue;
+      const xx = x + dx, yy = yTop + dy;
+      pxa(xx, yy, g.c[dy * g.w + dx], (a / 255) * alpha(xx, yy));
+    }
+    x += g.w + gap;
+  }
+  return true;
+}
 type AlphaFn = (x: number, y: number) => number;
 function drawDigits(text: string, xc: number, yBase: number, kx: number, ky: number, f: Font,
   rowColors: Uint16Array, shadow: number, alpha: AlphaFn): void {
@@ -149,7 +217,8 @@ function digitRowColors(p: Params, gh: number, ky: number): Uint16Array {
 function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number, alpha: AlphaFn): void {
   const L = TUBE_LENGTH_PX, H = TUBE_HEIGHT_PX; void pal;
   const every = Math.max(1, Math.round(ticksN === 60 ? p.digitMinuteStep : p.digitHourStep));
-  const f = FONTS[Math.max(0, Math.min(FONTS.length - 1, Math.round(p.digitFont)))];
+  const fontIdx = Math.round(p.digitFont), useSprite = fontIdx >= SPRITE_FONT;
+  const f = FONTS[Math.max(0, Math.min(FONTS.length - 1, fontIdx))];
   const minutes = ticksN === 60;
   const kx = minutes ? p.digitScaleXMin : p.digitScaleX, ky = minutes ? p.digitScaleYMin : p.digitScaleY;
   const bottom = minutes ? p.digitBottomMin : p.digitBottom;
@@ -158,7 +227,10 @@ function drawTubeDigits(y0: number, p: Params, pal: Palette, ticksN: number, alp
   for (let i = every; i < ticksN; i += every) {
     const x = Math.round((i * L) / ticksN);
     const t = ticksN === 60 && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
-    drawDigits(t, x, y0 + H - 1 - bottom, kx, ky, f, rows, shadow, alpha);
+    const yb = y0 + H - 1 - bottom;
+    // sprite box uses the same nominal 5x7 em as the bitmap fonts so the scale sliders mean the same thing
+    if (useSprite && drawSpriteDigits(t, x, yb, Math.max(1, Math.round(5 * kx)), Math.max(1, Math.round(7 * ky)), p, alpha)) continue;
+    drawDigits(t, x, yb, kx, ky, f, rows, shadow, alpha);
   }
 }
 

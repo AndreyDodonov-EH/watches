@@ -1,6 +1,8 @@
 # Liquid Watch — Parts Sourcing (prototype cuff)
 
-Date: 2026-08-20. Prices approximate, incl. VAT where known. AliExpress item pages can't be scraped, so AliExpress entries give the item ID / exact search phrase instead of verified price.
+Date: 2026-08-20. **Board already in hand: non-touch SKU 28872, no headers — do not order.** Orientation per `hardware-handoff.md`: tubes run along the forearm, so the 57.5 mm board lies **across** the band → cuff must be **≥ 65 mm wide** (board 57.5 + ≥3.5 mm leather each side). Sections 2/B below were first written for a 50 mm cuff; the ≥65 mm picks are in the Verified section.
+
+Prices approximate, incl. VAT where known. AliExpress item pages can't be scraped, so AliExpress entries give the item ID / exact search phrase instead of verified price.
 
 ## 0. Board facts (verified from Waveshare dimension drawing)
 
@@ -22,6 +24,70 @@ Two tube slots of 44 × 6 mm with a 4 mm gap = 16 mm tall → fits inside the 19
 
 ---
 
+## ✅ Verified picks — ready to order (checked live 2026-08-20, EU/DE shipping)
+
+Every link below was fetched and showed the product with price on 2026-08-20. Amazon.de / eBay.de / Etsy / AliExpress blocked automated checks, so entries from those shops further down are *unverified*.
+
+### Basket A — acrylhaus.com (optics, one order, in stock, 1–3 days DE)
+
+| Qty | Item | URL | Price |
+|---|---|---|---|
+| 1 | Halbrundstab Acrylglas XT transparent **Ø10 mm** (10 × 5), 1000 mm | https://acrylhaus.com/Halbrundstab-Acrylglas-XT-transparent-R-10mm-1000mm | €9.87 |
+| 1 | Halbrundstab Acrylglas XT transparent **Ø6 mm** (6 × 3), 1000 mm | https://acrylhaus.com/Halbrundstab-Acrylglas-XT-transparent-O-6mm-1000mm | €7.03 |
+| 1 | Rundstab Acrylglas XT transparent **Ø8 mm**, 1000 mm | https://acrylhaus.com/Rundstab-Acrylglas-XT-transparent-O-8mm-1000mm | €8.10 |
+| 1 | Acrylglasrohr XT Ø8/5 mm (1.5 mm wall), 1000 mm | https://acrylhaus.com/Acrylglasrohr-rund-XT-transparent-O-8-5mm-Aussen-Innen-1000mm | €5.96 |
+
+acrylhaus does **not** carry 8 × 4 half-round. The exact 8 × 4 profile is currently **out of stock** at both modellbau-profi.de (€11.60) and architekturbedarf.de (€7.58, https://www.architekturbedarf.de/kunststoffe/halbrundstaebe/acrylglas-xt-halbrundstab-_-80-mm — watch this one). UK fallback: Plastock 8 mm half-round £6.61 ex VAT / 2 m, min order £25, import customs. For the prototype the Ø10 and Ø6 half-rounds bracket the target; the Ø8 round rod can be sanded flat to 8 × ~5.
+
+Alt Ø8 round rod with free cut-to-length: dabenmo.de PLEXIGLAS Rundstab Ø8 €8.73 — https://www.dabenmo.de/PLEXIGLAS-Acrylglas-Rundstab-farblos-klar/SW10011.46
+
+### Basket B — leather (⚠ 50 mm picks below are too narrow for the across-band orientation; see **Basket B2 — ≥65 mm** for the valid ones)
+
+| Qty | Item | URL | Price |
+|---|---|---|---|
+| 1 | **lederriemen.com "Classic" Blankleder 5 cm, 2.9–3.4 mm, ~120 cm, dunkelbraun/cognac** (in stock) | https://lederriemen.com/Lederriemen-Blankleder-Classic-rotbraun-5cm-breit | €17.70 |
+| alt | lederriemen.com Blankleder natur, configurator 5 cm / 3.0–3.5 mm / 120 cm | https://lederriemen.com/Lederriemen-Blankleder-natur | from €5.50 |
+| alt | lederundhund.de Blankleder Riemen 50 mm, ~3 mm, 1.2 m, braun | https://www.lederundhund.de/p/blankleder-lederriemen-farbig-10mm-50mm-breit-1-2m-lang-ca-3mm-dick | €6.30 |
+| alt | leder-hobby.de Blankleder Riemen, 44/50 mm, 3.0–3.5 mm, cut to order | https://www.leder-hobby.de/Blankleder-Riemen | from €3.69 |
+
+No verified EU source for a **brown 50 mm ready-made snap cuff** — make it from the strip. (axymore.de has a 5.7 cm black one at €13.99: https://axymore.de/lederarmband-breit-in-schwarz-mit-druckknopfer.html ; leatherpunk.com US 2" brown $32.90.)
+
+### Basket C — tools & glue (schuhbedarf.de + one punch)
+
+| Qty | Item | URL | Price |
+|---|---|---|---|
+| 1 | Druckknopf 15 mm + Werkzeug, 10 pcs (silver; antique brass available) | https://schuhbedarf.de/metallwaren/druckknoepfe/druckknopf-15mm-mit-kugelkopf-verschluss-werkzeug-montageanleitung-silber.html | €3.99 |
+| 1 | Kövulfix Rekord 90 g contact cement | https://schuhbedarf.de/klebstoffe/klebstoff-tuben/koevulfix-rekord-schuhkleber-90g-profi-kontaktkleber-fuer-leder-reparaturen.html | €9.99 |
+| 1 | **Langlocheisen 10 × 6 mm** (Paffrath, DIN 7200, Made in Germany) | https://www.werkzeughandel-roeder.de/langlocheisen-10-x-6-mm | €36.25 |
+| alt | wupptool Langlocheisen 10 × 6 mm | https://www.wupptool.de/produkt/formlocheisen-kappenlocheisen-langlocheisen-10x6-mm | €40.22 |
+| pro | Osborne Line 24 setter €32.20 + Line 24 snaps 10 pcs €5.70 (leather up to 3.5 mm) | https://www.rickert-werkzeug.de/Osborne-Druckknopf-Einsetzwerkzeug/OSB-229-20M | €37.90 |
+
+A 6 mm slot punch is €36+ — for a one-off, drill/punch Ø6 holes at both slot ends and cut between with a knife + steel ruler instead (€0).
+
+### Basket D — battery (board already owned: non-touch SKU 28872, no headers)
+
+| Qty | Item | URL | Price |
+|---|---|---|---|
+| 1×2 | **batteryzone.de 502035 500 mAh MX1.25, 37 × 20 × 5 mm, 2 pcs, "positive"(standard) polarity** — DE shop but 10–18 business days (drop-shipped); protection PCB **not stated → ask seller** | https://batteryzone.de/products/2x3-7-v-500-mah-mx1-25-positiver-stecker-502035-digitale-hochtemperatur-polymer-lithium-batterie-fur-intelligente-gerate | €9.00 |
+| alt | same cell, **reversed** MX1.25 polarity variant (if the board turns out reversed) | https://batteryzone.de/products/2x3-7-v-500-mah-mx1-25-umgekehrter-stecker-502035-digitaler-hochtemperatur-polymer-lithium-akku-fur-intelligente-gerate | €9.00 |
+| alt | eckstein-shop.de LP503035 500 mAh **JST-PH 2.0**, with PCM, 5 mm thick — back-order to 31.08.2026; needs re-termination to a PicoBlade 1.25 pigtail | https://eckstein-shop.de/LiPo-Battery-Lithium-Ion-Polymer-Battery-37V-500mAh-with-JST-PHR-2-Connector-LP503035-EN | €5.19 |
+| ✗ | The Pi Hut PKCELL PicoBlade — **ships to England/Wales only**, drop it | — | — |
+
+**Polarity, now confirmed from the schematic** (https://files.waveshare.com/wiki/ESP32-S3-AMOLED-1.91/ESP32-S3-AMOLED-1.91.pdf): charger is a **PL4054**; BAT1 symbol pin 1 = BAT (+, also goes to PL4054 pin 3 and the 10k/1k divider → BAT_ADC on GPIO1), pin 2 = GND. The physical socket orientation is not drawn, so before plugging in: meter continuity from each socket pin to USB shell/GND — the pin **not** shorted to GND is +. Match to the battery's red wire; swap crimps if needed. Dimensions zip: https://files.waveshare.com/wiki/ESP32-S3-AMOLED-1.91/Esp32-s3-amoled-1_91-M.zip
+
+### Verified-basket total (one cuff)
+
+| | |
+|---|---|
+| Optics (acrylhaus, 4 items) | €31 |
+| Leather strip (lederriemen Classic) | €18 |
+| Snaps + glue (schuhbedarf) | €14 |
+| Slot punch (optional) | €36 |
+| Battery ×2 (batteryzone) | €9 |
+| **Total** | **≈ €72 without punch / €108 with**, plus shipping (~€15 across 4 shops) |
+
+---
+
 ## 1. Clear "vial" optics over the slots
 
 Best effect ranking: **half-round solid rod (1)** > full round rod, cut (2) > thin-wall tube, cut (3) > real spirit-level vial (4, but it hides the screen).
@@ -30,7 +96,7 @@ A solid half-round rod is a plano-convex cylinder lens: the flat face sits on th
 
 | # | Product / spec to search | Where | Price | Image | Why |
 |---|---|---|---|---|---|
-| 1a | **Acryl Halbrundstab 8 × 4 mm, XT glasklar, 1000 mm** | modellbau-profi.de — https://www.modellbau-profi.de/Werkstoffe-Halbzeug-Profile/Kunststoffe/Acrylglas/Acryl-Halbrundstab/Acryl-Halbrundstab-8mm-x-1000mm-XT-transparent-glasklar.htm?a=article&ProdNr=007572200830&p=12833 | €11.60 /m | https://www.modellbau-profi.de/modellprofi/prodpic/Acryl-Halbrundstab-8mm-x-1000mm-XT-transparent-glasklar-007572200830_b_0.JPG | Exactly the target profile; 1 m = 20 vials |
+| 1a | **Acryl Halbrundstab 8 × 4 mm, XT glasklar, 1000 mm** | modellbau-profi.de — https://www.modellbau-profi.de/Werkstoffe-Halbzeug-Profile/Kunststoffe/Acrylglas/Acryl-Halbrundstab/Acryl-Halbrundstab-8mm-x-1000mm-XT-transparent-glasklar.htm?a=article&ProdNr=007572200830&p=12833 | €11.60 /m | https://www.modellbau-profi.de/modellprofi/prodpic/Acryl-Halbrundstab-8mm-x-1000mm-XT-transparent-glasklar-007572200830_b_0.JPG | Exactly the target profile; 1 m = 20 vials. **Out of stock 2026-08-20** |
 | 1b | Half-round acrylic rod 6 mm / 8 mm, clear, 2000 mm | Plastock UK — https://www.plastock.co.uk/products/acrylic-extruded-clear-half-round-rod | £3.27 (6 mm) / £6.61 (8 mm) ex VAT | https://www.plastock.co.uk/cdn/shop/products/clear_acrylic_-_half_round.png | Cheapest; also 10 mm if a fatter lens is wanted |
 | 1c | Halbrundstab Acrylglas XT transparent, cut to length | acrylhaus.com — https://acrylhaus.com/Halbrundstab-aus-Acrylglas-XT-transparent ; architekturbedarf.de — https://www.architekturbedarf.de/kunststoffe/halbrundstaebe/1 | ~€5–12 | — | EU shops with Zuschnitt (cut-to-size) |
 | 1d | AliExpress search: `acrylic half round rod clear 8mm` / `semicircle acrylic strip transparent 8mm` | https://www.aliexpress.com/w/wholesale-acrylic-half-round-rod.html | ~€3–6 per 0.5–1 m | — | Slow shipping; sizes are sometimes 8 mm *height* not width—read listing |
@@ -47,7 +113,7 @@ Recommendation: 1a/1b (8 × 4 mm half-round, cut to 46–48 mm, flame- or sand-p
 
 ## 2. Leather for the cuff
 
-Target: veg-tan, 45–50 mm wide, 2.8–3.5 mm (7–9 oz), natural or dark brown. Wrist ~170 mm + snap overlap 25 mm → 200–220 mm per cuff.
+Target (updated): veg-tan, **65–80 mm wide** (board across the band), 2.8–3.5 mm (7–9 oz), natural or dark brown. Wrist ~170 mm + snap overlap 25 mm → 200–220 mm per cuff. The 45–50 mm entries below predate the orientation decision.
 
 | # | Product / spec | Where | Price | Why |
 |---|---|---|---|---|
@@ -80,7 +146,7 @@ Board space behind PCB ≈ 57 × 24 mm; keep cell ≤ 50 × 22 mm. Candidates (c
 
 | # | Product | Where | Price | Image | Note |
 |---|---|---|---|---|---|
-| 1 | **PKCELL 500 mAh 3.7 V LiPo, PicoBlade 1.25 mm (Molex 51021), 35 × 30 × 5 mm** | The Pi Hut — https://thepihut.com/products/500mah-3-7v-lipo-battery-1-25mm-picoblade-connector | £6 | https://thepihut.com/cdn/shop/files/500mah-3-7v-lipo-battery-1-25mm-picoblade-connector-pkcell-106602-1211901934.jpg | Ships EU; 30 mm wide is wider than the 24.5 mm board → protrudes 3 mm each side under the leather (acceptable) or pick #2 |
+| 1 | **PKCELL 500 mAh 3.7 V LiPo, PicoBlade 1.25 mm (Molex 51021), 35 × 30 × 5 mm** | The Pi Hut — https://thepihut.com/products/500mah-3-7v-lipo-battery-1-25mm-picoblade-connector | £6 | https://thepihut.com/cdn/shop/files/500mah-3-7v-lipo-battery-1-25mm-picoblade-connector-pkcell-106602-1211901934.jpg | **Does NOT ship outside England/Wales (lithium rule, checked 2026-08-20)**; 30 mm wide is wider than the 24.5 mm board → protrudes 3 mm each side under the leather (acceptable) or pick #2 |
 | 2 | **502035 / 502040 MX1.25 500 mAh** (5.0 × 20 × 35/40 mm) — AliExpress item 1005004361874420 (802035 MX1.25 5 pcs) or search `502040 MX1.25 battery 3.7V` | https://www.aliexpress.com/w/wholesale-mx1.25-battery.html ; batteryint.com 502035 MX1.25 https://batteryint.com/products/2x3-7-v-500-mah-mx1-25-positive-connector-502035-digital-high-temperature-polymer-lithium-battery-for-smart-devices | €3–6 each | — | 20 mm wide fits under the board; 5 mm thick |
 | 3 | **402535 / 402540 ~350–400 mAh, 4 mm thick**, JST 1.25 2-pin | AliExpress `402540 3.7V 1.25mm plug`; Amazon.de `3.7V 400mAh 402540 1.25mm` | €4–8 | — | Thinnest option; ~8–10 h at 40 mA avg AMOLED draw |
 | 4 | 503035 500 mAh with "JST 1.25 2-pin" (eBay 296066814451 / 185788773141; KBT on Amazon B0BJPPJ49D ships with PH1.25 + PH2.0 leads) | https://www.ebay.com/itm/296066814451 ; https://www.amazon.com/KBT-3-7V-500mAh-Li-Polymer-Battery/dp/B0BJPPJ49D | €6–12 | — | 5 × 30 × 35 mm |
@@ -129,11 +195,11 @@ Board space behind PCB ≈ 57 × 24 mm; keep cell ≤ 50 × 22 mm. Candidates (c
 
 ## Open questions for the user
 
-1. Touch or non-touch board? (Touch version has a slightly different outline / FPC; spec should say which.) Buy without headers?
-2. Confirm wrist circumference and desired cuff width (45 vs 50 mm) — drives leather width and whether the board's 24.5 mm + slots leave enough leather above/below.
-3. Rod profile preference: flush 6 mm half-round (subtle, ~1.2×) vs 8 × 4 mm (target) vs near-full Ø8 round (strong "vial" bulge)? I'd order 8 × 4 mm and Ø8 round and compare.
+1. ~~Board~~ — owned (non-touch 28872, no headers).
+2. Confirm wrist circumference and cuff width: 65 mm (minimum, 3.75 mm leather beside the board ends) vs 70–75 mm (comfortable margin, room for a stitched edge).
+3. Rod profile preference: 8 × 4 half-round is out of stock everywhere in DE — OK to prototype with Ø6 and Ø10 half-round + Ø8 round (all acrylhaus) and pick after seeing them?
 4. Should the rods' ends glow (light-pipe) or be masked black?
-5. Battery: accept 30 mm-wide PKCELL (easy EU purchase) or wait for 20 mm-wide 502040 from AliExpress?
+5. Battery: PKCELL/Pi Hut is out (UK-only shipping). batteryzone.de 502035 (20 mm wide, 10–18 days, PCM unconfirmed) vs eckstein JST-PH 503035 with PCM + re-terminate?
 6. Is a 3D-printed bezel acceptable (visible as a thin black frame in the slots) or must it be pure leather + acrylic?
 7. Is the slot gap (4 mm) leather or part of the bezel? If leather, 4 mm of 3 mm-thick leather between two 44 mm slots is fragile — consider 5 mm or bezel.
 8. Region for purchasing (EU vs Russia/CIS) — affects whether Amazon.de/Plastock or AliExpress/Ozon links should be primary.

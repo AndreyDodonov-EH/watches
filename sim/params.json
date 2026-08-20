@@ -72,5 +72,7 @@
   "tickMajorHeightM": 6,
   "tickColorM": "#303030",
   "tickMajorColorM": "#484848",
-  "tickPosM": 2
+  "tickPosM": 2,
+  "digitTint": "#cd7f32",
+  "digitTintAmount": 0
 }

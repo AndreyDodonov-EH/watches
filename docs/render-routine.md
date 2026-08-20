@@ -42,6 +42,13 @@ Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (
    optional 1 px `digitShadowColor` copy offset (+1,+1) drawn first. Every pixel of both is written with
    opacity `a`: `a = 1` outside the liquid (`x >= edge(ry)`), `a = liquidTransparency` inside
    (`digitsOnTop` forces `a = 1` for digits). `pixel = blend(existing, colour, a)`.
+   **Image digits** (`digitFont` ≥ 5: 5 steel, 6 brass steampunk, 7 copper gauge): glyphs come from a 64 px-high RGBA sheet
+   (`sim/public/assets/digits-*.png` + `.json` with per-glyph widths, produced from the AI sheets in `images/digits/` by
+   `sim/tools/make-digit-sprites.py`). The glyph box is the same nominal 5×7 em: `bw = round(5*scaleX)`, `bh = round(7*scaleY)`;
+   each glyph is box-filtered to `round(width_d * bw/cellW)` × `bh`, proportional spacing with gap `round(bw/5)`, optional
+   multiply-tint `digitTint` × `digitTintAmount` (turns the greyscale steel sheet bronze/gold), then `brightness`. Coverage `a_img`
+   (0..1) multiplies the liquid alpha above. **Firmware:** the box-filter runs offline — generate one `RGB565 + A8` table per
+   (sheet, hours box, minutes box) from `params.json` and blit it with the same `pxa()`; ~2-4 KB per table, no runtime scaling.
 5. **Fizz** (optional, `fizz`): `fizzCount` dots of size `fizzSize` px at (`fx = x*(xe-6)`, `fy`) drawn in
    `bubbleRim` colour (3×3+ get a `bubbleIn` centre); they drift up `fizzSpeed` px/s and wrap.
    Only drawn when inside the liquid (`fx < edgeX(fy) - 2`).

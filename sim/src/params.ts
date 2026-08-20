@@ -55,7 +55,9 @@ export interface Params {
   digitColor2: string;   // bottom of glyph (vertical gradient → metallic look; set equal for flat)
   digitShadow: boolean;  // 1 px darker copy offset down-right (emboss)
   digitShadowColor: string;
-  digitFont: number;     // 0 = 3x5, 1 = 4x6 narrow, 2 = 5x7 round, 3 = 5x7 seven-segment, 4 = 6x8 bold
+  digitTint: string;     // sprite fonts only: multiply colour (e.g. #cd7f32 bronze)
+  digitTintAmount: number; // 0 = untinted sheet, 1 = fully tinted
+  digitFont: number;     // 0 = 3x5, 1 = 4x6 narrow, 2 = 5x7 round, 3 = 5x7 seven-segment, 4 = 6x8 bold, 5 = steel sprite, 6 = brass steampunk sprite, 7 = copper gauge sprite (images)
   digitScaleX: number;   // hours tube: horizontal scale (0.5..6, fractional OK — nearest-neighbour)
   digitScaleY: number;   // hours tube: vertical scale — keep lower than X to counter the vial's vertical stretch
   digitScaleXMin: number; // minutes tube
@@ -122,6 +124,8 @@ export const DEFAULT_PARAMS: Params = {
   digitShadow: true,
   digitShadowColor: '#101010',
   digitFont: 2,
+  digitTint: '#cd7f32',
+  digitTintAmount: 0,
   digitScaleX: 2,
   digitScaleY: 1.5,
   digitScaleXMin: 1.5,
@@ -231,7 +235,9 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   liquidTransparency: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   // digits — shared
   digits: { group: 'Digits', label: 'show digits' },
-  digitFont: { group: 'Digits', label: 'font (0 3x5 · 1 4x6 · 2 5x7 · 3 7-seg · 4 6x8 bold)', min: 0, max: 4, step: 1 },
+  digitFont: { group: 'Digits', label: 'font (0 3x5 · 1 4x6 · 2 5x7 · 3 7-seg · 4 6x8 bold · images: 5 steel · 6 brass · 7 copper)', min: 0, max: 7, step: 1 },
+  digitTint: { group: 'Digits', label: 'image tint colour' },
+  digitTintAmount: { group: 'Digits', label: 'image tint amount', min: 0, max: 1, step: 0.05 },
   digitColor: { group: 'Digits', label: 'colour top' },
   digitColor2: { group: 'Digits', label: 'colour bottom' },
   digitShadow: { group: 'Digits', label: 'emboss shadow' },

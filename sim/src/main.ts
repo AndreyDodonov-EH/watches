@@ -2,9 +2,10 @@ import './style.css';
 import { PANEL_W, PANEL_H, HOURS_TUBE_Y, MINUTES_TUBE_Y, TUBE_HEIGHT_PX, BRIDGE_Y0, BRIDGE_Y1 } from '@spec/layout';
 import { DEFAULT_PARAMS, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, migrateParams, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
-import { renderFrame, blit, stepFizz, fb } from './render';
+import { renderFrame, blit, stepFizz, fb, loadSprites } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
 import { buildPanel } from './ui';
+loadSprites('assets/');
 import { SerialImu } from './serial';
 
 // ---------- state ----------
