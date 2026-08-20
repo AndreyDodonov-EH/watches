@@ -91,5 +91,22 @@ face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness,
   the highlight band, or are printed in front of it entirely (`ticksOnTop` / `digitsOnTop`). Contract in `docs/render-routine.md` step 4b.
 - URL params, applied on top of the restored session: `?fresh=1&preset=neon&t=10:09&along=0.3&across=0&settle=1&cuff=0&lens=0.6&lenscurve=1&lenssmooth=1&leather=black&grid=1&scale=3&demo=120&p.<key>=<v>`.
 - Parts sourcing research: `docs/parts-sourcing.md` (board is 57.5 × 24.5 mm; 8×4 mm acrylic half-round rod recommended).
+- **Pinned-liquid model + IMU hardening (2026-08-20, session 3)** — real accelerometer input no longer sends
+  the visuals crazy, and the liquid can never appear/disappear with motion: `serial.ts` normalises by a slow
+  gravity EMA (`GravityNorm`) instead of per-sample `|a|` (which amplified jerks 3-5×); `ImuFilter` clips tilt
+  at ±1.2 g and low-passes accel with two cascaded poles; `stepTube` hard-caps slosh at ±14 px and surface
+  angle at ±12° (`FILL_SLOSH_MAX_PX` / `ANGLE_HARD_MAX_DEG`, structural — params only tighten). Tilt now mostly
+  changes the *light*: `edgeLightGain` scales frontBright + edge glow via `TubeState.edgeLight`. Params **v3**:
+  migration drops stored physics/IMU tunings so the new soft defaults (fillSloshGain 6, angleTiltGain 5,
+  angleMax 8, accelLpHz 1.5 …) take effect even with autosave. Regression: `npm run check:imu`
+  (`sim/tools/replay-check.ts`) replays rest / wrist-wave / 3 g flicks / free-fall / ±90° / shake; worst edge
+  deviation 18.3 px (budget 31.2) at sustained ±90°. Follow-up same day: ALL input sources (manual
+  sliders/drag, flick, shake — injected as raw pre-filter values) now run through `ImuFilter`, so the
+  IMU-filter sliders are feelable in the browser without the board (drag = accel LP lag, flick/shake = gyro
+  HP/deadzone/clamp); per-frame readouts (`#imuraw`, slider outputs, fps, serial status) got fixed boxes +
+  fixed-format text so the control menus no longer twitch from reflow (root cause of the recurring Tilt-input twitch: fieldset's default `min-inline-size: min-content` let the variable-length raw-CSV line widen the box past `width: 340px` — now `min-inline-size: 0` + fixed-length raw text). A live **IMU scope** (canvas in the
+  Tilt-input fieldset, ~6 s window) plots raw vs filtered accel (grey/mint, ±1 g) and gyro (dim/bright blue,
+  ±gyroMax) — the liquid's response is deliberately tiny, so filter tuning is judged on the scope, not the
+  tube. Flick button = decaying ~150 ms raw gyro pulse (a single-sample kick died in the deadzone). Drop-end realism: `meniscusTiltGain` (tilt into the end bulges the meniscus, away flattens) and `meniscusAsym` (bottom-cling: mild at rest, gone when end-down — cap fills round, max when end-up — draining tail clings to the bottom wall), both driven by the smoothed `edgeLight` tilt, formula in docs/render-routine.md step 3.
 - Open: user sign-off on the look; final palette; leather texture asset (`sim/public/assets/leather-tile.jpg`,
   CSS falls back to procedural noise if missing).

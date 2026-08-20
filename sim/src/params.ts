@@ -15,11 +15,14 @@ export interface Params {
   shadeDepth: number;    // 0..1, how dark the bottom rows get (cylinder shading)
   meniscusDepth: number; // px, how far the liquid climbs the wall at top/bottom vs centre (>0 concave)
   meniscusPow: number;   // curve exponent (2 = parabola)
+  meniscusTiltGain: number; // 0..1: tilt into the end bulges the drop (deeper meniscus), away flattens it
+  meniscusAsym: number;  // 0..1: the bulge sags toward gravity (bottom wall extends, top retracts)
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
   frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
   edgeGlow: number;      // px, dim glow fading out past the fill edge (0 = off)
   glowStrength: number;  // 0..1 brightness of the glow at the edge
   cornerR: number;       // px, rounding of the column's left end (tube end cap)
+  edgeLightGain: number; // 0..1, how much along-tilt brightens (+) / dims (-) the fill-edge light
   // --- bubble ---
   bubble: boolean;
   bubbleW: number;       // px
@@ -101,7 +104,7 @@ export interface Params {
   digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
-export const PARAMS_VERSION = 2;
+export const PARAMS_VERSION = 3;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -115,11 +118,14 @@ export const DEFAULT_PARAMS: Params = {
   shadeDepth: 0.7,
   meniscusDepth: -8.5,
   meniscusPow: 1.6,
+  meniscusTiltGain: 0.35,
+  meniscusAsym: 0.3,
   edgeSoft: 2.7,
   frontBright: 32,
   edgeGlow: 25,
   glowStrength: 0.47,
   cornerR: 0,
+  edgeLightGain: 0.4,
   bubble: false,
   bubbleW: 14,
   bubbleH: 8,
@@ -153,20 +159,21 @@ export const DEFAULT_PARAMS: Params = {
   digitsLeadingZero: true,
   digitMinuteStep: 10,
   digitHourStep: 1,
+  // Pinned-liquid response (v3): the column barely moves; only the edge and the light react.
   fillK: 28,
-  fillDamp: 3.5,
-  fillSloshGain: 25,
+  fillDamp: 6,
+  fillSloshGain: 6,
   angleK: 35,
-  angleDamp: 4,
-  angleTiltGain: 20,
-  angleGyroGain: 0.03,
-  angleMax: 40,
-  acrossShiftGain: 6,
-  deadzone: 0.02,
-  accelLpHz: 3,
+  angleDamp: 7,
+  angleTiltGain: 5,
+  angleGyroGain: 0.02,
+  angleMax: 8,
+  acrossShiftGain: 4,
+  deadzone: 0.03,
+  accelLpHz: 1.5,
   gyroHpHz: 0.7,
-  gyroDeadzone: 10,
-  gyroMax: 400,
+  gyroDeadzone: 15,
+  gyroMax: 250,
   inputGain: 1,
   brightness: 1,
   liquidBright: 1,
@@ -214,6 +221,14 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
       if (typeof e === 'number' && typeof k === 'number') r[every] = e * k;
     }
   }
+  if (from < 3) {
+    // v3 re-modelled the liquid as capillary-pinned: hard caps in physics.ts plus much softer
+    // response defaults. Old physics/IMU tunings produced runaway visuals on real accelerometer
+    // input, so drop them and fall back to the new defaults instead of carrying them over.
+    for (const k of ['fillK', 'fillDamp', 'fillSloshGain', 'angleK', 'angleDamp', 'angleTiltGain',
+      'angleGyroGain', 'angleMax', 'acrossShiftGain', 'deadzone', 'accelLpHz', 'gyroHpHz',
+      'gyroDeadzone', 'gyroMax', 'inputGain']) delete r[k];
+  }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -232,11 +247,14 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   shadeDepth: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   meniscusDepth: { group: 'Shape', min: -12, max: 20, step: 0.5 },
   meniscusPow: { group: 'Shape', min: 1, max: 4, step: 0.1 },
+  meniscusTiltGain: { group: 'Shape', label: 'meniscus bulge vs tilt', min: 0, max: 1, step: 0.05 },
+  meniscusAsym: { group: 'Shape', label: 'meniscus bottom-cling (max end-up)', min: 0, max: 1, step: 0.05 },
   edgeSoft: { group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { group: 'Shape', min: 0, max: 40, step: 1 },
   edgeGlow: { group: 'Shape', min: 0, max: 40, step: 1 },
   glowStrength: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   cornerR: { group: 'Shape', min: 0, max: 36, step: 1 },
+  edgeLightGain: { group: 'Shape', label: 'edge light vs tilt', min: 0, max: 1, step: 0.05 },
   bubble: { group: 'Bubble' },
   bubbleW: { group: 'Bubble', min: 2, max: 40, step: 1 },
   bubbleH: { group: 'Bubble', min: 2, max: 30, step: 1 },
@@ -291,12 +309,12 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   digitBottomMin: { group: 'Digits · minutes', label: 'baseline from bottom', min: 0, max: 40, step: 1 },
   fillK: { group: 'Physics', min: 1, max: 400, step: 1 },
   fillDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },
-  fillSloshGain: { group: 'Physics', min: 0, max: 200, step: 1 },
+  fillSloshGain: { group: 'Physics', label: 'slosh px/g (capped 14)', min: 0, max: 14, step: 0.5 },
   angleK: { group: 'Physics', min: 1, max: 400, step: 1 },
   angleDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },
-  angleTiltGain: { group: 'Physics', min: 0, max: 90, step: 1 },
+  angleTiltGain: { group: 'Physics', label: 'tilt deg/g', min: 0, max: 12, step: 0.5 },
   angleGyroGain: { group: 'Physics', min: 0, max: 1, step: 0.005 },
-  angleMax: { group: 'Physics', min: 0, max: 80, step: 1 },
+  angleMax: { group: 'Physics', label: 'angle clamp (hard cap 12)', min: 0, max: 12, step: 1 },
   acrossShiftGain: { group: 'Physics', min: 0, max: 30, step: 0.5 },
   deadzone: { group: 'Physics', min: 0, max: 0.2, step: 0.005 },
   accelLpHz: { group: 'IMU filter', min: 0.2, max: 25, step: 0.1 },

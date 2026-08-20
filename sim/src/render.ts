@@ -332,19 +332,28 @@ export function stepFizz(p: Params, dt: number): void {
   }
 }
 
-/** Fill-edge x for tube-row `ry` (0..H-1), given edge centre `xe`, angle and meniscus. */
-export function edgeX(ry: number, xe: number, angleDeg: number, p: Params): number {
+/** Fill-edge x for tube-row `ry` (0..H-1), given edge centre `xe`, angle and meniscus.
+ *  `tilt` is the smoothed along-tilt (TubeState.edgeLight, -1..1) and reshapes the drop end:
+ *  end down (+) -> hydrostatic pressure fills the cap: deeper, rounder, symmetric bulge;
+ *  end up (-) -> the drop drains and flattens, and what remains clings to the BOTTOM wall
+ *  (a thin tail: bottom contact line extends, top retracts). At rest a mild bottom-cling
+ *  remains — liquid in a horizontal tube always sags onto the lower wall. */
+export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt = 0): number {
   const H = TUBE_HEIGHT_PX, yc = (H - 1) / 2;
   const d = (ry - yc) / yc;                  // -1..1
-  const tilt = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  const men = p.meniscusDepth * Math.pow(Math.abs(d), p.meniscusPow); // liquid climbs the wall
-  return xe + tilt + men;
+  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
+  const asymEff = p.meniscusAsym * Math.max(0, Math.min(1, 0.4 - 0.6 * tilt));
+  const depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
+  return xe + skew + depth * Math.pow(Math.abs(d), p.meniscusPow); // liquid climbs the wall
 }
 
 /** Draw one tube. y0 = top of tube in panel coords. */
 export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: Palette, ticksN: number): void {
   const H = TUBE_HEIGHT_PX, L = TUBE_LENGTH_PX;
   const xe = s.fillTarget * L + s.fillPos;   // edge centre
+  // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
+  // liquid into the right end brightens the cap glow, draining away from it dims it.
+  const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight);
   ensureFizz(idx, p);
 
   // Step 1: glass background (empty tube) — whole strip
@@ -354,7 +363,7 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
   // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
   const edges = new Float32Array(H);
   for (let ry = 0; ry < H; ry++) {
-    const ex = edgeX(ry, xe, s.angle, p);
+    const ex = edgeX(ry, xe, s.angle, p, s.edgeLight);
     edges[ry] = ex;
     let x0 = 0;
     if (p.cornerR > 0) { // rounded left end cap
@@ -375,11 +384,16 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
   // Step 3a: front brightening — last `frontBright` px before the edge lerp toward the highlight colour (per row).
   if (p.frontBright > 0) {
     const hiC = q(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright));
+    // Brighten RELATIVE to each row's shade (weight = row luma / max luma): the flat highlight
+    // colour would light up the dark bottom wall near the cap and read as the drop bulging
+    // along the bottom. Firmware: the weights fold into the per-row LUT.
+    const w = new Float32Array(H); let lmax = 1;
+    for (let ry = 0; ry < H; ry++) { w[ry] = luma(rgb565to888(pal.rows[ry])); lmax = Math.max(lmax, w[ry]); }
     for (let ry = 0; ry < H; ry++) {
-      const ex = edges[ry]; const xi = Math.floor(ex);
+      const ex = edges[ry]; const xi = Math.floor(ex); const rowK = w[ry] / lmax;
       for (let k = 1; k <= p.frontBright; k++) {
         const x = xi - k; if (x < 0) break;
-        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(pal.rows[ry], hiC, t * t * 0.85));
+        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(pal.rows[ry], hiC, Math.min(1, t * t * 0.85 * lightK * rowK)));
       }
     }
   }
@@ -389,7 +403,7 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
     for (let ry = 0; ry < H; ry++) {
       const ex = edges[ry]; const xs = Math.ceil(ex + (p.edgeSoft > 0 ? Math.round(p.edgeSoft) : 0));
       for (let k = 0; k < p.edgeGlow; k++) {
-        const t = (1 - k / p.edgeGlow); const c = blend565(pal.glass, pal.rows[ry], t * t * p.glowStrength);
+        const t = (1 - k / p.edgeGlow); const c = blend565(pal.glass, pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK));
         if (xs + k < L) px(xs + k, y0 + ry, c);
       }
     }
@@ -426,7 +440,7 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
   // Step 5: fizz dots (inside liquid only)
   if (p.fizz) for (const f of fizz[idx]) {
     const fx = Math.round(f.x * (xe - 6)), fy = Math.round(f.y);
-    if (fx < 2 || fx >= edgeX(fy, xe, s.angle, p) - 2) continue;
+    if (fx < 2 || fx >= edgeX(fy, xe, s.angle, p, s.edgeLight) - 2) continue;
     const c = pal.bubbleRim;
     for (let dy = 0; dy < p.fizzSize; dy++) for (let dx = 0; dx < p.fizzSize; dx++) {
       const inner = p.fizzSize >= 3 && dx > 0 && dy > 0 && dx < p.fizzSize - 1 && dy < p.fizzSize - 1;

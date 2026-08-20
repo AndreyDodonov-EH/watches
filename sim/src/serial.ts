@@ -1,7 +1,7 @@
 // Web Serial bridge to the board's `i` IMU stream (t_ms,ax,ay,az,gx,gy,gz at 50 Hz).
 // Chrome/Edge only. Maps IMU axes to tube frame using spec/layout IMU_* constants.
 import { IMU_AXIS_ALONG_TUBE, IMU_ALONG_TUBE_SIGN, IMU_AXIS_ACROSS_TUBE, IMU_ACROSS_TUBE_SIGN } from '@spec/layout';
-import type { TiltInput } from './physics';
+import { GravityNorm, type TiltInput } from './physics';
 
 export class SerialImu {
   port: any = null;
@@ -9,6 +9,7 @@ export class SerialImu {
   last: TiltInput = { along: 0, across: 0, gyroAlong: 0, gyroAcross: 0 };
   raw = '';
   connected = false;
+  private norm = new GravityNorm();
   onStatus: (s: string) => void = () => {};
 
   get supported(): boolean { return 'serial' in navigator; }
@@ -60,7 +61,9 @@ export class SerialImu {
     const f = line.split(',').map(Number);
     if (f.length < 7 || f.some(Number.isNaN)) return;
     const a = [f[1], f[2], f[3]], g = [f[4], f[5], f[6]];
-    const n = Math.hypot(a[0], a[1], a[2]) || 1;  // normalise (board reads ~0.94 g)
+    // Normalise by the slow-tracked gravity magnitude (board reads ~0.94 g), NOT by this
+    // sample's |a| — instantaneous |a| collapses during jerks and would amplify transients.
+    const n = this.norm.update(Math.hypot(a[0], a[1], a[2]));
     this.last = {
       along: (IMU_ALONG_TUBE_SIGN * a[IMU_AXIS_ALONG_TUBE]) / n,
       across: (IMU_ACROSS_TUBE_SIGN * a[IMU_AXIS_ACROSS_TUBE]) / n,

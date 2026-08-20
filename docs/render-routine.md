@@ -19,19 +19,29 @@ LUT. Colours are RGB565; blends happen only on a handful of edge pixels per row 
    by ≥1 px or just index `rows[ry - shift]`.)
 
 ## Per frame, per tube (`y0` = 24 for hours, 144 for minutes; `L=536`, `H=72`)
-Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (deg), `acrossShift` (px).
+Inputs from physics: `fillTarget` (0..1), `fillPos` (px slosh offset), `angle` (deg), `acrossShift` (px),
+`edgeLight` (-1..1 slow along-tilt follower).
 `xe = fillTarget*L + fillPos` is the fill-edge centre.
 
 1. **Background**: fill rows `y0..y0+H-1`, x `0..L` with `glass` (pure black by default).
 2. _(ticks and digits moved to step 4b — they are drawn after the column so they can show through it)_
 3. **Column**: for each row `ry`:
-   - `edge = edgeX(ry)`:  `yc = 35.5`, `d = (ry-yc)/yc`,
-     `edge = xe + tan(angle)*(ry-yc) + meniscusDepth * |d|^meniscusPow`.
+   - `edge = edgeX(ry)`:  `yc = 35.5`, `d = (ry-yc)/yc`, `t = edgeLight` (smoothed along-tilt, -1..1),
+     `asymEff = meniscusAsym * clamp(0.4 - 0.6*t, 0, 1)`,
+     `depth = meniscusDepth * (1 + meniscusTiltGain*t) * (1 - asymEff*d)`,
+     `edge = xe + tan(angle)*(ry-yc) + depth * |d|^meniscusPow`.
+     Tilt reshapes the drop end: end down (+t) -> pressure fills the cap into a deeper, rounder,
+     symmetric bulge; end up (-t) -> the drop drains/flattens and the remainder clings to the bottom
+     wall (thin tail); at rest a mild bottom-cling remains (liquid always sags onto the lower wall).
+     The front brightening is weighted by `luma(rows[ry])/max` so the dark bottom wall stays dark
+     near the cap (otherwise the light reads as a false bottom bulge).
    - left cap `x0 = 0` (or circle cut if `cornerR > 0`).
    - `hspan(y0+ry, x0, floor(edge), rows[ry])`.
    - Edge AA (`edgeSoft` px): pixel `floor(edge)+k` = `blend(glass, rows[ry], frac-k)`.
-   - **Front brightening** (`frontBright` px before the edge): pixel `xi-k` = `blend(rows[ry], hi, (1-k/frontBright)^2 * 0.85)`.
-   - **Glow** (`edgeGlow` px after the edge): pixel `k` = `blend(glass, rows[ry], (1-k/edgeGlow)^2 * glowStrength)`.
+   - **Front brightening** (`frontBright` px before the edge): pixel `xi-k` = `blend(rows[ry], hi, min(1, (1-k/frontBright)^2 * 0.85 * lightK))`.
+   - **Glow** (`edgeGlow` px after the edge): pixel `k` = `blend(glass, rows[ry], min(1, (1-k/edgeGlow)^2 * glowStrength * lightK))`.
+   - `lightK = max(0.25, 1 + edgeLightGain * edgeLight)` — tilt changes the LIGHT at the edge, not the
+     column: gravity pressing the liquid into the right end brightens the cap, draining away dims it.
 4. **Highlight inset** (rows of the highlight band only): over the last `highlightInset` px before the edge and
    the first `highlightInset` px from the left, blend the highlight row colour toward the body colour
    (`rows[hiTop+highlightH+1]`) linearly so the highlight does not touch the meniscus / end cap.
@@ -98,14 +108,25 @@ Nothing is ever drawn in `y 96..143` (bridge) or outside the tube strips; the fu
 first, the dirty-strip path only pushes rows `24..95` and `144..215`.
 
 ## Physics (fixed 50 Hz, `stepTube`)
+The liquid is modelled as capillary-pinned in a thin sealed tube: tilt/shake only nudge the fill edge and
+the light, never relocate the column. **Hard caps** (constants in `physics.ts`, ported verbatim; params can
+tighten them, never widen): `FILL_SLOSH_MAX_PX = 14` on `|fillPos|` (rest offset AND integrated state, with
+outward velocity zeroed on clamp) and `ANGLE_HARD_MAX_DEG = 12` on `|angle|` (`aMax = min(angleMax, 12)`).
 Input per tube frame: `along` (g, + = right end down), `across` (g), `gyroAcross` (dps). Deadzone `deadzone` g.
-- fill slosh: `rest = along*fillSloshGain`; `a = -fillK*(fillPos-rest) - fillDamp*fillVel + gyroAcross*angleGyroGain*4`.
-- surface angle: `rest = clamp(along*angleTiltGain, ±angleMax)`;
-  `a = -angleK*(angle-rest) - angleDamp*angleVel + gyroAcross*angleGyroGain*10`; clamp to `±angleMax`.
+- fill slosh: `rest = clamp(along*fillSloshGain, ±14)`; `a = -fillK*(fillPos-rest) - fillDamp*fillVel + gyroAcross*angleGyroGain*4`; clamp pos to ±14.
+- surface angle: `rest = clamp(along*angleTiltGain, ±aMax)`;
+  `a = -angleK*(angle-rest) - angleDamp*angleVel + gyroAcross*angleGyroGain*10`; clamp to `±aMax`.
 - `acrossShift += (across*acrossShiftGain - acrossShift) * min(1, 8*dt)`.
+- `edgeLight += (clamp(along, ±1) - edgeLight) * min(1, 5*dt)` — feeds the render `lightK` (step 3).
 Semi-implicit Euler (`vel += a*dt; pos += vel*dt`).
 Fill targets: `hours = (h%12 + (m + s/60)/60)/12`, `minutes = (m + s/60)/60`.
-IMU conditioning (`ImuFilter`, before the springs): accel one-pole low-pass at `accelLpHz`
-(`a = 1-exp(-2π f dt)`); gyro one-pole high-pass at `gyroHpHz` (`k = rc/(rc+dt)`, `y = k(y_prev + x - x_prev)`)
-→ removes bias and slow rotation, then deadzone `gyroDeadzone` dps and clamp `±gyroMax`; all × `inputGain`.
-IMU → tube frame: `along = IMU_ALONG_TUBE_SIGN * a[IMU_AXIS_ALONG_TUBE] / |a|`, etc. (see `spec/layout.h`).
+IMU conditioning (`ImuFilter`, before the springs): tilt input clipped to ±1.2 g (a gravity direction can
+never exceed 1 g — the excess is linear acceleration); accel low-pass = **two cascaded** one-poles at
+`accelLpHz` (`a = 1-exp(-2π f dt)`, 12 dB/oct — one pole lets wrist-jerk spikes kick the springs); gyro
+one-pole high-pass at `gyroHpHz` (`k = rc/(rc+dt)`, `y = k(y_prev + x - x_prev)`) → removes bias and slow
+rotation, then deadzone `gyroDeadzone` dps and clamp `±gyroMax`; all × `inputGain`.
+IMU → tube frame: `along = IMU_ALONG_TUBE_SIGN * a[IMU_AXIS_ALONG_TUBE] / n`, etc. (see `spec/layout.h`),
+where `n` is **not** this sample's `|a|` but a slow EMA of it (`GravityNorm`, tau ≈ 2 s, floored at 0.5):
+instantaneous `|a|` collapses during jerks/free-fall and would amplify transients 3-5×.
+Regression: `cd sim && npm run check:imu` replays rest / wrist-wave / 3 g flick / free-fall / ±90° /
+shake traces through the exact pipeline and asserts the edge never strays past its budget.

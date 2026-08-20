@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:imu": "tsc tools/replay-check.ts --outDir node_modules/.cache/replay-check --module commonjs --target es2021 --moduleResolution node --esModuleInterop && node -e \"require('fs').writeFileSync('node_modules/.cache/replay-check/package.json','{}')\" && node node_modules/.cache/replay-check/tools/replay-check.js"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

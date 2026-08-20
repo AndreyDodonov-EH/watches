@@ -15,8 +15,14 @@ main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px
 #lensc { image-rendering: pixelated; }
 #gridc { pointer-events: none; }
 .controls { margin-top: 16px; display: flex; gap: 16px; flex-wrap: wrap; }
-fieldset { border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; width: 340px; flex: none; }
-.mono { font-family: monospace; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: clip; height: 1.4em; font-variant-numeric: tabular-nums; }
+fieldset { border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; width: 340px; flex: none; min-inline-size: 0; }
+.mono { font-family: monospace; font-size: 11px; color: var(--muted); white-space: pre; overflow: hidden; text-overflow: clip; height: 1.4em; font-variant-numeric: tabular-nums; }
+/* per-frame readouts get fixed boxes so changing text can never reflow the menus */
+#alongv, #acrossv { display: inline-block; width: 3.2em; text-align: right; font-family: monospace; font-variant-numeric: tabular-nums; }
+#fps { flex: none; width: 330px; white-space: pre; overflow: hidden; font-family: monospace; }
+/* serial status may carry long error text: clip it so it can never wrap/resize the fieldset */
+#serialst { display: inline-block; max-width: 10em; height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+#scope { width: 316px; height: 70px; background: #0d0d0d; border-radius: 3px; flex: none; }
 legend { color: var(--muted); padding: 0 4px; }
 fieldset label { display: flex; gap: 6px; align-items: center; }
 fieldset input[type=range] { flex: 1; }

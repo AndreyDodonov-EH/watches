@@ -64,6 +64,7 @@ app.innerHTML = `
         <label><input type="radio" name="src" value="device"> device orientation (phone)</label>
         <label><input type="radio" name="src" value="serial"> board via Web Serial <button id="serialbtn">connect</button> <span id="serialst"></span></label>
         <div id="imuraw" class="mono"></div>
+        <canvas id="scope" width="316" height="70"></canvas>
         <label>along <input type="range" id="along" min="-1" max="1" step="0.01" value="0"> <output id="alongv">0</output> g</label>
         <label>across <input type="range" id="across" min="-1" max="1" step="0.01" value="0"> <output id="acrossv">0</output> g</label>
         <button id="center">centre</button> <button id="flick">flick →</button> <button id="flickl">← flick</button> <button id="shake">shake</button>
@@ -227,6 +228,39 @@ function drawGrid() {
   g.fillText(`hours y=${HOURS_TUBE_Y}`, 4, HOURS_TUBE_Y - 3); g.fillText(`minutes y=${MINUTES_TUBE_Y}`, 4, MINUTES_TUBE_Y - 3); g.fillText('bridge (must stay black)', 4, BRIDGE_Y0 + 14);
 }
 
+// ---------- IMU scope: raw (dim) vs filtered (bright) accel + gyro, ~6 s window ----------
+// This is how you SEE the filter work: the liquid's response is deliberately tiny (pinned model),
+// so slider effects show up here long before they show up in the tube.
+const SCOPE_N = 316;
+const scope = { rawA: new Float32Array(SCOPE_N), fA: new Float32Array(SCOPE_N), rawG: new Float32Array(SCOPE_N), fG: new Float32Array(SCOPE_N), i: 0 };
+function scopePush(raw: TiltInput, filt: TiltInput): void {
+  scope.rawA[scope.i] = raw.along; scope.fA[scope.i] = filt.along;
+  scope.rawG[scope.i] = raw.gyroAcross; scope.fG[scope.i] = filt.gyroAcross;
+  scope.i = (scope.i + 1) % SCOPE_N;
+}
+const scopeCtx = (document.getElementById('scope') as HTMLCanvasElement).getContext('2d')!;
+function drawScope(): void {
+  const c = scopeCtx, W = SCOPE_N, laneH = 34;
+  c.fillStyle = '#0d0d0d'; c.fillRect(0, 0, W, 70);
+  const lane = (buf: Float32Array, yc: number, scale: number, color: string): void => {
+    c.strokeStyle = color; c.beginPath();
+    for (let x = 0; x < W; x++) {
+      const v = buf[(scope.i + x) % SCOPE_N];
+      const y = yc - Math.max(-laneH / 2 + 1, Math.min(laneH / 2 - 1, v * scale));
+      x === 0 ? c.moveTo(x, y) : c.lineTo(x, y);
+    }
+    c.stroke();
+  };
+  c.strokeStyle = '#222'; c.beginPath(); c.moveTo(0, 17.5); c.lineTo(W, 17.5); c.moveTo(0, 52.5); c.lineTo(W, 52.5); c.stroke();
+  c.fillStyle = '#333'; c.fillRect(0, 34, W, 1);
+  lane(scope.rawA, 17.5, 15, '#555');                      // accel lane: ±1 g full scale
+  lane(scope.fA, 17.5, 15, '#5dcaa5');
+  lane(scope.rawG, 52.5, 15 / Math.max(50, params.gyroMax), '#3a4a5a'); // gyro lane: ±gyroMax full scale
+  lane(scope.fG, 52.5, 15 / Math.max(50, params.gyroMax), '#7ab8ff');
+  c.fillStyle = '#666'; c.font = '8px monospace';
+  c.fillText('accel g (raw/filt)', 3, 8); c.fillText(`gyro dps ±${Math.round(Math.max(50, params.gyroMax))}`, 3, 43);
+}
+
 // ---------- loop: fixed-step physics, decoupled render ----------
 let acc = 0, last = performance.now(), frames = 0, fpsT = last;
 function currentDate(): Date {
@@ -235,18 +269,23 @@ function currentDate(): Date {
   return new Date(demoClock);
 }
 function physics(dt: number) {
-  // choose input
-  if (inputSource === 'manual') { input.along = manual.along; input.across = manual.across; input.gyroAcross = 0; imuFilter.reset(); }
-  else {
-    const raw = inputSource === 'device' ? { along: dev.along, across: dev.across, gyroAlong: 0, gyroAcross: dev.gyroAcross } : serial.last;
-    Object.assign(input, imuFilter.step(raw, params, dt));
-  }
+  // Every source — manual sliders included — goes through the SAME ImuFilter the firmware will
+  // run, so the IMU-filter sliders are feelable in the browser: drag the panel to feel the accel
+  // low-pass lag, flick/shake to feel the gyro high-pass, deadzone and clamp (both are injected
+  // as RAW input, before the filter).
+  const raw: TiltInput = inputSource === 'manual'
+    ? { along: manual.along, across: manual.across, gyroAlong: 0, gyroAcross: 0 }
+    : inputSource === 'device'
+      ? { along: dev.along, across: dev.across, gyroAlong: 0, gyroAcross: dev.gyroAcross }
+      : { ...serial.last };
   if (shakeT > 0) { // ~2.5 Hz wrist shake that dies out over SHAKE_T seconds
     shakeT -= dt; const env = Math.pow(shakeT / SHAKE_T, 1.5);
-    input.along += Math.sin((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 0.9 * env;
-    input.gyroAcross += Math.cos((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 120 * env;
+    raw.along += Math.sin((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 0.9 * env;
+    raw.gyroAcross += Math.cos((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 120 * env;
   }
-  if (kick !== 0) { input.gyroAcross += kick; kick = 0; }
+  if (kick !== 0) { raw.gyroAcross += kick; kick *= Math.exp(-dt / 0.06); if (Math.abs(kick) < 5) kick = 0; }
+  Object.assign(input, imuFilter.step(raw, params, dt));
+  scopePush(raw, input);
   if (timeMode === 'demo') demoClock += dt * 1000 * demoSpeed;
   const f = fillLevels(currentDate());
   hours.fillTarget = f.hours; minutes.fillTarget = f.minutes;
@@ -261,14 +300,17 @@ function frame(now: number) {
   renderFrame(hours, minutes, params);
   blit(img); fbctx.putImageData(img, 0, 0);
   if (overlay.enabled && overlay.lens > 0) { lensc.style.display = 'block'; drawLens(fbc, lensc, overlay); } else lensc.style.display = 'none';
+  drawScope();
   frames++;
   if (now - fpsT > 1000) {
-    $('fps').textContent = `${frames} fps · fill h=${hours.fillTarget.toFixed(3)} m=${minutes.fillTarget.toFixed(3)} · angle ${hours.angle.toFixed(1)}°`;
+    $('fps').textContent = `${String(frames).padStart(3)} fps · fill h=${hours.fillTarget.toFixed(3)} m=${minutes.fillTarget.toFixed(3)} · angle ${hours.angle.toFixed(1).padStart(5)}°`;
     frames = 0; fpsT = now;
   }
   const d = currentDate();
   $('clock').textContent = d.toTimeString().slice(0, 8);
-  $('imuraw').textContent = inputSource === 'manual' ? '' : `in: along ${input.along.toFixed(2)} across ${input.across.toFixed(2)} gyro ${input.gyroAcross.toFixed(0)}` + (serial.connected ? ` | raw ${serial.raw}` : '');
+  const f2 = (v: number) => (v < 0 ? '' : '+') + v.toFixed(2); // sign-stable width
+  $('imuraw').textContent = `filtered  along ${f2(input.along)}  across ${f2(input.across)}  gyro ${String(Math.round(input.gyroAcross)).padStart(5)}`
+    + (serial.connected ? ` | ${serial.raw}`.slice(0, 46).padEnd(46) : ''); // fixed length: never widens the box
 }
 requestAnimationFrame(frame);
 
