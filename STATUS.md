@@ -50,11 +50,12 @@ face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness,
 
 ## Open problems / to verify with the user (need eyes on the panel)
 - [x] Calibration face visible, centred lines OK (user confirmed 2026-08-20). Colour was blue → byte-order fixed.
-- [ ] Re-confirm after rotation fix: `h` face must read "<- LEFT (USB-C here?)" top-left with USB-C on the left.
+- [x] Orientation confirmed (USB-C left) and R/G/B swatch order correct (user, 2026-08-20).
 - [ ] USB-C side in the cuff: defaulting to LEFT (no cuff yet; flip with `-DUSB_LEFT=0` if that changes).
 - [ ] IMU axis mapping to tube length — needs the board tilted along the tube while streaming `i`.
       Not yet documented.
-- [ ] Colour check of #5DCAA5 on the AMOLED vs monitor (hello face shows R/G/B/liquid/highlight swatches).
+- [~] #5DCAA5 reads as mint/turquoise on the AMOLED — channel order verified correct, so this is the spec colour
+      itself. Final shade tuning deferred to Phase 2/3 (serial palette-nudge mode).
 
 ## Next step
 Phase 1 acceptance: photo of calibration face, tilt test for axis mapping → then Phase 2 (browser sim).
