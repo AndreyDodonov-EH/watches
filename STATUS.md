@@ -52,10 +52,12 @@ face, `f` fps benchmark, `i` toggle 50 Hz IMU CSV stream, `b<0-255>` brightness,
 - [x] Calibration face visible, centred lines OK (user confirmed 2026-08-20). Colour was blue → byte-order fixed.
 - [x] Orientation confirmed (USB-C left) and R/G/B swatch order correct (user, 2026-08-20).
 - [ ] USB-C side in the cuff: defaulting to LEFT (no cuff yet; flip with `-DUSB_LEFT=0` if that changes).
-- [ ] IMU axis mapping to tube length — needs the board tilted along the tube while streaming `i`.
-      Not yet documented.
+- [x] IMU axis mapping measured (see `spec/layout.h`): **Y along the tube** (USB end up → ay −0.64 g),
+      **X across** (far edge up → ax −0.72 g), Z out of screen. |a| ≈ 0.94 g at rest → normalize, or
+      calibrate scale later.
 - [~] #5DCAA5 reads as mint/turquoise on the AMOLED — channel order verified correct, so this is the spec colour
       itself. Final shade tuning deferred to Phase 2/3 (serial palette-nudge mode).
 
 ## Next step
-Phase 1 acceptance: photo of calibration face, tilt test for axis mapping → then Phase 2 (browser sim).
+**Phase 1 complete** (calibration face confirmed visually by user, IMU streamed + axes mapped, fps recorded).
+→ Phase 2: browser-based liquid simulation (Vite + TS + Canvas), `spec/layout.ts` mirroring `spec/layout.h`.

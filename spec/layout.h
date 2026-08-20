@@ -20,3 +20,13 @@
 #define RGB565(r,g,b)      ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
 #define LIQUID_RGB565      RGB565(0x5D,0xCA,0xA5)   // 0x5E54
 #define LIQUID_HI_RGB565   RGB565(0x9F,0xE1,0xCB)
+
+// ---- IMU axis mapping (QMI8658, measured 2026-08-20 with USB_LEFT=1 orientation) ----
+// Board flat, screen up:  a ≈ (+0.03, -0.07, +0.94) g   (|a| ≈ 0.94 → accel scale ~6 % low, normalize)
+// Lift USB-C (left) end:  ay → negative   → IMU Y is ALONG the tube; liquid flows toward the RIGHT.
+// Lift far/top long edge: ax → negative   → IMU X is ACROSS the tube (toward viewer positive).
+// Z points out of the screen.
+#define IMU_AXIS_ALONG_TUBE   1      // 0=x 1=y 2=z
+#define IMU_ALONG_TUBE_SIGN  -1      // tilt_along = IMU_ALONG_TUBE_SIGN * ay  → positive = right end down
+#define IMU_AXIS_ACROSS_TUBE  0
+#define IMU_ACROSS_TUBE_SIGN -1      // positive = far edge down
