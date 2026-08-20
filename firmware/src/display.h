@@ -9,8 +9,10 @@ bool display_init(void);
 // NOTE: the panel takes big-endian RGB565; the framebuffer must already hold byte-swapped
 // pixels (PsramCanvas in main.cpp does this), so the copy to DMA memory is a plain memcpy.
 void display_push_frame(const uint16_t *fb);
-// Push a horizontal band [y0, y1) of a full-width framebuffer. y0/y1 must be even.
+// Push a horizontal band [y0, y1) of a full-width framebuffer (staged through the strips, blocking).
 void display_push_rows(const uint16_t *fb, int y0, int y1);
+// The two TUBE_HEIGHT_PX-row strip buffers (internal DMA RAM) owned by the display module.
+uint16_t *display_strip(int i);
 void display_set_brightness(uint8_t v);   // 0..255 (cmd 0x51)
 // Queue a push of `rows` full-width rows starting at panel row y0, read by DMA straight from
 // `buf` (must be internal DMA-capable RAM, byte-swapped pixels). Returns immediately; call
