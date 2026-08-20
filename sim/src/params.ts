@@ -164,7 +164,7 @@ export const PRESET_MINT: Partial<Params> = {
 export type ParamKey = keyof Params;
 
 /** UI metadata: [min, max, step] for numeric params; grouping for the panel. */
-export const PARAM_META: Record<string, { group: string; min?: number; max?: number; step?: number }> = {
+export const PARAM_META: Record<string, { group: string; label?: string; min?: number; max?: number; step?: number }> = {
   liquid: { group: 'Colour' }, liquidHi: { group: 'Colour' }, liquidLo: { group: 'Colour' },
   glass: { group: 'Colour' }, tick: { group: 'Colour' }, bubbleRim: { group: 'Colour' },
   brightness: { group: 'Colour', min: 0.1, max: 1, step: 0.01 },
@@ -191,19 +191,26 @@ export const PARAM_META: Record<string, { group: string; min?: number; max?: num
   ticks: { group: 'Ticks' },
   tickMajorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
   tickMinorH: { group: 'Ticks', min: 0, max: 30, step: 1 },
-  digits: { group: 'Digits' }, digitColor: { group: 'Digits' }, digitColor2: { group: 'Digits' },
-  digitShadow: { group: 'Digits' }, digitShadowColor: { group: 'Digits' },
-  digitFont: { group: 'Digits', min: 0, max: 4, step: 1 },
-  digitScaleX: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
-  digitScaleY: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
-  digitScaleXMin: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
-  digitScaleYMin: { group: 'Digits', min: 0.5, max: 6, step: 0.25 },
-  digitBottomMin: { group: 'Digits', min: 0, max: 40, step: 1 },
-  digitBottom: { group: 'Digits', min: 0, max: 40, step: 1 },
-  digitsOnTop: { group: 'Digits' }, digitsLeadingZero: { group: 'Digits' },
-  digitMinuteStep: { group: 'Digits', min: 5, max: 30, step: 5 },
-  digitHourStep: { group: 'Digits', min: 1, max: 6, step: 1 },
   liquidTransparency: { group: 'Shape', min: 0, max: 1, step: 0.01 },
+  // digits — shared
+  digits: { group: 'Digits', label: 'show digits' },
+  digitFont: { group: 'Digits', label: 'font (0 3x5 · 1 4x6 · 2 5x7 · 3 7-seg · 4 6x8 bold)', min: 0, max: 4, step: 1 },
+  digitColor: { group: 'Digits', label: 'colour top' },
+  digitColor2: { group: 'Digits', label: 'colour bottom' },
+  digitShadow: { group: 'Digits', label: 'emboss shadow' },
+  digitShadowColor: { group: 'Digits', label: 'shadow colour' },
+  digitsOnTop: { group: 'Digits', label: 'print on top of liquid' },
+  // digits — hours tube
+  digitHourStep: { group: 'Digits · hours', label: 'label every N h', min: 1, max: 6, step: 1 },
+  digitScaleX: { group: 'Digits · hours', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
+  digitScaleY: { group: 'Digits · hours', label: 'scale Y', min: 0.5, max: 6, step: 0.25 },
+  digitBottom: { group: 'Digits · hours', label: 'baseline from bottom', min: 0, max: 40, step: 1 },
+  // digits — minutes tube
+  digitMinuteStep: { group: 'Digits · minutes', label: 'label every N min', min: 5, max: 30, step: 5 },
+  digitsLeadingZero: { group: 'Digits · minutes', label: 'leading zero (05)' },
+  digitScaleXMin: { group: 'Digits · minutes', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
+  digitScaleYMin: { group: 'Digits · minutes', label: 'scale Y', min: 0.5, max: 6, step: 0.25 },
+  digitBottomMin: { group: 'Digits · minutes', label: 'baseline from bottom', min: 0, max: 40, step: 1 },
   fillK: { group: 'Physics', min: 1, max: 400, step: 1 },
   fillDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },
   fillSloshGain: { group: 'Physics', min: 0, max: 200, step: 1 },

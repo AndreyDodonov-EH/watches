@@ -18,7 +18,7 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   for (const key of Object.keys(PARAM_META) as (keyof Params)[]) {
     const meta = PARAM_META[key];
     const row = document.createElement('label'); row.className = 'row';
-    const name = document.createElement('span'); name.textContent = key; row.appendChild(name);
+    const name = document.createElement('span'); name.textContent = meta.label ?? key; name.title = key; row.appendChild(name);
     const v = p[key];
     const inp = document.createElement('input');
     const val = document.createElement('output');
