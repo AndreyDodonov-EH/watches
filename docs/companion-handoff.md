@@ -120,7 +120,7 @@ can filter by service.
   only large assets). `board_build.filesystem = littlefs`, `pio run -t uploadfs`. The `spiffs` partition in
   `default_16MB.csv` is 3.4 MB at 0xC90000 — plenty.
 - Mode switching: BOOT held 3 s → stop BLE, start AP, show a small "AP: LiquidWatch-XXXX / 192.168.4.1"
-  overlay in the bridge zone (y 96..143 is unused — but the spec says keep it black; a 5-minute exception
+  overlay in the bridge zone (y 72..167 is unused — but the spec says keep it black; a 5-minute exception
   while in setup mode is acceptable, or print it in the serial log only). Idle timeout 5 min, BOOT again exits.
 
 ## Companion app structure

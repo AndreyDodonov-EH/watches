@@ -9,6 +9,10 @@ export interface Params {
   liquidLo: string;      // bottom shade (cylinder shading)
   glass: string;         // empty part of the tube (very dark; 0 = off for AMOLED power)
   bubbleRim: string;
+  // --- layout (px) ---
+  tubeHeight: number;    // across-tube size, ≤ TUBE_HEIGHT_MAX
+  hoursY: number;        // top row of the hours tube
+  minutesY: number;      // top row of the minutes tube
   // --- shape ---
   remaining: boolean;    // true = liquid at the right end, draining as time passes; false = fills from the left
   highlightH: number;    // px, height of highlight strip at top of column
@@ -119,6 +123,9 @@ export const PARAMS_VERSION = 3;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
+  tubeHeight: 72,
+  hoursY: 0,
+  minutesY: 168,
   remaining: false,
   liquid: '#346a2a',
   liquidHi: '#b6ffa0',
@@ -263,6 +270,9 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   liquidBright: { group: 'Colour', label: '· liquid trim', min: 0, max: 2, step: 0.01 },
   tickBright: { group: 'Colour', label: '· ticks trim', min: 0, max: 2, step: 0.01 },
   digitBright: { group: 'Colour', label: '· digits trim', min: 0, max: 2, step: 0.01 },
+  tubeHeight: { group: 'Layout', label: 'tube height', min: 16, max: 120, step: 1 },
+  hoursY: { group: 'Layout', label: 'hours tube y', min: 0, max: 224, step: 1 },
+  minutesY: { group: 'Layout', label: 'minutes tube y', min: 0, max: 224, step: 1 },
   remaining: { group: 'Shape', label: 'liquid = remaining' },
   highlightH: { group: 'Shape', min: 0, max: 30, step: 1 },
   highlightInset: { group: 'Shape', min: 0, max: 40, step: 1 },

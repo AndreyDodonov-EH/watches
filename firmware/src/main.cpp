@@ -81,13 +81,21 @@ static float fps = 0;
 // other tube renders.
 static uint16_t *strip[2] = {nullptr, nullptr};
 
+static TubeLayout shownLayout = {0, 0, 0};
+
 static void renderBoth() {
+  TubeLayout lay = tubeLayout(params);
+  if (lay != shownLayout) {                 // tubes moved: wipe the rows they used to cover
+    display_wait_all();
+    fb.fillScreen(0); display_push_frame(fb.buf);
+    shownLayout = lay;
+  }
   renderTube(0, tubeH, params, strip[0]);
   display_wait_all();                       // previous frame's minutes strip must be done before hours goes out
-  display_push_strip_async(strip[0], HOURS_TUBE_Y, TUBE_HEIGHT_PX);
+  display_push_strip_async(strip[0], lay.yH, lay.H);
   renderTube(1, tubeM, params, strip[1]);
   display_wait_all();
-  display_push_strip_async(strip[1], MINUTES_TUBE_Y, TUBE_HEIGHT_PX);
+  display_push_strip_async(strip[1], lay.yM, lay.H);
 }
 
 static void face_hello() {
@@ -261,7 +269,7 @@ static void handleLine(char *line) {
                     tubeH.fillTarget, tubeH.fillPos, tubeH.angle, tubeH.acrossShift, tubeH.edgeLight, tubeH.agitation,
                     tubeM.fillTarget, tubeM.fillPos, tubeM.angle, tubeM.acrossShift, tubeM.edgeLight, tubeM.agitation);
       static char hex[PANEL_W * 4 + 2];
-      for (int t = 0; t < 2; t++) for (int y = 0; y < TUBE_HEIGHT_PX; y++) {
+      for (int t = 0; t < 2; t++) for (int y = 0; y < tubeLayout(params).H; y++) {
         const uint16_t *row = strip[t] + y * PANEL_W; char *o = hex;
         for (int x = 0; x < PANEL_W; x++) { uint16_t c = __builtin_bswap16(row[x]); o += sprintf(o, "%04x", c); }
         *o++ = '\n'; *o = 0; Serial.write(hex);

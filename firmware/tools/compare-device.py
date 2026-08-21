@@ -14,7 +14,7 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIM = os.path.join(ROOT, 'sim')
-W, H, TH, Y0 = 536, 240, 72, (24, 144)
+W, H = 536, 240
 SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge']
 
 def talk(s, cmd, end=b'\n', timeout=10):
@@ -37,6 +37,8 @@ def main():
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
     s = serial.Serial(a.port, 115200, timeout=0.3); time.sleep(0.3)
     params = json.loads(talk(s, 'p?').strip().splitlines()[-1])
+    TH = max(4, min(120, round(params['tubeHeight'])))
+    Y0 = tuple(max(0, min(H - TH, round(params[k]))) for k in ('hoursY', 'minutesY'))
     fizz_was = params['fizz']
     if fizz_was: talk(s, 'pfizz=0'); params['fizz'] = False
     dump = talk(s, 'x', b'END', timeout=60)

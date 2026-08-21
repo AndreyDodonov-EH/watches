@@ -6,11 +6,13 @@
 #define PANEL_H            240
 
 #define TUBE_LENGTH_PX     536   // full width; leather may mask the outer ~10px
+// Defaults; runtime values come from params tubeHeight / hoursY / minutesY.
 #define TUBE_HEIGHT_PX     72    // ≈ 6 mm at ~0.083 mm/px
-#define HOURS_TUBE_Y       24    // tube spans y 24..96
-#define MINUTES_TUBE_Y     144   // tube spans y 144..216
-#define BRIDGE_Y0          96    // bridge zone y 96..144 must stay pure black
-#define BRIDGE_Y1          144
+#define TUBE_HEIGHT_MAX    120   // strip buffer size
+#define HOURS_TUBE_Y       0     // tube spans y 0..72
+#define MINUTES_TUBE_Y     168   // tube spans y 168..240
+#define BRIDGE_Y0          72    // bridge zone y 72..168 must stay pure black
+#define BRIDGE_Y1          168
 
 // Colors (RGB888 reference; RGB565 derived, verify on AMOLED)
 #define LIQUID_RGB888      0x5DCAA5

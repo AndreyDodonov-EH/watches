@@ -5,6 +5,9 @@
 
 struct Params {
   int v;
+  float tubeHeight;
+  float hoursY;
+  float minutesY;
   uint32_t liquid;
   uint32_t liquidHi;
   uint32_t liquidLo;
@@ -104,12 +107,15 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 98
+#define PARAMS_NUM_FIELDS 101
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
 static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"v", 'i', (uint16_t)offsetof(Params, v)},
+  {"tubeHeight", 'f', (uint16_t)offsetof(Params, tubeHeight)},
+  {"hoursY", 'f', (uint16_t)offsetof(Params, hoursY)},
+  {"minutesY", 'f', (uint16_t)offsetof(Params, minutesY)},
   {"liquid", 'c', (uint16_t)offsetof(Params, liquid)},
   {"liquidHi", 'c', (uint16_t)offsetof(Params, liquidHi)},
   {"liquidLo", 'c', (uint16_t)offsetof(Params, liquidLo)},
@@ -212,6 +218,9 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 // from presets/1.json
 static const Params PRESET_1 = {
   3, // v
+  72.0f, // tubeHeight
+  0.0f, // hoursY
+  168.0f, // minutesY
   0x346A2A, // liquid
   0xB6FFA0, // liquidHi
   0x1E7515, // liquidLo

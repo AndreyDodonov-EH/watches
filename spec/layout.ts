@@ -5,11 +5,13 @@ export const PANEL_W = 536;
 export const PANEL_H = 240;
 
 export const TUBE_LENGTH_PX = 536; // full width; leather may mask the outer ~10px
+// Defaults; runtime values come from params tubeHeight / hoursY / minutesY.
 export const TUBE_HEIGHT_PX = 72;  // ≈ 6 mm at ~0.083 mm/px
-export const HOURS_TUBE_Y = 24;    // tube spans y 24..96
-export const MINUTES_TUBE_Y = 144; // tube spans y 144..216
-export const BRIDGE_Y0 = 96;       // bridge zone y 96..144 must stay pure black
-export const BRIDGE_Y1 = 144;
+export const TUBE_HEIGHT_MAX = 120; // strip buffer size
+export const HOURS_TUBE_Y = 0;     // tube spans y 0..72
+export const MINUTES_TUBE_Y = 168; // tube spans y 168..240
+export const BRIDGE_Y0 = 72;       // bridge zone y 72..168 must stay pure black
+export const BRIDGE_Y1 = 168;
 
 export const LIQUID_RGB888 = 0x5dcaa5;
 export const LIQUID_HI_RGB888 = 0x9fe1cb;
