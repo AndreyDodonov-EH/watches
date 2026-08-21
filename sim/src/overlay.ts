@@ -19,7 +19,7 @@ export const DEFAULT_OVERLAY: OverlayOpts = { enabled: true, lens: 0.6, lensCurv
 /** Lens-distort the two tube strips from `src` canvas into `dst` canvas (same size). */
 export function drawLens(src: HTMLCanvasElement, dst: HTMLCanvasElement, o: OverlayOpts, lay: TubeLayout): void {
   const ctx = dst.getContext('2d')!;
-  ctx.imageSmoothingEnabled = o.lensSmooth;
+  ctx.imageSmoothingEnabled = o.lensSmooth || dst.width < PANEL_W;   // downsampled canvas: always filter
   ctx.clearRect(0, 0, PANEL_W, PANEL_H);
   ctx.drawImage(src, 0, 0);
   if (o.lens <= 0) return;
