@@ -197,7 +197,7 @@ function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number,
   const sy = bh / sprite.cellH;
   for (let d = 0; d < 10; d++) {
     const gw = Math.max(1, Math.round(sprite.widths[d] * bw / sprite.cellW));
-    const sx = gw / sprite.cellW, cx0 = d * sprite.cellW + (sprite.cellW - sprite.widths[d]) / 2;
+    const sx = gw / sprite.widths[d], cx0 = d * sprite.cellW + (sprite.cellW - sprite.widths[d]) / 2;
     const c = new Uint16Array(gw * bh), a = new Uint8Array(gw * bh);
     for (let y = 0; y < bh; y++) for (let x = 0; x < gw; x++) {
       const X0 = Math.floor(cx0 + x / sx), X1 = Math.max(X0 + 1, Math.floor(cx0 + (x + 1) / sx));

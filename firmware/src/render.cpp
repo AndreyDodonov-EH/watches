@@ -165,7 +165,7 @@ static ScaledGlyph *scaledGlyphs(int slot, int sheetIdx, int bw, int bh, float b
   float sy = (float)bh / sp.cellH;
   for (int d = 0; d < 10; d++) {
     int gw = (int)fmaxf(1, jround(sp.widths[d] * (float)bw / sp.cellW));
-    float sx = (float)gw / sp.cellW, cx0 = d * sp.cellW + (sp.cellW - sp.widths[d]) / 2.0f;
+    float sx = (float)gw / sp.widths[d], cx0 = d * sp.cellW + (sp.cellW - sp.widths[d]) / 2.0f;
     free(S.g[d].c); free(S.g[d].a);
     S.g[d].w = gw; S.g[d].h = bh;
     S.g[d].c = (uint16_t *)heap_caps_calloc(gw * bh, 2, MALLOC_CAP_SPIRAM);
