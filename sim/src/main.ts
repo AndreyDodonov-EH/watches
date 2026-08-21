@@ -2,7 +2,7 @@ import './style.css';
 import { PANEL_W, PANEL_H } from '@spec/layout';
 import { PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
-import { renderFrame, blit, stepFizz, fb, loadSprites, tubeLayout } from './render';
+import { renderFrame, blit, stepFizz, fb, fizz, loadSprites, tubeLayout } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
 import { DEFAULT_VIEW, loadSession, saveSession } from './persist';
 import { buildPanel } from './ui';
@@ -369,4 +369,4 @@ if (url.has('settle')) for (let i = 0; i < 250; i++) physics(PHYS_DT); // spring
 requestAnimationFrame(frame);
 
 // dev hook
-(window as any).sim = { params, hours, minutes, fb, overlay };
+(window as any).sim = { params, hours, minutes, fb, fizz, overlay };

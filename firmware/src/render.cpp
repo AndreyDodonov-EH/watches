@@ -343,12 +343,14 @@ static void ensureFizz(int i, const Params &p, float fill, float agitation) {
 void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
   const float speed = p.fizzSpeed * (1 + 3 * agitation);
   const float up = sqrtf(fmaxf(0.05f, 1 - along * along - across * across));
+  const float a = clampf(across * p.fizzAcrossGain, -1, 1);
+  const float rise = (1 - fabsf(a)) * up - a;   // screen-up; across + = top edge down
   const float vx = (-along * p.fizzDriftGain * speed) / L;
   for (int i = 0; i < 2; i++) for (int k = 0; k < fizzN[i]; k++) {
     Fizz &f = fizz[i][k];
-    f.y -= speed * f.v * up * dt;
+    f.y -= speed * f.v * rise * dt;
     f.x = clampf(f.x + vx * f.v * dt, 0, 1);
-    if (f.y < 3 || f.y >= H) { f.y = H - 3; f.x = frand(); f.v = 0.5f + frand(); }
+    if (f.y < 3 || f.y >= H) { f.y = rise >= 0 ? H - 3 : 3; f.x = frand(); f.v = 0.5f + frand(); }
   }
 }
 

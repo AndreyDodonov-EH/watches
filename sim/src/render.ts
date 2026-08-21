@@ -363,16 +363,19 @@ function ensureFizz(i: number, p: Params, fill: number, agitation = 0): void {
   if (arr.length > want) arr.length = want;
 }
 /** Fizz rises against gravity: along-tilt steers it toward the high end (`fizzDriftGain` = steering gain),
- *  roll tips the rise out of the screen plane (slower on-screen rise), shake (`agitation`) speeds it up. */
+ *  across-tilt (`fizzAcrossGain`) turns the on-screen rise toward the high edge, shake (`agitation`) speeds it up. */
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
   const speed = p.fizzSpeed * (1 + 3 * agitation);
   const up = Math.sqrt(Math.max(0.05, 1 - along * along - across * across));
+  // On-screen rise: out-of-plane gravity reads as screen-up; across-tilt (+ = top edge down) turns it toward the physically high edge.
+  const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain));
+  const rise = (1 - Math.abs(a)) * up - a;
   const vx = (-along * p.fizzDriftGain * speed) / TUBE_LENGTH_PX;
   const H = tubeLayout(p).H;
   for (let i = 0; i < 2; i++) for (const f of fizz[i]) {
-    f.y -= speed * f.v * up * dt;
+    f.y -= speed * f.v * rise * dt;
     f.x = Math.max(0, Math.min(1, f.x + vx * f.v * dt));
-    if (f.y < 3 || f.y >= H) { f.y = H - 3; f.x = Math.random(); f.v = 0.5 + Math.random(); }
+    if (f.y < 3 || f.y >= H) { f.y = rise >= 0 ? H - 3 : 3; f.x = Math.random(); f.v = 0.5 + Math.random(); }
   }
 }
 
