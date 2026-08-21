@@ -366,7 +366,7 @@ function ensureFizz(i: number, p: Params, fill: number, agitation = 0): void {
  *  across-tilt (`fizzAcrossGain`) turns the on-screen rise toward the high edge, shake (`agitation`) speeds it up. */
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
   const speed = p.fizzSpeed * (1 + 3 * agitation);
-  const up = Math.sqrt(Math.max(0.05, 1 - along * along - across * across));
+  const up = Math.sqrt(Math.max(0, 1 - along * along - across * across));
   // On-screen rise: out-of-plane gravity reads as screen-up; across-tilt (+ = top edge down) turns it toward the physically high edge.
   const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain));
   const rise = (1 - Math.abs(a)) * up * p.fizzFlatRise - a;
