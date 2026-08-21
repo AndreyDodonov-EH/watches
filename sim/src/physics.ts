@@ -8,7 +8,7 @@ export const PHYS_DT = 1 / PHYS_HZ;
 /** Input in the tube's frame (already mapped from IMU axes via spec/layout IMU_* constants). */
 export interface TiltInput {
   along: number;  // g, +1 = right end of the tube is down (liquid wants to flow right)
-  across: number; // g, +1 = far (top) edge down
+  across: number; // g, +1 = far (top) edge up
   gyroAlong: number; // deg/s rotation rate about the along-tube axis... (rolling the tube)
   gyroAcross: number; // deg/s rotation about the across axis (tilting left/right end up/down) — drives slosh
 }

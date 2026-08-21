@@ -35,4 +35,4 @@ export function rgb565to888(c: number): [number, number, number] {
 export const IMU_AXIS_ALONG_TUBE = 1;   // 0=x 1=y 2=z
 export const IMU_ALONG_TUBE_SIGN = -1;  // tilt_along = sign * ay → positive = right end down
 export const IMU_AXIS_ACROSS_TUBE = 0;
-export const IMU_ACROSS_TUBE_SIGN = 1;  // positive = top (far) edge down; verified by fizz direction 2026-08-21
+export const IMU_ACROSS_TUBE_SIGN = -1; // positive = top (far) edge up

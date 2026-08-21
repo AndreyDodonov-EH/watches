@@ -367,9 +367,9 @@ function ensureFizz(i: number, p: Params, fill: number, agitation = 0): void {
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
   const speed = p.fizzSpeed * (1 + 3 * agitation);
   const up = Math.sqrt(Math.max(0, 1 - along * along - across * across));
-  // On-screen rise: out-of-plane gravity reads as screen-up; across-tilt (+ = top edge down) turns it toward the physically high edge.
+  // On-screen rise: out-of-plane gravity reads as screen-up; across-tilt (+ = top edge up) turns it toward the physically high edge.
   const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain));
-  const rise = (1 - Math.abs(a)) * up * p.fizzFlatRise - a;
+  const rise = (1 - Math.abs(a)) * up * p.fizzFlatRise + a;
   const vx = (-along * p.fizzDriftGain * speed) / TUBE_LENGTH_PX;
   const H = tubeLayout(p).H;
   for (let i = 0; i < 2; i++) for (const f of fizz[i]) {
