@@ -86,7 +86,11 @@ const fbc = document.getElementById('fbc') as HTMLCanvasElement;
 const lensc = document.getElementById('lensc') as HTMLCanvasElement;
 const gridc = document.getElementById('gridc') as HTMLCanvasElement;
 const fbctx = fbc.getContext('2d')!;
-const img = fbctx.createImageData(PANEL_W, PANEL_H);
+// Full-resolution frame; at scale < 1 the visible canvases are downsampled from it with area filtering
+// (a CSS-transform downscale point-samples and drops 1 px ticks).
+const fullc = document.createElement('canvas'); fullc.width = PANEL_W; fullc.height = PANEL_H;
+const fullctx = fullc.getContext('2d')!;
+const img = fullctx.createImageData(PANEL_W, PANEL_H);
 const ovlDom = buildOverlayDom(wrap);
 applyOverlay(ovlDom, overlay, tubeLayout(params));
 
@@ -103,6 +107,14 @@ const setScale = () => {
   viewport.style.width = `${(PANEL_W + 2 * padX) * scale}px`; viewport.style.height = `${(PANEL_H + 2 * padY) * scale}px`;
   wrap.style.transform = `translate(${padX * scale}px, ${padY * scale}px) scale(${scale})`;
   wrap.classList.toggle('smooth', scale < 2); // pixelated upscale only at ≥2; bilinear when shrinking
+  // Below 1: canvas backing store at on-screen size, CSS size stays 536x240 so the wrap transform maps 1:1.
+  const ss = Math.min(1, scale);
+  for (const c of [fbc, lensc, gridc]) {
+    c.width = Math.ceil(PANEL_W * ss); c.height = Math.ceil(PANEL_H * ss);
+    c.style.width = `${PANEL_W}px`; c.style.height = `${PANEL_H}px`;
+    const g = c.getContext('2d')!; g.setTransform(ss, 0, 0, ss, 0, 0); g.imageSmoothingQuality = 'high';
+  }
+  drawGrid();
 };
 setScale();
 $('scale').oninput = (e) => { scale = +(e.target as HTMLSelectElement).value; setScale(); };
@@ -253,7 +265,7 @@ function drawGrid() {
   const g = gridc.getContext('2d')!;
   g.clearRect(0, 0, PANEL_W, PANEL_H);
   if (!showGrid) return;
-  g.strokeStyle = 'rgba(255,255,255,0.6)'; g.lineWidth = 1; g.setLineDash([4, 4]);
+  g.strokeStyle = 'rgba(255,255,255,0.6)'; g.lineWidth = 1 / Math.min(1, scale); g.setLineDash([4, 4]);
   const { H, yH, yM } = tubeLayout(params);
   for (const y of [yH, yH + H, yM, yM + H]) { g.beginPath(); g.moveTo(0, y + 0.5); g.lineTo(PANEL_W, y + 0.5); g.stroke(); }
   const b0 = Math.min(yH, yM) + H, b1 = Math.max(yH, yM);
@@ -332,8 +344,9 @@ function frame(now: number) {
   const dt = Math.min(0.25, (now - last) / 1000); last = now;
   if (!paused) { acc += dt; while (acc >= PHYS_DT) { physics(PHYS_DT); acc -= PHYS_DT; } }
   renderFrame(hours, minutes, params);
-  blit(img); fbctx.putImageData(img, 0, 0);
-  if (overlay.enabled && overlay.lens > 0) { lensc.style.display = 'block'; drawLens(fbc, lensc, overlay, tubeLayout(params)); } else lensc.style.display = 'none';
+  blit(img); fullctx.putImageData(img, 0, 0);
+  fbctx.imageSmoothingEnabled = scale < 1; fbctx.drawImage(fullc, 0, 0);
+  if (overlay.enabled && overlay.lens > 0) { lensc.style.display = 'block'; drawLens(fullc, lensc, overlay, tubeLayout(params)); } else lensc.style.display = 'none';
   drawScope();
   frames++;
   if (now - fpsT > 1000) {
