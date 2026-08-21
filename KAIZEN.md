@@ -26,7 +26,7 @@ is the dominant controllable power cost after the AMOLED itself. It also dictate
    each frame. Removes the ~8 ms of mark compositing (`throughLiquid` per glyph pixel) from the hot path.
 4. **LUT-ify the edge effects** — front-bright / glow blends are functions of (row, k, lightK): a
    72×(21+15) 565 table rebuilt only when `lightK` changes by > 1/64. Turns ~6 k blends/frame into
-   table lookups. (docs/render-routine.md already notes this.)
+   table lookups.
 5. **Fizz as a power setting** — it forces continuous repaint; make it off-by-default on battery, or
    animate it at 10 Hz in a small dirty rect.
 6. **Memory follow-through** — with 1–3 in place the second internal strip (77 KB) and possibly the whole
@@ -38,6 +38,14 @@ is the dominant controllable power cost after the AMOLED itself. It also dictate
 incrementality makes every render bug harder to see, so it comes after the visuals are stable.
 
 ## Other
+- Lighting is a stylised fixed light from screen-top (side view): highlight band at rows 2..13, cylinder
+  shading bright at 1/3. Face-up on the wrist the light is along the screen normal and the acrylic rod gives
+  real specular. Kept as style. If ever made physical: light direction from `across`/`up`, highlight row from
+  it; `acrossShift` then becomes redundant.
+- `edgeLight -> lightK` is a proxy: pressure into the end fills the cap (modelled via `meniscusTiltGain`);
+  the brightness change stands in for the stronger caustic of a fuller cap.
+- Gyro about the screen normal (IMU z) is dropped in both mains; it is the rate that physically kicks the
+  in-plane front skew (`angle`). Plumb it as `gyroNormal` in `TiltInput` and add an impulse term.
 - Serial command parser lives in `main.cpp`; extract to `command.cpp` with an output sink before it grows
   a second transport (BLE/HTTP) — planned in docs/companion-handoff.md.
 - Param writes are unvalidated on device; clamp with the sim's `PARAM_META` min/max before exposing to

@@ -12,7 +12,7 @@
 struct TiltInput { float along, across, gyroAlong, gyroAcross; };
 
 struct TubeState {
-  float fillTarget = 0, fillPos = 0, fillVel = 0, angle = 0, angleVel = 0, acrossShift = 0, acrossVel = 0, agitation = 0, edgeLight = 0;
+  float fillTarget = 0, fillPos = 0, fillVel = 0, angle = 0, angleVel = 0, acrossShift = 0, acrossVel = 0, agitation = 0, edgeLight = 0, acrossTilt = 0;
 };
 
 void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt = PHYS_DT);

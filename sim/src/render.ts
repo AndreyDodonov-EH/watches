@@ -1,6 +1,6 @@
 // Renderer: draws into an RGB565 framebuffer (Uint16Array, PANEL_W*PANEL_H) with only
 // operations that port 1:1 to the MCU: per-row horizontal spans, a per-row colour LUT,
-// a few filled ellipses/dots. Documented step-by-step in docs/render-routine.md.
+// a few filled ellipses/dots. Mirrored 1:1 by firmware/src/render.cpp.
 import {
   PANEL_W, PANEL_H, TUBE_LENGTH_PX, TUBE_HEIGHT_MAX,
   rgb565, rgb565to888,
@@ -44,7 +44,9 @@ export interface Palette {
   body: number; glass: number; bubbleRim: number; bubbleIn: Uint16Array;
 }
 
-/** Step 0: build the per-row colour LUT. Firmware does this once per param change. */
+/** Step 0: build the per-row colour LUT. Firmware does this once per param change.
+ *  Lighting is stylised: a fixed light from screen-top (side view of the tube), not the wearer's
+ *  environment. The acrylic rod over the panel supplies the real specular. */
 export function buildPalette(p: Params, acrossShift = 0): Palette {
   const body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
   const br = p.brightness * p.liquidBright;   // glass stays on the panel dimmer alone (see below)
@@ -366,6 +368,7 @@ function ensureFizz(i: number, p: Params, fill: number, agitation = 0): void {
  *  across-tilt (`fizzAcrossGain`) turns the on-screen rise toward the high edge, shake (`agitation`) speeds it up.
  *  A bubble leaving the tube on either axis respawns at the low side of that axis (vertical tube: recycles in x). */
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
+  if (p.remaining) along = -along; // fizz lives in the mirrored liquid frame (see drawTube)
   const speed = p.fizzSpeed * (1 + 3 * agitation);
   const up = Math.sqrt(Math.max(0, 1 - along * along - across * across));
   // On-screen rise: out-of-plane gravity reads as screen-up; across-tilt (+ = top edge up) turns it toward the physically high edge.
@@ -382,16 +385,16 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
 }
 
 /** Fill-edge x for tube-row `ry` (0..H-1), given edge centre `xe`, angle and meniscus.
- *  `tilt` is the smoothed along-tilt (TubeState.edgeLight, -1..1) and reshapes the drop end:
- *  end down (+) -> hydrostatic pressure fills the cap: deeper, rounder, symmetric bulge;
- *  end up (-) -> the drop drains and flattens, and what remains clings to the BOTTOM wall
- *  (a thin tail: bottom contact line extends, top retracts). At rest a mild bottom-cling
- *  remains — liquid in a horizontal tube always sags onto the lower wall. */
-export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt = 0): number {
+ *  `tilt` = smoothed along-tilt (TubeState.edgeLight): end down (+) -> pressure fills the cap
+ *  (deeper, rounder); end up (-) -> the drop drains and flattens.
+ *  `side` = smoothed across-tilt (TubeState.acrossTilt, + = top edge up): the drop sags onto the
+ *  low wall — that contact line extends, the high one retracts; stronger while draining.
+ *  Face up (side = 0) the sag is toward the back glass and invisible: symmetric cap. */
+export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt = 0, side = 0): number {
   const H = tubeLayout(p).H, yc = (H - 1) / 2;
   const d = (ry - yc) / yc;                  // -1..1
   const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  const asymEff = p.meniscusAsym * Math.max(0, Math.min(1, 0.4 - 0.6 * tilt)) * Math.sqrt(Math.max(0, 1 - tilt * tilt)); // no sag when vertical
+  const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt));
   const depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
   return xe + skew + depth * Math.pow(Math.abs(d), p.meniscusPow); // liquid climbs the wall
 }
@@ -402,9 +405,9 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
  *  flipped in place, and the scale is drawn last in panel coordinates. */
 export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number): void {
   const H = pal.rows.length, L = TUBE_LENGTH_PX;
-  const s = p.remaining ? { ...state, fillPos: -state.fillPos, angle: -state.angle, edgeLight: -state.edgeLight } : state;
-  // roll swings the liquid toward the lower wall: its contact line leads, the front skews
-  const angle = s.angle + (p.remaining ? -1 : 1) * s.acrossShift * p.meniscusRollGain;
+  // Mirroring flips along-axis quantities only; across-axis ones (angle, acrossShift, acrossTilt) are invariant.
+  const s = p.remaining ? { ...state, fillPos: -state.fillPos, edgeLight: -state.edgeLight } : state;
+  const angle = s.angle + s.acrossShift * p.meniscusRollGain;   // roll swing: the lower contact line leads
   const xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;   // edge centre
   // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
   // liquid into the right end brightens the cap glow, draining away from it dims it.
@@ -417,7 +420,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
   const edges = new Float32Array(H);
   for (let ry = 0; ry < H; ry++) {
-    const ex = edgeX(ry, xe, angle, p, s.edgeLight);
+    const ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt);
     edges[ry] = ex;
     let x0 = 0;
     if (p.cornerR > 0) { // rounded left end cap
@@ -497,7 +500,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Step 5: fizz dots (inside liquid only)
   if (p.fizz) for (const f of fizz[idx]) {
     const fx = Math.round(f.x * (xe - 6)), fy = Math.round(f.y);
-    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight) - 2) continue;
+    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
     const c = pal.bubbleRim;
     for (let dy = 0; dy < p.fizzSize; dy++) for (let dx = 0; dx < p.fizzSize; dx++) {
       const inner = p.fizzSize >= 3 && dx > 0 && dy > 0 && dx < p.fizzSize - 1 && dy < p.fizzSize - 1;

@@ -16,9 +16,8 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   if (s.fillPos < -FILL_SLOSH_MAX_PX) { s.fillPos = -FILL_SLOSH_MAX_PX; s.fillVel = fmaxf(0, s.fillVel); }
 
   const float aMax = fminf(p.angleMax, ANGLE_HARD_MAX_DEG);
-  const float lever = along * sqrtf(fmaxf(0, 1 - along * along));   // gravity torque on the front: 0 when vertical
-  const float angleRest = clampf(lever * p.angleTiltGain, -aMax, aMax);
-  const float angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel + in.gyroAcross * p.angleGyroGain * 10;
+  const float angleRest = clampf(across * p.angleTiltGain, -aMax, aMax);   // in-plane gravity only (see sim physics.ts)
+  const float angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel;
   s.angleVel += angleAcc * dt;
   s.angle += s.angleVel * dt;
   if (s.angle > aMax) { s.angle = aMax; s.angleVel = fminf(0, s.angleVel); }
@@ -34,6 +33,7 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   const float shake = fminf(1, ((fabsf(in.gyroAcross) + fabsf(in.gyroAlong)) / 200) * p.shakeGain);
   s.agitation += (shake - s.agitation) * fminf(1, (shake > s.agitation ? 20 : 2) * dt);
   s.edgeLight += (clampf(along, -1, 1) - s.edgeLight) * fminf(1, 5 * dt);
+  s.acrossTilt += (clampf(across, -1, 1) - s.acrossTilt) * fminf(1, 5 * dt);
 }
 
 float GravityNorm::update(float n) {
