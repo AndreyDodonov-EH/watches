@@ -40,6 +40,7 @@ export function tubeLayout(p: Params): TubeLayout {
 
 export interface Palette {
   rows: Uint16Array;     // H colours: body shade per row incl. highlight band
+  glassRows: Uint16Array; // empty-tube shade per row
   body: number; glass: number; bubbleRim: number; bubbleIn: Uint16Array;
 }
 
@@ -50,6 +51,22 @@ export function buildPalette(p: Params, acrossShift = 0): Palette {
   const H = tubeLayout(p).H;
   const rows = new Uint16Array(H);
   const bubbleIn = new Uint16Array(H);
+  const glassRows = new Uint16Array(H);
+  const glass = hexToRgb(p.glass), ghi = hexToRgb(p.glassHi);
+  /** Glass wall shading weight 0..1 for a row: specular tent on the top wall, a faint band on the
+   *  lower wall, brighter outermost rows. */
+  const glassW = (y: number): number => {
+    const t = y / (H - 1);
+    // ambient: cylinder lit from above — brightest near 1/3, darkest near 2/3, lifting again at the bottom
+    let w = p.glassBody * (0.5 + 0.5 * Math.cos((t - 0.3) * Math.PI * 1.6));
+    if (y >= hiTop && y < hiTop + p.highlightH)
+      w += p.glassHiBright * Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp);
+    const d = (t - 0.82) / 0.07;
+    w += p.glassReflect * Math.exp(-d * d);
+    const rim = Math.min(y, H - 1 - y);
+    if (rim < 2) w += p.glassRim * (rim === 0 ? 1 : 0.4);
+    return Math.min(1, w);
+  };
   const hiTop = Math.round(2 + acrossShift);
   const roll = acrossShift * p.shadeRollGain;   // rows the shading rotates with roll
   for (let y = 0; y < H; y++) {
@@ -62,10 +79,13 @@ export function buildPalette(p: Params, acrossShift = 0): Palette {
       const k = Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp); // tent
       c = mix(c, hi, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
     }
+    const gw = glassW(y);
+    glassRows[y] = q(scale(mix(glass, ghi, gw), p.brightness));
+    c = mix(c, ghi, gw * p.glassOverLiquid);
     rows[y] = q(scale(c, br));
     bubbleIn[y] = q(scale(mix(c, [0, 0, 0], p.bubbleDark), br));
   }
-  return { rows, body: q(scale(body, br)), glass: q(scale(hexToRgb(p.glass), p.brightness)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn };
+  return { rows, glassRows, body: q(scale(body, br)), glass: q(scale(glass, p.brightness)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn };
 }
 
 function hspan(y: number, x0: number, x1: number, c: number): void {
@@ -385,8 +405,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   ensureFizz(idx, p, Math.max(0, Math.min(1, xe / L)), s.agitation);
 
   // Step 1: glass background (empty tube) — whole strip
-  if (pal.glass !== 0) for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.glass);
-  else for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, 0);
+  for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.glassRows[ry]);
 
   // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
   const edges = new Float32Array(H);
@@ -404,7 +423,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const w = Math.max(1, Math.round(p.edgeSoft));
       for (let k = 0; k < w; k++) {
         const t = Math.max(0, Math.min(1, (frac - k) / 1 + (w > 1 ? 0.5 : 0)));
-        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.glass, pal.rows[ry], t));
+        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.glassRows[ry], pal.rows[ry], t));
       }
     } else if (frac >= 0.5) px(xi, y0 + ry, pal.rows[ry]);
   }
@@ -431,7 +450,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     for (let ry = 0; ry < H; ry++) {
       const ex = edges[ry]; const xs = Math.ceil(ex + (p.edgeSoft > 0 ? Math.round(p.edgeSoft) : 0));
       for (let k = 0; k < p.edgeGlow; k++) {
-        const t = (1 - k / p.edgeGlow); const c = blend565(pal.glass, pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK));
+        const t = (1 - k / p.edgeGlow); const c = blend565(pal.glassRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK));
         if (xs + k < L) px(xs + k, y0 + ry, c);
       }
     }

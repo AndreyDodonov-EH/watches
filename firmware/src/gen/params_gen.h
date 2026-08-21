@@ -12,6 +12,12 @@ struct Params {
   uint32_t liquidHi;
   uint32_t liquidLo;
   uint32_t glass;
+  uint32_t glassHi;
+  float glassBody;
+  float glassHiBright;
+  float glassReflect;
+  float glassRim;
+  float glassOverLiquid;
   uint32_t bubbleRim;
   bool remaining;
   float highlightH;
@@ -107,7 +113,7 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 101
+#define PARAMS_NUM_FIELDS 107
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -120,6 +126,12 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"liquidHi", 'c', (uint16_t)offsetof(Params, liquidHi)},
   {"liquidLo", 'c', (uint16_t)offsetof(Params, liquidLo)},
   {"glass", 'c', (uint16_t)offsetof(Params, glass)},
+  {"glassHi", 'c', (uint16_t)offsetof(Params, glassHi)},
+  {"glassBody", 'f', (uint16_t)offsetof(Params, glassBody)},
+  {"glassHiBright", 'f', (uint16_t)offsetof(Params, glassHiBright)},
+  {"glassReflect", 'f', (uint16_t)offsetof(Params, glassReflect)},
+  {"glassRim", 'f', (uint16_t)offsetof(Params, glassRim)},
+  {"glassOverLiquid", 'f', (uint16_t)offsetof(Params, glassOverLiquid)},
   {"bubbleRim", 'c', (uint16_t)offsetof(Params, bubbleRim)},
   {"remaining", 'b', (uint16_t)offsetof(Params, remaining)},
   {"highlightH", 'f', (uint16_t)offsetof(Params, highlightH)},
@@ -225,6 +237,12 @@ static const Params PRESET_1 = {
   0xB6FFA0, // liquidHi
   0x1E7515, // liquidLo
   0x000000, // glass
+  0xA8C0C8, // glassHi
+  0.1f, // glassBody
+  0.55f, // glassHiBright
+  0.22f, // glassReflect
+  0.4f, // glassRim
+  0.4f, // glassOverLiquid
   0xB0C7A9, // bubbleRim
   false, // remaining
   11.0f, // highlightH

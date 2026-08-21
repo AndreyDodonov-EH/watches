@@ -17,7 +17,7 @@ SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge']  # di
 FIELDS = [
  ('v','int'),
  ('tubeHeight','float'),('hoursY','float'),('minutesY','float'),
- ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('glass','rgb'),('bubbleRim','rgb'),
+ ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('glass','rgb'),('glassHi','rgb'),('glassBody','float'),('glassHiBright','float'),('glassReflect','float'),('glassRim','float'),('glassOverLiquid','float'),('bubbleRim','rgb'),
  ('remaining','bool'),('highlightH','float'),('highlightInset','float'),('highlightBright','float'),('highlightSharp','float'),('shadeRollGain','float'),('shadeDepth','float'),('meniscusDepth','float'),
  ('meniscusPow','float'),('meniscusTiltGain','float'),('meniscusAsym','float'),('edgeSoft','float'),
  ('frontBright','float'),('edgeGlow','float'),('glowStrength','float'),('cornerR','float'),('edgeLightGain','float'),
