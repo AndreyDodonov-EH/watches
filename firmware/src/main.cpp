@@ -64,7 +64,17 @@ static GravityNorm gnorm;
 static ImuFilter imuFilter;
 static TiltInput rawTilt = {0, 0, 0, 0};
 static float demoSpeed = 1;          // time multiplier (d<N>)
-static double clockSec = 10 * 3600 + 9 * 60 + 30;  // seconds since midnight (until `t` sets it)
+// Wall clock lives in the RTC-backed system time (settimeofday): survives the USB-CDC DTR/RTS reset
+// that every host port open/close triggers. Power-on starts at 0 → default 10:09:30 until `t`/`T`.
+static double demoOffset = 0;        // seconds added by demo speed on top of real time
+static double clockSec = 0;          // local seconds since midnight, refreshed every physics step
+static const time_t CLOCK_EPOCH_MIN = 86400L * 365;  // below this = never set since power-on
+static void setClockLocal(time_t localSec) { timeval tv = { localSec, 0 }; settimeofday(&tv, nullptr); demoOffset = 0; }
+static double clockNow() {
+  timeval tv; gettimeofday(&tv, nullptr);
+  double s = fmod((double)(tv.tv_sec % 86400) + tv.tv_usec * 1e-6 + demoOffset, 86400.0);
+  return s < 0 ? s + 86400 : s;
+}
 static uint32_t lastPhysUs = 0, frames = 0, fpsT0 = 0;
 static float fps = 0;
 // Tube strips (owned by display.cpp, internal DMA RAM): the panel DMA reads them directly while the
@@ -150,16 +160,15 @@ static void liquid_tick() {
   int steps = 0;
   while ((int32_t)(now - lastPhysUs) >= (int32_t)(1000000 / PHYS_HZ) && steps < 5) {
     lastPhysUs += 1000000 / PHYS_HZ; steps++;
-    clockSec += PHYS_DT * demoSpeed;
-    if (clockSec >= 86400) clockSec -= 86400;
-    if (clockSec < 0) clockSec += 86400;
+    demoOffset += PHYS_DT * (demoSpeed - 1);
+    clockSec = clockNow();
     TiltInput in = have_imu ? imuFilter.step(rawTilt, params) : TiltInput{0, 0, 0, 0};
     double m = fmod(clockSec / 60.0, 60.0), h = fmod(clockSec / 3600.0, 12.0);
     tubeH.fillTarget = (float)(h / 12.0);
     tubeM.fillTarget = (float)(m / 60.0);
     stepTube(tubeH, in, params);
     stepTube(tubeM, in, params);
-    stepFizz(params, PHYS_DT);
+    stepFizz(params, PHYS_DT, in.along, in.across, tubeH.agitation);
   }
   renderBoth();
   frames++;
@@ -232,7 +241,12 @@ static void handleLine(char *line) {
     case 'h': case 'c': case 'f': case 'l': show(c); break;
     case 'i': imu_stream = !imu_stream; Serial.printf("imu stream %s\n", imu_stream ? "on (t_ms,ax,ay,az,gx,gy,gz)" : "off"); break;
     case 'b': { int v = atoi(arg); display_set_brightness(constrain(v, 0, 255)); Serial.printf("brightness %d\n", v); break; }
-    case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { clockSec = hh * 3600 + mm * 60 + ss; Serial.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else Serial.println("usage: t HH:MM[:SS]"); break; }
+    case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { setClockLocal(CLOCK_EPOCH_MIN + hh * 3600 + mm * 60 + ss); Serial.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else Serial.println("usage: t HH:MM[:SS]"); break; }
+    case 'T': {  // T <epoch_s> <tz_offset_min>: local time = epoch + tz
+      long long ep = 0; int tz = 0;
+      if (sscanf(arg, "%lld %d", &ep, &tz) >= 1) { setClockLocal((time_t)(ep + tz * 60L)); clockSec = clockNow(); Serial.printf("time %02d:%02d:%02d\n", (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60); }
+      else Serial.println("usage: T <epoch_s> <tz_min>");
+      break; }
     case 'd': demoSpeed = atof(arg); Serial.printf("demo speed x%g\n", demoSpeed); break;
     case 'p': {
       if (arg[0] == '?') dumpParams();
@@ -243,9 +257,9 @@ static void handleLine(char *line) {
     case 'x': {  // dump state + both strips (hex) for offline comparison with the sim
       display_wait_all();
       renderTube(0, tubeH, params, strip[0]); renderTube(1, tubeM, params, strip[1]);
-      Serial.printf("STATE %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
-                    tubeH.fillTarget, tubeH.fillPos, tubeH.angle, tubeH.acrossShift, tubeH.edgeLight,
-                    tubeM.fillTarget, tubeM.fillPos, tubeM.angle, tubeM.acrossShift, tubeM.edgeLight);
+      Serial.printf("STATE %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
+                    tubeH.fillTarget, tubeH.fillPos, tubeH.angle, tubeH.acrossShift, tubeH.edgeLight, tubeH.agitation,
+                    tubeM.fillTarget, tubeM.fillPos, tubeM.angle, tubeM.acrossShift, tubeM.edgeLight, tubeM.agitation);
       static char hex[PANEL_W * 4 + 2];
       for (int t = 0; t < 2; t++) for (int y = 0; y < TUBE_HEIGHT_PX; y++) {
         const uint16_t *row = strip[t] + y * PANEL_W; char *o = hex;
@@ -258,7 +272,7 @@ static void handleLine(char *line) {
                  mode, fps, (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60,
                  rawTilt.along, rawTilt.across, rawTilt.gyroAcross, tubeH.fillTarget, tubeM.fillTarget, ESP.getFreeHeap()); break;
     case 'r': ESP.restart(); break;
-    case '?': Serial.println("cmds: l c h f i s b<0-255> t HH:MM d<N> p<name>=<v> p? p! r"); break;
+    case '?': Serial.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> p<name>=<v> p? p! r"); break;
     default: break;
   }
 }
@@ -275,6 +289,8 @@ void setup() {
   have_imu = imu_init();
   Serial.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);
+  if (time(nullptr) < CLOCK_EPOCH_MIN) setClockLocal(CLOCK_EPOCH_MIN + 10 * 3600 + 9 * 60 + 30);
+  clockSec = clockNow();
   Serial.println("ready. ? for commands");
 }
 

@@ -17,11 +17,11 @@ SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge']  # di
 FIELDS = [
  ('v','int'),
  ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('glass','rgb'),('bubbleRim','rgb'),
- ('highlightH','float'),('highlightInset','float'),('shadeDepth','float'),('meniscusDepth','float'),
+ ('remaining','bool'),('highlightH','float'),('highlightInset','float'),('highlightBright','float'),('highlightSharp','float'),('shadeRollGain','float'),('shadeDepth','float'),('meniscusDepth','float'),
  ('meniscusPow','float'),('meniscusTiltGain','float'),('meniscusAsym','float'),('edgeSoft','float'),
  ('frontBright','float'),('edgeGlow','float'),('glowStrength','float'),('cornerR','float'),('edgeLightGain','float'),
- ('bubble','bool'),('bubbleW','float'),('bubbleH','float'),('bubbleGap','float'),('bubbleY','float'),('bubbleDark','float'),
- ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSpeed','float'),
+ ('bubble','bool'),('bubbleW','float'),('bubbleH','float'),('bubbleGap','float'),('bubbleY','float'),('bubbleDark','float'),('bubbleRollGain','float'),('bubbleTiltGain','float'),
+ ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSpeed','float'),('fizzDriftGain','float'),
  ('ticksH','bool'),('tickStepH','float'),('tickMajorEveryH','float'),('tickMinorHeightH','float'),('tickMajorHeightH','float'),
  ('tickMajorWidthH','float'),('tickColorH','rgb'),('tickMajorColorH','rgb'),('tickPosH','float'),
  ('ticksM','bool'),('tickStepM','float'),('tickMajorEveryM','float'),('tickMinorHeightM','float'),('tickMajorHeightM','float'),
@@ -34,7 +34,7 @@ FIELDS = [
  ('liquidTransparency','float'),('markContrast','float'),('digitsLeadingZero','bool'),
  ('digitMinuteStep','float'),('digitHourStep','float'),
  ('fillK','float'),('fillDamp','float'),('fillSloshGain','float'),('angleK','float'),('angleDamp','float'),
- ('angleTiltGain','float'),('angleGyroGain','float'),('angleMax','float'),('acrossShiftGain','float'),('deadzone','float'),
+ ('angleTiltGain','float'),('angleGyroGain','float'),('angleMax','float'),('acrossShiftGain','float'),('acrossK','float'),('acrossDamp','float'),('acrossGyroGain','float'),('shakeGain','float'),('deadzone','float'),
  ('accelLpHz','float'),('gyroHpHz','float'),('gyroDeadzone','float'),('gyroMax','float'),('inputGain','float'),
  ('brightness','float'),('liquidBright','float'),('tickBright','float'),('digitBright','float'),
 ]

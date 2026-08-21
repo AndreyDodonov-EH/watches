@@ -77,14 +77,15 @@ static void buildPalette(const Params &p, float acrossShift, Palette &pal) {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
   float br = p.brightness * p.liquidBright;
   int hiTop = (int)jround(2 + acrossShift);
+  float roll = acrossShift * p.shadeRollGain;
   for (int y = 0; y < H; y++) {
-    float t = (float)y / (H - 1);
+    float t = clampf((y - roll) / (H - 1), 0, 1);
     RGB c;
     if (t < 0.33f) c = mix(mix(body, lo, 0.25f), body, t / 0.33f);
     else c = mix(body, lo, ((t - 0.33f) / 0.67f) * p.shadeDepth);
     if (y >= hiTop && y < hiTop + p.highlightH) {
-      float k = 1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2;
-      c = mix(c, hi, 0.35f + 0.65f * k);
+      float k = powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
+      c = mix(c, hi, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
     pal.rows[y] = q(scale(c, br));
     pal.bubbleIn[y] = q(scale(mix(c, {0, 0, 0}, p.bubbleDark), br));
@@ -183,7 +184,8 @@ struct Mark {
   int y0; const float *edges; const Params *p; bool onTop; float contrast;
   void operator()(int x, int y, uint16_t c, float cov = 1) const {
     int ry = y - y0;
-    if (!onTop && inStrip(x, y) && x < edges[ry])
+    bool inside = p->remaining ? x >= edges[ry] : x < edges[ry];
+    if (!onTop && inStrip(x, y) && inside)
       c = throughLiquid(rd(x, y), c, *p, contrast);
     pxa(x, y, c, cov);
   }
@@ -309,15 +311,19 @@ struct Fizz { float x, y, v; };
 static Fizz fizz[2][MAX_FIZZ];
 static int fizzN[2] = {0, 0};
 static inline float frand() { return (esp_random() >> 8) / 16777216.0f; }
-static void ensureFizz(int i, const Params &p) {
-  int want = (int)p.fizzCount; if (want > MAX_FIZZ) want = MAX_FIZZ; if (want < 0) want = 0;
+static void ensureFizz(int i, const Params &p, float fill, float agitation) {
+  int want = (int)floorf(p.fizzCount * fill * (1 + (agitation < 0.05f ? 0 : agitation))); if (want > MAX_FIZZ) want = MAX_FIZZ; if (want < 0) want = 0;
   while (fizzN[i] < want) { fizz[i][fizzN[i]++] = { frand(), frand() * H, 0.5f + frand() }; }
   fizzN[i] = want;
 }
-void stepFizz(const Params &p, float dt) {
+void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
+  const float speed = p.fizzSpeed * (1 + 3 * agitation);
+  const float up = sqrtf(fmaxf(0.05f, 1 - along * along - across * across));
+  const float vx = (-along * p.fizzDriftGain * speed) / L;
   for (int i = 0; i < 2; i++) for (int k = 0; k < fizzN[i]; k++) {
     Fizz &f = fizz[i][k];
-    f.y -= p.fizzSpeed * f.v * dt;
+    f.y -= speed * f.v * up * dt;
+    f.x = clampf(f.x + vx * f.v * dt, 0, 1);
     if (f.y < 3) { f.y = H - 3; f.x = frand(); f.v = 0.5f + frand(); }
   }
 }
@@ -334,10 +340,14 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
   return xe + skew + depth * powf(fabsf(d), p.meniscusPow);
 }
 
-static void drawTube(int idx, int y0, const TubeState &s, const Params &p, const Palette &pal, int ticksN) {
-  float xe = s.fillTarget * L + s.fillPos;
-  float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight);
-  ensureFizz(idx, p);
+// `remaining`: liquid at the right end, draining. The liquid layer is rendered in a mirrored frame
+// (edge from the right, along-axis signs flipped), rows are flipped in place, scale drawn last.
+static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, int ticksN) {
+  TubeState s = st;
+  if (p.remaining) { s.fillPos = -st.fillPos; s.angle = -st.angle; s.edgeLight = -st.edgeLight; }
+  float xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;
+  float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
+  ensureFizz(idx, p, clampf(xe / L, 0, 1), s.agitation);
 
   // 1 + 3: glass (only where the column does not cover it) and the liquid column
   static float edges[TUBE_HEIGHT_PX];
@@ -410,12 +420,15 @@ static void drawTube(int idx, int y0, const TubeState &s, const Params &p, const
   }
 
   // 4b: scale
-  static Labels labels;
-  bool haveLabels = layoutLabels(idx, y0, p, ticksN, labels);
-  Mark tickMark { y0, edges, &p, p.ticksOnTop, p.markContrast * p.tickBright };
-  Mark digitMark { y0, edges, &p, p.digitsOnTop, p.markContrast * p.digitBright };
-  drawTicks(y0, p, ticksN, haveLabels ? &labels : nullptr, tickMark);
-  if (haveLabels) drawLabels(labels, digitMark);
+  auto drawScale = [&]() {
+    static Labels labels;
+    bool haveLabels = layoutLabels(idx, y0, p, ticksN, labels);
+    Mark tickMark { y0, edges, &p, p.ticksOnTop, p.markContrast * p.tickBright };
+    Mark digitMark { y0, edges, &p, p.digitsOnTop, p.markContrast * p.digitBright };
+    drawTicks(y0, p, ticksN, haveLabels ? &labels : nullptr, tickMark);
+    if (haveLabels) drawLabels(labels, digitMark);
+  };
+  if (!p.remaining) drawScale();
 
   // 5: fizz
   if (p.fizz) for (int k = 0; k < fizzN[idx]; k++) {
@@ -432,7 +445,7 @@ static void drawTube(int idx, int y0, const TubeState &s, const Params &p, const
 
   // 6: bubble
   if (p.bubble) {
-    float bx = xe - p.bubbleGap, by = (H - 1) * p.bubbleY - s.acrossShift * 0.5f;
+    float bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - s.acrossShift * p.bubbleRollGain;
     float rx = p.bubbleW / 2, ry_ = p.bubbleH / 2;
     if (bx - rx > 2) {
       for (int yy = (int)floorf(by - ry_); yy <= (int)ceilf(by + ry_); yy++) {
@@ -448,6 +461,15 @@ static void drawTube(int idx, int y0, const TubeState &s, const Params &p, const
       hspan(y0 + yt, (int)jround(bx - rx * 0.45f), (int)jround(bx + rx * 0.45f) + 1, pal.bubbleRim);
       hspan(y0 + yb, (int)jround(bx - rx * 0.45f), (int)jround(bx + rx * 0.45f) + 1, pal.bubbleRim);
     }
+  }
+
+  if (p.remaining) {
+    for (int ry = 0; ry < H; ry++) {
+      uint16_t *row = FB + ry * PANEL_W;
+      for (int a = 0, b = L - 1; a < b; a++, b--) { uint16_t t = row[a]; row[a] = row[b]; row[b] = t; }
+      edges[ry] = L - edges[ry];
+    }
+    drawScale();
   }
 }
 

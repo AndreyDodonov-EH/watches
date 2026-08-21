@@ -138,7 +138,9 @@ send full `params` on preset load/import.
 
 ## Where to start (recommendation)
 
-1. **Transport 0 — Web Serial, today, zero firmware changes.** `serial.ts` already owns the port; add a
+1. **Transport 0 — Web Serial.** _Done 2026-08-21: `sim/src/transport/{types,serial}.ts`, Device fieldset
+   in `main.ts` (connect, live push coalesced to ≤ 20 Hz, pull, push all, set time); `serial.ts` is the IMU
+   feed on top of the transport. Verified on the board: write 26 ms, `p?` 15 ms._ `serial.ts` already owns the port; add a
    `write(line)` and push `p name=value` on every param edit (throttled), `p?` on connect to pull, `t` on
    "set time". This validates the whole UX loop (live mirror, throttling, pull/push semantics, the
    transport interface) with the board on the desk, before any radio/memory work. ~1–2 h.
@@ -153,6 +155,10 @@ BLE before SoftAP because: it is the primary path on your own phone (Android), c
 mode switching or captive portal, and the hosted-PWA deployment is one `vite build` + push.
 
 ## Gotchas collected so far
+
+- WSL2 + browser on Windows: don't usbipd-attach the board to WSL. Keep it on Windows (Web Serial works),
+  flash with `firmware/tools/flash-win.sh` (builds in WSL, flashes via Windows `python.exe -m esptool`, COM auto-detected
+  by VID_303A). The port is exclusive: disconnect in the sim's Device fieldset before flashing.
 
 - USB CDC: the board prints nothing unsolicited; commands are newline-terminated and echoed (since
   session 4). Don't run `compare-device.py` while a monitor holds the port.

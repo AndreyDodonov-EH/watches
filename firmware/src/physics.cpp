@@ -23,8 +23,15 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   if (s.angle > aMax) { s.angle = aMax; s.angleVel = fminf(0, s.angleVel); }
   if (s.angle < -aMax) { s.angle = -aMax; s.angleVel = fmaxf(0, s.angleVel); }
 
-  const float target = across * p.acrossShiftGain;
-  s.acrossShift += (target - s.acrossShift) * fminf(1, 8 * dt);
+  const float acrossRest = across * p.acrossShiftGain;
+  const float acrossAcc = -p.acrossK * (s.acrossShift - acrossRest) - p.acrossDamp * s.acrossVel + in.gyroAlong * p.acrossGyroGain * 10;
+  s.acrossVel += acrossAcc * dt;
+  s.acrossShift += s.acrossVel * dt;
+  if (s.acrossShift > ACROSS_MAX_PX) { s.acrossShift = ACROSS_MAX_PX; s.acrossVel = fminf(0, s.acrossVel); }
+  if (s.acrossShift < -ACROSS_MAX_PX) { s.acrossShift = -ACROSS_MAX_PX; s.acrossVel = fmaxf(0, s.acrossVel); }
+
+  const float shake = fminf(1, ((fabsf(in.gyroAcross) + fabsf(in.gyroAlong)) / 200) * p.shakeGain);
+  s.agitation += (shake - s.agitation) * fminf(1, (shake > s.agitation ? 20 : 2) * dt);
   s.edgeLight += (clampf(along, -1, 1) - s.edgeLight) * fminf(1, 5 * dt);
 }
 
@@ -49,7 +56,8 @@ TiltInput ImuFilter::step(const TiltInput &raw, const Params &p, float dt) {
     g = k * (hpPrevOut + raw.gyroAcross - hpPrevIn);
     hpPrevIn = raw.gyroAcross; hpPrevOut = g;
   }
-  g = dz(g, p.gyroDeadzone);
-  g = clampf(g, -p.gyroMax, p.gyroMax);
-  return { lpAlong2 * p.inputGain, lpAcross2 * p.inputGain, raw.gyroAlong, g * p.inputGain };
+  const float gl = 1 - expf(-2 * (float)M_PI * GYRO_LP_HZ * dt);
+  lpGyroAcross += (clampf(dz(g, p.gyroDeadzone), -p.gyroMax, p.gyroMax) - lpGyroAcross) * gl;
+  lpGyroAlong += (clampf(dz(raw.gyroAlong, p.gyroDeadzone), -p.gyroMax, p.gyroMax) - lpGyroAlong) * gl;
+  return { lpAlong2 * p.inputGain, lpAcross2 * p.inputGain, lpGyroAlong * p.inputGain, lpGyroAcross * p.inputGain };
 }

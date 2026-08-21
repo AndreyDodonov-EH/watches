@@ -8,6 +8,7 @@ import { DEFAULT_VIEW, loadSession, saveSession } from './persist';
 import { buildPanel } from './ui';
 loadSprites(`${import.meta.env.BASE_URL}assets/`);
 import { SerialImu } from './serial';
+import { SerialTransport } from './transport/serial';
 
 // ---------- state ----------
 // Params *and* view state are restored from localStorage and saved again on every edit (persist.ts).
@@ -62,12 +63,17 @@ app.innerHTML = `
       <fieldset><legend>Tilt input</legend>
         <label><input type="radio" name="src" value="manual" checked> sliders / drag on panel</label>
         <label><input type="radio" name="src" value="device"> device orientation (phone)</label>
-        <label><input type="radio" name="src" value="serial"> board via Web Serial <button id="serialbtn">connect</button> <span id="serialst"></span></label>
+        <label><input type="radio" name="src" value="serial"> board IMU via Web Serial</label>
         <div id="imuraw" class="mono"></div>
         <canvas id="scope" width="316" height="70"></canvas>
         <label>along <input type="range" id="along" min="-1" max="1" step="0.01" value="0"> <output id="alongv">0</output> g</label>
         <label>across <input type="range" id="across" min="-1" max="1" step="0.01" value="0"> <output id="acrossv">0</output> g</label>
         <button id="center">centre</button> <button id="flick">flick →</button> <button id="flickl">← flick</button> <button id="shake">shake</button>
+      </fieldset>
+      <fieldset><legend>Device</legend>
+        <label><button id="serialbtn">connect</button> <span id="serialst">disconnected</span></label>
+        <label><input type="checkbox" id="livepush" checked> push params live</label>
+        <label><button id="pull">pull params</button> <button id="settime">set time</button> <button id="pushall">push all</button></label>
       </fieldset>
     </div>
   </section>
@@ -177,18 +183,41 @@ function askOrientation() {
   window.addEventListener('devicemotion', (e) => { dev.gyroAcross = e.rotationRate?.beta ?? 0; });
 }
 
-// serial
-const serial = new SerialImu();
+// device: one serial port serves the IMU stream and the param/time commands
+const transport = new SerialTransport();
+const serial = new SerialImu(transport);
+const srcRadio = (v: string) => document.querySelector(`input[name=src][value=${v}]`) as HTMLInputElement;
+transport.onStatus = (st, detail) => {
+  $('serialst').textContent = detail ? `${st}: ${detail}` : st;
+  $('serialbtn').textContent = st === 'connected' ? 'disconnect' : 'connect';
+  if (st !== 'connected' && inputSource === 'serial') { inputSource = 'manual'; srcRadio('manual').checked = true; }
+};
 $('serialbtn').onclick = async () => {
-  if (!serial.supported) { $('serialst').textContent = 'Web Serial not supported (use Chrome)'; return; }
-  if (serial.connected) { await serial.disconnect(); $('serialbtn').textContent = 'connect'; return; }
-  try { await serial.connect(); $('serialbtn').textContent = 'disconnect'; (document.querySelector('input[name=src][value=serial]') as HTMLInputElement).checked = true; inputSource = 'serial'; }
+  if (!transport.supported) { $('serialst').textContent = 'Web Serial not supported (use Chrome)'; return; }
+  if (transport.connected) { await serial.setStream(false); await transport.disconnect(); return; }
+  try { await transport.connect(); } catch { return; }
+  const d = new Date(); await transport.setTime(d.getTime(), -d.getTimezoneOffset());  // port open may have reset the board
+  await serial.setStream(true);
+  srcRadio('serial').checked = true; inputSource = 'serial';
+};
+// Live push: coalesce slider edits per key, flush at ≤ 20 Hz. Whole-struct changes push every field.
+const dirty = new Map<keyof Params, Params[keyof Params]>();
+let flushTimer = 0;
+const flush = () => { flushTimer = 0; for (const [k, v] of dirty) void transport.setParam(k, v); dirty.clear(); };
+const pushParam = (key?: keyof Params) => {
+  if (!transport.connected || !$<HTMLInputElement>('livepush').checked) return;
+  if (key) dirty.set(key, params[key]); else for (const k of Object.keys(params) as (keyof Params)[]) dirty.set(k, params[k]);
+  if (!flushTimer) flushTimer = window.setTimeout(flush, 50);
+};
+$('pull').onclick = async () => {
+  try { Object.assign(params, await transport.getParams()); panelUi.refresh(); save(); $('serialst').textContent = 'pulled'; }
   catch (e) { $('serialst').textContent = String(e); }
 };
-serial.onStatus = (s) => { $('serialst').textContent = s; };
+$('pushall').onclick = async () => { if (!transport.connected) return; await transport.setParams(params); $('serialst').textContent = 'pushed'; };
+$('settime').onclick = async () => { const d = new Date(); await transport.setTime(d.getTime(), -d.getTimezoneOffset()); $('serialst').textContent = 'time set'; };
 
 // params panel
-const panelUi = buildPanel($('panel'), params, { onChange: save });
+const panelUi = buildPanel($('panel'), params, { onChange: (key) => { save(); pushParam(key); } });
 
 // URL params, applied on top of the restored session — for reproducible states / screenshots:
 //   ?fresh=1 (ignore the saved session) &preset=neon|mint|concept &t=10:09 &demo=120 &settle=1
@@ -291,7 +320,7 @@ function physics(dt: number) {
   hours.fillTarget = f.hours; minutes.fillTarget = f.minutes;
   stepTube(hours, input, params, dt);
   stepTube(minutes, input, params, dt);
-  stepFizz(params, dt);
+  stepFizz(params, dt, input.along, input.across, hours.agitation);
 }
 function frame(now: number) {
   requestAnimationFrame(frame);
@@ -310,7 +339,7 @@ function frame(now: number) {
   $('clock').textContent = d.toTimeString().slice(0, 8);
   const f2 = (v: number) => (v < 0 ? '' : '+') + v.toFixed(2); // sign-stable width
   $('imuraw').textContent = `filtered  along ${f2(input.along)}  across ${f2(input.across)}  gyro ${String(Math.round(input.gyroAcross)).padStart(5)}`
-    + (serial.connected ? ` | ${serial.raw}`.slice(0, 46).padEnd(46) : ''); // fixed length: never widens the box
+    + (transport.connected ? ` | ${serial.raw}`.slice(0, 46).padEnd(46) : ''); // fixed length: never widens the box
 }
 requestAnimationFrame(frame);
 

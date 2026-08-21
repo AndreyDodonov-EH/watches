@@ -42,3 +42,17 @@ incrementality makes every render bug harder to see, so it comes after the visua
   a second transport (BLE/HTTP) — planned in docs/companion-handoff.md.
 - Param writes are unvalidated on device; clamp with the sim's `PARAM_META` min/max before exposing to
   the companion.
+
+## Companion / transport
+_Added 2026-08-21 with Transport 0 (Web Serial)._
+- Serial writes are one per render frame (~26 ms): "push all" = 87 × 26 ms ≈ 2.3 s. Add a batch command
+  (`p {json}` or `p a=1,b=2`) on the firmware, or parse several lines per `loop()`.
+- Reply matching relies on the echoed command line being intact; an IMU CSV line could in theory split
+  the echo (firmware echoes per char between `imu_poll` calls). Fix firmware-side: drop echo when a
+  stream is on, or prefix replies (`> ok`).
+- `t HH:MM:SS` loses the date; `T <epoch> <tz>` + `settimeofday` per companion-handoff.md.
+- FW power management: light sleep when still (QMI8658 wake-on-motion on INT1/INT2 = GPIO45/46; not RTC pins → light sleep only, not deep), AMOLED SLPIN while asleep, partial window updates for the two bar strips only, tick rate 1–2 Hz once liquid settled. Target avg <15 mA → 500 mAh cell lasts days.
+  Two-stage wake: (1) QMI8658 WoM threshold/debounce tuned so walking/typing don't trip it, accel-only low-power mode; (2) on wake, gyro burst 100 Hz, classify wrist-raise (forearm-axis rotation 60–90° in 300–600 ms ending glass-up + 200 ms still) before panel on; no match → back to sleep. Tilt-away blanks early. Tune thresholds from `i` CSV recordings.
+
+## Power / clock
+- Low battery → AMOLED off + deep sleep: RTC domain (~10 µA) keeps the time until the cell is flat, not until the display can no longer run.
