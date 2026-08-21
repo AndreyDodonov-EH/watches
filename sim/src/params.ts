@@ -84,6 +84,7 @@ export interface Params {
   digitShadowColor: string;
   digitTint: string;     // sprite fonts only: multiply colour (e.g. #cd7f32 bronze)
   digitTintAmount: number; // 0 = untinted sheet, 1 = fully tinted
+  digitTone: number;     // sprite fonts only: -1 = black, 0 = source, 1 = white
   digitFont: number;     // 0..4 bitmap, 5..11 image sprites
   digitScaleX: number;   // hours tube: horizontal scale (0.5..6, fractional OK — nearest-neighbour)
   digitScaleY: number;   // hours tube: vertical scale — keep lower than X to counter the vial's vertical stretch
@@ -128,7 +129,7 @@ export interface Params {
   digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
-export const PARAMS_VERSION = 4;
+export const PARAMS_VERSION = 5;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -188,6 +189,7 @@ export const DEFAULT_PARAMS: Params = {
   digitFont: 5,
   digitTint: '#6d6617',
   digitTintAmount: 0.65,
+  digitTone: 0,
   digitScaleX: 6,
   digitScaleY: 5,
   digitScaleXMin: 3.75,
@@ -361,6 +363,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   },
   digitTint: { help: 'Sprite fonts only: multiply colour.', group: 'Digits', label: 'image tint colour' },
   digitTintAmount: { help: 'Sprite fonts only: 0 = untinted sheet, 1 = fully tinted.', group: 'Digits', label: 'image tint amount', min: 0, max: 1, step: 0.05 },
+  digitTone: { help: 'Sprite fonts only: darken toward black or lighten toward white after tinting.', group: 'Digits', label: 'image tone', min: -1, max: 1, step: 0.05 },
   digitColor: { help: 'Top of glyph (vertical gradient; set equal to bottom for flat).', group: 'Digits', label: 'colour top' },
   digitColor2: { help: 'Bottom of glyph.', group: 'Digits', label: 'colour bottom' },
   digitShadow: { help: '1 px darker copy offset down-right (emboss).', group: 'Digits', label: 'emboss shadow' },
