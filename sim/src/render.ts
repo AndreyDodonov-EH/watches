@@ -40,8 +40,8 @@ export function tubeLayout(p: Params): TubeLayout {
 
 export interface Palette {
   rows: Uint16Array;     // H colours: body shade per row incl. highlight band
-  glassRows: Uint16Array; // empty-tube shade per row
-  body: number; glass: number; bubbleRim: number; bubbleIn: Uint16Array;
+  tubeBackRows: Uint16Array; // tube-back colour with glass shading per row
+  body: number; tubeBack: number; bubbleRim: number; bubbleIn: Uint16Array;
 }
 
 /** Top row of the highlight band for highlight angle `lightDeg` (TubeState.light):
@@ -57,15 +57,15 @@ export function highlightTop(p: Params, H: number, lightDeg: number): number {
  *  The highlight band sits at `light` in both. The acrylic rod over the panel supplies the real specular. */
 export function buildPalette(p: Params, lightDeg = 0): Palette {
   const body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
-  const br = p.brightness * p.liquidBright;   // glass stays on the panel dimmer alone (see below)
+  const br = p.brightness * p.liquidBright;   // tube back stays on the panel dimmer alone
   const H = tubeLayout(p).H, yc = (H - 1) / 2;
   const lightRad = (2 * lightDeg * Math.PI) / 180;
   /** Lambert weight 0..1 of row y under the physical light. */
   const lambert = (y: number): number => Math.max(0, Math.cos(Math.asin(Math.max(-1, Math.min(1, (yc - y) / yc))) - lightRad));
   const rows = new Uint16Array(H);
   const bubbleIn = new Uint16Array(H);
-  const glassRows = new Uint16Array(H);
-  const glass = hexToRgb(p.glass), ghi = hexToRgb(p.glassHi);
+  const tubeBackRows = new Uint16Array(H);
+  const tubeBack = hexToRgb(p.tubeBack), ghi = hexToRgb(p.glassHi);
   /** Glass wall shading weight 0..1 for a row: specular tent on the top wall, a faint band on the
    *  lower wall, brighter outermost rows. */
   const glassW = (y: number): number => {
@@ -94,12 +94,12 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
       c = mix(c, hi, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
     }
     const gw = glassW(y);
-    glassRows[y] = q(scale(mix(glass, ghi, gw), p.brightness));
+    tubeBackRows[y] = q(scale(mix(tubeBack, ghi, gw), p.brightness));
     c = mix(c, ghi, gw * p.glassOverLiquid);
     rows[y] = q(scale(c, br));
     bubbleIn[y] = q(scale(mix(c, [0, 0, 0], p.bubbleDark), br));
   }
-  return { rows, glassRows, body: q(scale(body, br)), glass: q(scale(glass, p.brightness)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn };
+  return { rows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn };
 }
 
 function hspan(y: number, x0: number, x1: number, c: number): void {
@@ -434,8 +434,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   ensureFizz(idx, p, Math.max(0, Math.min(1, xe / L)), s.agitation);
 
-  // Step 1: glass background (empty tube) — whole strip
-  for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.glassRows[ry]);
+  // Step 1: tube back — whole strip
+  for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.tubeBackRows[ry]);
 
   // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
   const edges = new Float32Array(H);
@@ -453,7 +453,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const w = Math.max(1, Math.round(p.edgeSoft));
       for (let k = 0; k < w; k++) {
         const t = Math.max(0, Math.min(1, (frac - k) / 1 + (w > 1 ? 0.5 : 0)));
-        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.glassRows[ry], pal.rows[ry], t));
+        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], t));
       }
     } else if (frac >= 0.5) px(xi, y0 + ry, pal.rows[ry]);
   }
@@ -475,12 +475,12 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     }
   }
 
-  // Step 3b: edge glow — a few px past the edge fade from (body*glowStrength) to glass. Ported as a short span of LUT colours.
+  // Step 3b: edge glow — a few px past the edge fade from liquid to the tube back.
   if (p.edgeGlow > 0 && p.glowStrength > 0) {
     for (let ry = 0; ry < H; ry++) {
       const ex = edges[ry]; const xs = Math.ceil(ex + (p.edgeSoft > 0 ? Math.round(p.edgeSoft) : 0));
       for (let k = 0; k < p.edgeGlow; k++) {
-        const t = (1 - k / p.edgeGlow); const c = blend565(pal.glassRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK));
+        const t = (1 - k / p.edgeGlow); const c = blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK));
         if (xs + k < L) px(xs + k, y0 + ry, c);
       }
     }

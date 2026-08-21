@@ -7,7 +7,7 @@ export interface Params {
   liquid: string;        // body colour
   liquidHi: string;      // specular highlight strip
   liquidLo: string;      // bottom shade (cylinder shading)
-  glass: string;         // empty part of the tube (very dark; 0 = off for AMOLED power)
+  tubeBack: string;      // colour behind the liquid and glass layers (very dark; 0 = AMOLED off)
   // --- glass tube shading (empty part; specular also over the liquid) ---
   glassHi: string;       // specular colour of the glass wall
   glassBody: number;     // 0..1 ambient cylinder shade of the empty wall (0 = pure black, AMOLED off)
@@ -128,7 +128,7 @@ export interface Params {
   digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
-export const PARAMS_VERSION = 3;
+export const PARAMS_VERSION = 4;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -139,7 +139,7 @@ export const DEFAULT_PARAMS: Params = {
   liquid: '#346a2a',
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
-  glass: '#000000',
+  tubeBack: '#000000',
   glassHi: '#a8c0c8',
   glassBody: 0.1,
   glassHiBright: 0.55,
@@ -228,7 +228,7 @@ export const DEFAULT_PARAMS: Params = {
 
 /** Neon preset close to images/reference-liquid.jpg */
 export const PRESET_NEON: Partial<Params> = {
-  liquid: '#39ff14', liquidHi: '#b6ffa0', liquidLo: '#158f08', bubbleRim: '#d8ffcc', glass: '#061006',
+  liquid: '#39ff14', liquidHi: '#b6ffa0', liquidLo: '#158f08', bubbleRim: '#d8ffcc', tubeBack: '#061006',
   fizz: true,
 };
 /** Concept-art preset (images/concept-cuff.jpg): rounded ends, convex bright front, neon. */
@@ -238,12 +238,12 @@ export const PRESET_CONCEPT: Partial<Params> = {
 };
 /** User-tuned look (2026-08-20): deep green body, wide highlight, convex bright front, fizz. */
 export const PRESET_USER_V1: Partial<Params> = {
-  liquid: '#346a2a', liquidHi: '#b6ffa0', liquidLo: '#1e7515', glass: '#000000', bubbleRim: '#b0c7a9',
+  liquid: '#346a2a', liquidHi: '#b6ffa0', liquidLo: '#1e7515', tubeBack: '#000000', bubbleRim: '#b0c7a9',
   highlightH: 30, highlightInset: 0, shadeDepth: 0.7, meniscusDepth: -8.5, meniscusPow: 1.6, edgeSoft: 2.7,
   frontBright: 32, edgeGlow: 25, glowStrength: 0.47, cornerR: 0, bubble: false, fizz: true, fizzCount: 10, fizzSize: 2, fizzSpeed: 14,
 };
 export const PRESET_MINT: Partial<Params> = {
-  liquid: '#5dcaa5', liquidHi: '#9fe1cb', liquidLo: '#1f6b52', bubbleRim: '#bff5dc', glass: '#000000',
+  liquid: '#5dcaa5', liquidHi: '#9fe1cb', liquidLo: '#1f6b52', bubbleRim: '#bff5dc', tubeBack: '#000000',
   fizz: false,
 };
 
@@ -253,6 +253,7 @@ export type ParamKey = keyof Params;
 export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   const r: Record<string, unknown> = { ...o };
   const from = typeof r.v === 'number' ? r.v : 1;
+  if ('glass' in r) { if (!('tubeBack' in r)) r.tubeBack = r.glass; delete r.glass; }
   if ('ticks' in r) { r.ticksH = r.ticksM = r.ticks; delete r.ticks; }
   if ('tickMajorH' in r) { r.tickMajorHeightH = r.tickMajorHeightM = r.tickMajorH; delete r.tickMajorH; }
   if ('tickMinorH' in r) { r.tickMinorHeightH = r.tickMinorHeightM = r.tickMinorH; delete r.tickMinorH; }
@@ -282,7 +283,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
 /** UI metadata: [min, max, step] for numeric params; grouping for the panel. */
 export const PARAM_META: Record<string, { group: string; label?: string; help?: string; min?: number; max?: number; step?: number; options?: readonly string[] }> = {
   liquid: { help: 'Body colour of the liquid.', group: 'Colour' }, liquidHi: { help: 'Specular highlight strip colour.', group: 'Colour' }, liquidLo: { help: 'Bottom shade colour (cylinder shading).', group: 'Colour' },
-  glass: { help: 'Empty part of the tube. #000000 = AMOLED pixels off.', group: 'Colour' }, bubbleRim: { help: 'Rim colour of the spirit-level bubble and fizz.', group: 'Colour' },
+  tubeBack: { help: 'Colour behind the liquid and glass layers. #000000 = AMOLED pixels off.', group: 'Colour', label: 'tube back' }, bubbleRim: { help: 'Rim colour of the spirit-level bubble and fizz.', group: 'Colour' },
   glassHi: { help: 'Specular colour of the glass wall.', group: 'Glass', label: 'specular colour' },
   glassBody: { help: 'Ambient cylinder shade of the empty wall. 0 = pure black.', group: 'Glass', label: 'ambient body', min: 0, max: 0.5, step: 0.01 },
   glassHiBright: { help: 'Strength of the glass specular band (same rows as the liquid highlight).', group: 'Glass', label: 'specular', min: 0, max: 1, step: 0.01 },

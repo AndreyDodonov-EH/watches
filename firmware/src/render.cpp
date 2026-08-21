@@ -77,7 +77,7 @@ static inline void pxa(int x, int y, uint16_t c, float t) {
 // ---------------------------------------------------------------------------------------------
 // palette
 // ---------------------------------------------------------------------------------------------
-struct Palette { uint16_t rows[TUBE_HEIGHT_MAX]; uint16_t bubbleIn[TUBE_HEIGHT_MAX]; uint16_t glassRows[TUBE_HEIGHT_MAX]; uint16_t body, glass, bubbleRim; };
+struct Palette { uint16_t rows[TUBE_HEIGHT_MAX]; uint16_t bubbleIn[TUBE_HEIGHT_MAX]; uint16_t tubeBackRows[TUBE_HEIGHT_MAX]; uint16_t body, tubeBack, bubbleRim; };
 
 // Glass wall shading weight 0..1 per row (sim: glassW): ambient cylinder shade, specular tent on the
 // top wall, faint band on the lower wall, brighter outermost rows.
@@ -103,7 +103,7 @@ static int highlightTop(const Params &p, float lightDeg) {
 // Style top light blended (lightPhys) with a Lambert cylinder lit from 2*light (sim buildPalette).
 static void buildPalette(const Params &p, float lightDeg, Palette &pal) {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
-  RGB glass = hexToRgb(p.glass), ghi = hexToRgb(p.glassHi);
+  RGB tubeBack = hexToRgb(p.tubeBack), ghi = hexToRgb(p.glassHi);
   float br = p.brightness * p.liquidBright;
   float yc = (H - 1) / 2.0f, lightRad = 2 * lightDeg * (float)M_PI / 180;
   int hiTop = highlightTop(p, lightDeg);
@@ -119,13 +119,13 @@ static void buildPalette(const Params &p, float lightDeg, Palette &pal) {
       c = mix(c, hi, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
     float gw = glassW(p, y, hiTop, lam);
-    pal.glassRows[y] = q(scale(mix(glass, ghi, gw), p.brightness));
+    pal.tubeBackRows[y] = q(scale(mix(tubeBack, ghi, gw), p.brightness));
     c = mix(c, ghi, gw * p.glassOverLiquid);
     pal.rows[y] = q(scale(c, br));
     pal.bubbleIn[y] = q(scale(mix(c, {0, 0, 0}, p.bubbleDark), br));
   }
   pal.body = q(scale(body, br));
-  pal.glass = q(scale(glass, p.brightness));
+  pal.tubeBack = q(scale(tubeBack, p.brightness));
   pal.bubbleRim = q(scale(hexToRgb(p.bubbleRim), br));
 }
 
@@ -389,7 +389,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   ensureFizz(idx, p, clampf(xe / L, 0, 1), s.agitation);
 
-  // 1 + 3: glass (only where the column does not cover it) and the liquid column
+  // 1 + 3: tube back and liquid column
   static float edges[TUBE_HEIGHT_MAX];
   for (int ry = 0; ry < H; ry++) {
     float ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt);
@@ -400,14 +400,14 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
       if (dy > yc - r) { float k = (dy - (yc - r)) / r; x0 = (int)jround(r - sqrtf(fmaxf(0, 1 - k * k)) * r); }
     }
     int xi = (int)floorf(ex); float frac = ex - xi;
-    if (x0 > 0) hspan(y0 + ry, 0, x0, pal.glassRows[ry]);
-    hspan(y0 + ry, x0 > xi ? x0 : xi, L, pal.glassRows[ry]);
+    if (x0 > 0) hspan(y0 + ry, 0, x0, pal.tubeBackRows[ry]);
+    hspan(y0 + ry, x0 > xi ? x0 : xi, L, pal.tubeBackRows[ry]);
     hspan(y0 + ry, x0, xi, pal.rows[ry]);
     if (p.edgeSoft > 0) {
       int w = (int)fmaxf(1, jround(p.edgeSoft));
       for (int k = 0; k < w; k++) {
         float t = clampf((frac - k) + (w > 1 ? 0.5f : 0), 0, 1);
-        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.glassRows[ry], pal.rows[ry], t));
+        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], t));
       }
     } else if (frac >= 0.5f) px(xi, y0 + ry, pal.rows[ry]);
   }
@@ -433,7 +433,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
       int xs = (int)ceilf(edges[ry] + (p.edgeSoft > 0 ? jround(p.edgeSoft) : 0));
       for (int k = 0; k < p.edgeGlow; k++) {
         float t = 1 - k / p.edgeGlow;
-        uint16_t c = blend565(pal.glassRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK));
+        uint16_t c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK));
         if (xs + k < L) px(xs + k, y0 + ry, c);
       }
     }
