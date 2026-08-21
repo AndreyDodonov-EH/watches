@@ -25,16 +25,17 @@ export interface TubeState {
   fillTarget: number;  // 0..1 from time
   fillPos: number;     // px offset of the edge relative to target (slosh), spring toward 0
   fillVel: number;
-  angle: number;       // deg, surface tilt (+ = top of meniscus further right)
+  angle: number;       // deg, in-plane front skew (+ = bottom contact line leads); follows across-tilt
   angleVel: number;
-  acrossShift: number; // px, spring-damped roll swing: highlight, shading, bubble height
+  acrossShift: number; // px, spring-damped roll response of the light (highlight row, shading, bubble height) — style, not liquid motion
   acrossVel: number;
   agitation: number;   // 0..1, gyro energy with fast attack / slow decay: fizz speed, edge glow
   edgeLight: number;   // -1..1, slow along-tilt follower — brightens/dims the fill edge (render only)
+  acrossTilt: number;  // -1..1, slow across-tilt follower — meniscus sag toward the low wall (render only)
 }
 
 export function newTube(): TubeState {
-  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, acrossShift: 0, acrossVel: 0, agitation: 0, edgeLight: 0 };
+  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, acrossShift: 0, acrossVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0 };
 }
 
 function dz(v: number, d: number): number {
@@ -54,18 +55,18 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   if (s.fillPos > FILL_SLOSH_MAX_PX) { s.fillPos = FILL_SLOSH_MAX_PX; s.fillVel = Math.min(0, s.fillVel); }
   if (s.fillPos < -FILL_SLOSH_MAX_PX) { s.fillPos = -FILL_SLOSH_MAX_PX; s.fillVel = Math.max(0, s.fillVel); }
 
-  // Surface angle: rest angle follows along-tilt; gyro about the across axis gives impulses.
+  // Front skew: the screen is the tube's cross-section plane, so only the across component of
+  // gravity (the one fizz rises against) tilts the front on screen. Along-tilt is out of plane.
   const aMax = Math.min(p.angleMax, ANGLE_HARD_MAX_DEG);
-  const lever = along * Math.sqrt(Math.max(0, 1 - along * along));   // gravity torque on the front: 0 when vertical
-  const angleRest = Math.max(-aMax, Math.min(aMax, lever * p.angleTiltGain));
-  const angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel
-    + inp.gyroAcross * p.angleGyroGain * 10;
+  const angleRest = Math.max(-aMax, Math.min(aMax, across * p.angleTiltGain));
+  const angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel;
   s.angleVel += angleAcc * dt;
   s.angle += s.angleVel * dt;
   if (s.angle > aMax) { s.angle = aMax; s.angleVel = Math.min(0, s.angleVel); }
   if (s.angle < -aMax) { s.angle = -aMax; s.angleVel = Math.max(0, s.angleVel); }
 
-  // Roll: the liquid swings around the tube axis — spring toward the across-tilt rest, kicked by roll rate.
+  // Roll: a full-bore pinned column does not move under roll; acrossShift moves only the LIGHT
+  // (highlight row, shading, bubble height) — a stylised world-fixed light. Spring toward across rest, kicked by roll rate.
   const acrossRest = across * p.acrossShiftGain;
   const acrossAcc = -p.acrossK * (s.acrossShift - acrossRest) - p.acrossDamp * s.acrossVel
     + inp.gyroAlong * p.acrossGyroGain * 10;
@@ -81,6 +82,7 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   // Edge light: slow follower of along-tilt. +1 = gravity presses the liquid into the right
   // end (edge glows brighter), -1 = drains away from it (edge dims). Consumed by the renderer.
   s.edgeLight += (Math.max(-1, Math.min(1, along)) - s.edgeLight) * Math.min(1, 5 * dt);
+  s.acrossTilt += (Math.max(-1, Math.min(1, across)) - s.acrossTilt) * Math.min(1, 5 * dt);
 }
 
 /** Continuous fill levels per the layout spec. */

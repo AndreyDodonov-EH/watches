@@ -26,12 +26,12 @@ export interface Params {
   highlightInset: number;
   highlightBright: number; // 0..1.5 strength of the specular band
   highlightSharp: number;  // 0.3..4 band profile exponent (high = narrow, glossy)
-  shadeRollGain: number;   // 0..2 rows the cylinder shading rotates per px of acrossShift// px, highlight starts this far from left and ends this far before the edge
+  shadeRollGain: number;   // 0..2 rows the cylinder shading rotates per px of acrossShift (light effect, see physics.ts)
   shadeDepth: number;    // 0..1, how dark the bottom rows get (cylinder shading)
   meniscusDepth: number; // px, how far the liquid climbs the wall at top/bottom vs centre (>0 concave)
   meniscusPow: number;   // curve exponent (2 = parabola)
   meniscusTiltGain: number; // 0..1: tilt into the end bulges the drop (deeper meniscus), away flattens it
-  meniscusAsym: number;  // 0..1: the bulge sags toward gravity (bottom wall extends, top retracts)
+  meniscusAsym: number;  // 0..1: across-tilt sags the bulge onto the low wall (its contact line extends, the high one retracts)
   meniscusRollGain: number; // deg of front skew per px of roll swing (acrossShift): the lower wall leads
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
   frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
@@ -105,10 +105,10 @@ export interface Params {
   fillSloshGain: number; // px per g of along-tube acceleration
   angleK: number;        // spring stiffness of surface angle
   angleDamp: number;
-  angleTiltGain: number; // deg of surface tilt per g of along-tube tilt (static response)
-  angleGyroGain: number; // deg impulse per (dps) of along-axis rotation rate
+  angleTiltGain: number; // deg of in-plane front skew per g of across-tube tilt (static response)
+  angleGyroGain: number; // fill-edge kick per dps of rotation about the across axis (flicks)
   angleMax: number;      // deg clamp
-  acrossShiftGain: number; // px vertical shift of highlight per g of across-tube tilt
+  acrossShiftGain: number; // px vertical shift of highlight per g of across-tube tilt (moves the light, not the liquid)
   acrossK: number;       // spring stiffness of the across (roll) swing
   acrossDamp: number;
   acrossGyroGain: number; // px impulse per dps of roll rate (gyro about the tube axis)
@@ -308,7 +308,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   meniscusDepth: { group: 'Shape', min: -12, max: 20, step: 0.5 },
   meniscusPow: { group: 'Shape', min: 1, max: 4, step: 0.1 },
   meniscusTiltGain: { group: 'Shape', label: 'meniscus bulge vs tilt', min: 0, max: 1, step: 0.05 },
-  meniscusAsym: { group: 'Shape', label: 'meniscus bottom-cling (max end-up)', min: 0, max: 1, step: 0.05 },
+  meniscusAsym: { group: 'Shape', label: 'meniscus sag per g across', min: 0, max: 1, step: 0.05 },
   meniscusRollGain: { group: 'Shape', label: 'front skew vs roll (deg/px)', min: 0, max: 1, step: 0.01 },
   edgeSoft: { group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { group: 'Shape', min: 0, max: 40, step: 1 },
@@ -378,7 +378,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   fillSloshGain: { group: 'Physics', label: 'slosh px/g (capped 30)', min: 0, max: 30, step: 0.5 },
   angleK: { group: 'Physics', min: 1, max: 800, step: 1 },
   angleDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },
-  angleTiltGain: { group: 'Physics', label: 'tilt deg/g', min: 0, max: 20, step: 0.5 },
+  angleTiltGain: { group: 'Physics', label: 'skew deg/g across', min: 0, max: 20, step: 0.5 },
   angleGyroGain: { group: 'Physics', min: 0, max: 3, step: 0.005 },
   angleMax: { group: 'Physics', label: 'angle clamp (hard cap 20)', min: 0, max: 20, step: 1 },
   acrossShiftGain: { group: 'Physics', label: 'roll shift px/g', min: 0, max: 40, step: 0.5 },

@@ -93,6 +93,7 @@ static float glassW(const Params &p, int y, int hiTop) {
   return fminf(1, w);
 }
 
+// Stylised fixed light from screen-top (see sim buildPalette); the acrylic rod supplies real specular.
 static void buildPalette(const Params &p, float acrossShift, Palette &pal) {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
   RGB glass = hexToRgb(p.glass), ghi = hexToRgb(p.glassHi);
@@ -341,6 +342,7 @@ static void ensureFizz(int i, const Params &p, float fill, float agitation) {
   fizzN[i] = want;
 }
 void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
+  if (p.remaining) along = -along;   // fizz lives in the mirrored liquid frame (see drawTube)
   const float speed = p.fizzSpeed * (1 + 3 * agitation);
   const float up = sqrtf(fmaxf(0.0f, 1 - along * along - across * across));
   const float a = clampf(across * p.fizzAcrossGain, -1, 1);
@@ -358,21 +360,22 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
 // ---------------------------------------------------------------------------------------------
 // tube
 // ---------------------------------------------------------------------------------------------
-static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt) {
+// tilt = along follower (edgeLight), side = across follower (acrossTilt); see sim edgeX.
+static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt, float side) {
   const float yc = (H - 1) / 2.0f;
   float d = (ry - yc) / yc;
   float skew = tanf(angleDeg * (float)M_PI / 180) * (ry - yc);
-  float asymEff = p.meniscusAsym * clampf(0.4f - 0.6f * tilt, 0, 1) * sqrtf(fmaxf(0, 1 - tilt * tilt)); // no sag when vertical
+  float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f);
   float depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
   return xe + skew + depth * powf(fabsf(d), p.meniscusPow);
 }
 
 // `remaining`: liquid at the right end, draining. The liquid layer is rendered in a mirrored frame
-// (edge from the right, along-axis signs flipped), rows are flipped in place, scale drawn last.
+// (edge from the right, along-axis signs flipped; across-axis state is invariant), rows are flipped in place, scale drawn last.
 static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, int ticksN) {
   TubeState s = st;
-  if (p.remaining) { s.fillPos = -st.fillPos; s.angle = -st.angle; s.edgeLight = -st.edgeLight; }
-  float angle = s.angle + (p.remaining ? -1 : 1) * s.acrossShift * p.meniscusRollGain;
+  if (p.remaining) { s.fillPos = -st.fillPos; s.edgeLight = -st.edgeLight; }
+  float angle = s.angle + s.acrossShift * p.meniscusRollGain;
   float xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;
   float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   ensureFizz(idx, p, clampf(xe / L, 0, 1), s.agitation);
@@ -380,7 +383,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   // 1 + 3: glass (only where the column does not cover it) and the liquid column
   static float edges[TUBE_HEIGHT_MAX];
   for (int ry = 0; ry < H; ry++) {
-    float ex = edgeX(ry, xe, angle, p, s.edgeLight);
+    float ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt);
     edges[ry] = ex;
     int x0 = 0;
     if (p.cornerR > 0) {
@@ -463,7 +466,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     const Fizz &f = fizz[idx][k];
     int fx = (int)jround(f.x * (xe - 6)), fy = (int)jround(f.y);
     if (fy < 0 || fy >= H) continue;
-    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight) - 2) continue;
+    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
     int sz = (int)p.fizzSize;
     for (int dy = 0; dy < sz; dy++) for (int dx = 0; dx < sz; dx++) {
       bool inner = sz >= 3 && dx > 0 && dy > 0 && dx < sz - 1 && dy < sz - 1;

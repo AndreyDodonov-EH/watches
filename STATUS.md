@@ -69,7 +69,7 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
 ## Phase 2 — browser simulator (`sim/`)
 - Vite + TS, no framework. `cd sim && npm install && npm run dev` → http://localhost:5173
 - Renders into a real RGB565 `Uint16Array` framebuffer (exact 565 quantisation) using only row spans /
-  pixels / a per-row colour LUT, so the routine ports 1:1 (documented in `docs/render-routine.md`).
+  pixels / a per-row colour LUT, so the routine ports 1:1 (`sim/src/render.ts` is the spec; `firmware/src/render.cpp` mirrors it).
 - Fixed-step 50 Hz physics (`sim/src/physics.ts`), decoupled from rAF rendering. IMU axes mapped via `spec/layout.ts`.
 - Inputs: sliders / drag on the panel, phone DeviceOrientation, **Web Serial to the board's `i` stream** (Chrome).
 - Time: real / demo (×N) / set HH:MM. Leather-cuff overlay with slot inset, acrylic-vial lens remap and gloss
@@ -92,7 +92,7 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
   gap under each number; majors are longer, wider (`tickMajorWidth*`) and placed every N **units**
   (`tickMajorEvery*` counts hours/minutes, migrated from the old "every N-th minor" via `params.v`);
   marks inside the liquid keep a minimum luma distance from it (`markContrast`) so the ladder survives
-  the highlight band, or are printed in front of it entirely (`ticksOnTop` / `digitsOnTop`). Contract in `docs/render-routine.md` step 4b.
+  the highlight band, or are printed in front of it entirely (`ticksOnTop` / `digitsOnTop`). Contract: `throughLiquid` in `sim/src/render.ts`.
 - URL params, applied on top of the restored session: `?fresh=1&preset=neon&t=10:09&along=0.3&across=0&settle=1&cuff=0&lens=0.6&lenscurve=1&lenssmooth=1&leather=black&grid=1&scale=3&demo=120&p.<key>=<v>`.
 - Parts sourcing research: `docs/parts-sourcing.md` (board is 57.5 × 24.5 mm; 8×4 mm acrylic half-round rod recommended).
 - **Pinned-liquid model + IMU hardening (2026-08-20, session 3)** — real accelerometer input no longer sends
@@ -111,7 +111,7 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
   fixed-format text so the control menus no longer twitch from reflow (root cause of the recurring Tilt-input twitch: fieldset's default `min-inline-size: min-content` let the variable-length raw-CSV line widen the box past `width: 340px` — now `min-inline-size: 0` + fixed-length raw text). A live **IMU scope** (canvas in the
   Tilt-input fieldset, ~6 s window) plots raw vs filtered accel (grey/mint, ±1 g) and gyro (dim/bright blue,
   ±gyroMax) — the liquid's response is deliberately tiny, so filter tuning is judged on the scope, not the
-  tube. Flick button = decaying ~150 ms raw gyro pulse (a single-sample kick died in the deadzone). Drop-end realism: `meniscusTiltGain` (tilt into the end bulges the meniscus, away flattens) and `meniscusAsym` (bottom-cling: mild at rest, gone when end-down — cap fills round, max when end-up — draining tail clings to the bottom wall), both driven by the smoothed `edgeLight` tilt, formula in docs/render-routine.md step 3.
+  tube. Flick button = decaying ~150 ms raw gyro pulse (a single-sample kick died in the deadzone). Drop-end realism: `meniscusTiltGain` (tilt into the end bulges the meniscus, away flattens) and `meniscusAsym` (bottom-cling: mild at rest, gone when end-down — cap fills round, max when end-up — draining tail clings to the bottom wall), both driven by the smoothed `edgeLight` tilt, formula in `edgeX` (`sim/src/render.ts`).
 - Open: user sign-off on the look; final palette; leather texture asset (`sim/public/assets/leather-tile.jpg`,
   CSS falls back to procedural noise if missing).
 

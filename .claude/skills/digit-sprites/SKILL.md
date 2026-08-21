@@ -38,7 +38,7 @@ If it asserts `expected 10 glyphs, found N`: glyphs touch (N<10) or a glyph has 
 
 - `sim/src/render.ts`: append `'digits-<style>'` to `SPRITE_SHEETS` (index = `digitFont` value − `SPRITE_FONT`).
 - `sim/src/params.ts`: bump `digitFont` meta `max` and extend the label (`… · 8 <style>`); update the comment on the `digitFont` field.
-- `docs/render-routine.md` step 4b: add the style to the `digitFont` list.
+- `sim/src/render.ts`: append the sheet name to `SPRITE_SHEETS` and extend the `digitFont` comment in `sim/src/params.ts`.
 
 ## 4. Verify
 
