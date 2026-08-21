@@ -56,3 +56,6 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 
 ## Power / clock
 - Low battery → AMOLED off + deep sleep: RTC domain (~10 µA) keeps the time until the cell is flat, not until the display can no longer run.
+
+## Vial optic
+- Sim `lens` / `lensCurve` / `gloss` are view-only (overlay.ts), not firmware params. If the real acrylic rod magnifies too little or distorts the bar, the firmware may need its own per-row remap of the tube strip to increase or compensate the lens effect.
