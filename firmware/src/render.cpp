@@ -349,8 +349,9 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   for (int i = 0; i < 2; i++) for (int k = 0; k < fizzN[i]; k++) {
     Fizz &f = fizz[i][k];
     f.y -= speed * f.v * rise * dt;
-    f.x = clampf(f.x + vx * f.v * dt, 0, 1);
+    f.x += vx * f.v * dt;
     if (f.y < 3 || f.y >= H) { f.y = rise >= 0 ? H - 3 : 3; f.x = frand(); f.v = 0.5f + frand(); }
+    else if (f.x < 0 || f.x > 1) { f.x = vx < 0 ? 1 : 0; f.y = 3 + frand() * (H - 6); f.v = 0.5f + frand(); }
   }
 }
 
