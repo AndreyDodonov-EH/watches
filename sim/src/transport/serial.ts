@@ -70,7 +70,7 @@ export class SerialTransport implements WatchTransport {
   }
 
   async setParam(key: ParamKey, value: Params[ParamKey]): Promise<boolean> {
-    return (await this.request(`p ${key}=${fmt(value)}`)) === 'ok';
+    return (await this.request(`p ${key}=${fmt(value)}`)).startsWith('ok');
   }
 
   async setParams(patch: Partial<Params>): Promise<void> {

@@ -215,7 +215,13 @@ $('serialbtn').onclick = async () => {
 // Live push: coalesce slider edits per key, flush at ≤ 20 Hz. Whole-struct changes push every field.
 const dirty = new Map<keyof Params, Params[keyof Params]>();
 let flushTimer = 0;
-const flush = () => { flushTimer = 0; for (const [k, v] of dirty) void transport.setParam(k, v); dirty.clear(); };
+const flush = async () => {
+  flushTimer = 0;
+  const batch = [...dirty]; dirty.clear();
+  const rejected: string[] = [];
+  for (const [k, v] of batch) if (!(await transport.setParam(k, v))) rejected.push(k);
+  if (rejected.length) $('serialst').textContent = `device rejected: ${rejected.join(', ')} (old firmware?)`;
+};
 const pushParam = (key?: keyof Params) => {
   if (!transport.connected || !$<HTMLInputElement>('livepush').checked) return;
   if (key) dirty.set(key, params[key]); else for (const k of Object.keys(params) as (keyof Params)[]) dirty.set(k, params[k]);
