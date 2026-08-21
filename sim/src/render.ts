@@ -44,13 +44,24 @@ export interface Palette {
   body: number; glass: number; bubbleRim: number; bubbleIn: Uint16Array;
 }
 
-/** Step 0: build the per-row colour LUT. Firmware does this once per param change.
- *  Lighting is stylised: a fixed light from screen-top (side view of the tube), not the wearer's
- *  environment. The acrylic rod over the panel supplies the real specular. */
-export function buildPalette(p: Params, acrossShift = 0): Palette {
+/** Top row of the highlight band for highlight angle `lightDeg` (TubeState.light):
+ *  the cylinder surface point whose normal makes that angle with the screen normal. */
+export function highlightTop(p: Params, H: number, lightDeg: number): number {
+  const yc = (H - 1) / 2;
+  return Math.round(yc - yc * Math.sin((lightDeg * Math.PI) / 180) - (p.highlightH - 1) / 2);
+}
+
+/** Step 0: build the per-row colour LUT. Firmware rebuilds it when the light moves.
+ *  Shading blends (lightPhys) a stylised top light (bright at 1/3, dark at the bottom) with a
+ *  Lambert cylinder lit from direction 2*light in the cross-section (world-up when physical).
+ *  The highlight band sits at `light` in both. The acrylic rod over the panel supplies the real specular. */
+export function buildPalette(p: Params, lightDeg = 0): Palette {
   const body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
   const br = p.brightness * p.liquidBright;   // glass stays on the panel dimmer alone (see below)
-  const H = tubeLayout(p).H;
+  const H = tubeLayout(p).H, yc = (H - 1) / 2;
+  const lightRad = (2 * lightDeg * Math.PI) / 180;
+  /** Lambert weight 0..1 of row y under the physical light. */
+  const lambert = (y: number): number => Math.max(0, Math.cos(Math.asin(Math.max(-1, Math.min(1, (yc - y) / yc))) - lightRad));
   const rows = new Uint16Array(H);
   const bubbleIn = new Uint16Array(H);
   const glassRows = new Uint16Array(H);
@@ -59,8 +70,9 @@ export function buildPalette(p: Params, acrossShift = 0): Palette {
    *  lower wall, brighter outermost rows. */
   const glassW = (y: number): number => {
     const t = y / (H - 1);
-    // ambient: cylinder lit from above — brightest near 1/3, darkest near 2/3, lifting again at the bottom
-    let w = p.glassBody * (0.5 + 0.5 * Math.cos((t - 0.3) * Math.PI * 1.6));
+    // ambient: style = cylinder lit from above (brightest near 1/3, darkest near 2/3, lifting again at the bottom)
+    const amb = 0.5 + 0.5 * Math.cos((t - 0.3) * Math.PI * 1.6);
+    let w = p.glassBody * (amb + (lambert(y) - amb) * p.lightPhys);
     if (y >= hiTop && y < hiTop + p.highlightH)
       w += p.glassHiBright * Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp);
     const d = (t - 0.82) / 0.07;
@@ -69,14 +81,14 @@ export function buildPalette(p: Params, acrossShift = 0): Palette {
     if (rim < 2) w += p.glassRim * (rim === 0 ? 1 : 0.4);
     return Math.min(1, w);
   };
-  const hiTop = Math.round(2 + acrossShift);
-  const roll = acrossShift * p.shadeRollGain;   // rows the shading rotates with roll
+  const hiTop = highlightTop(p, H, lightDeg);
   for (let y = 0; y < H; y++) {
-    // cylinder shading: brightest around 1/3 from top, darkest at the bottom
-    const t = Math.max(0, Math.min(1, (y - roll) / (H - 1)));
+    const t = y / (H - 1);
+    // style shading: brightest around 1/3 from top, darkest at the bottom
     let c: [number, number, number];
     if (t < 0.33) c = mix(mix(body, lo, 0.25), body, t / 0.33);
     else c = mix(body, lo, ((t - 0.33) / 0.67) * p.shadeDepth);
+    if (p.lightPhys > 0) c = mix(c, mix(lo, body, 1 - p.shadeDepth * (1 - lambert(y))), p.lightPhys);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       const k = Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp); // tent
       c = mix(c, hi, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
@@ -405,9 +417,9 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
  *  flipped in place, and the scale is drawn last in panel coordinates. */
 export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number): void {
   const H = pal.rows.length, L = TUBE_LENGTH_PX;
-  // Mirroring flips along-axis quantities only; across-axis ones (angle, acrossShift, acrossTilt) are invariant.
+  // Mirroring flips along-axis quantities only; across-axis ones (angle, light, acrossTilt) are invariant.
   const s = p.remaining ? { ...state, fillPos: -state.fillPos, edgeLight: -state.edgeLight } : state;
-  const angle = s.angle + s.acrossShift * p.meniscusRollGain;   // roll swing: the lower contact line leads
+  const angle = s.angle;
   const xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;   // edge centre
   // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
   // liquid into the right end brightens the cap glow, draining away from it dims it.
@@ -469,8 +481,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Step 4: highlight inset — erase highlight near the edge so it reads as a cylinder (optional)
   // (handled by LUT; inset applied by drawing glass over highlight rows past xe - inset? simpler: skip)
   if (p.highlightInset > 0) {
-    const hiTop = Math.round(2 + s.acrossShift);
-    for (let ry = hiTop; ry < hiTop + p.highlightH && ry < H; ry++) {
+    const hiTop = highlightTop(p, H, s.light);
+    for (let ry = Math.max(0, hiTop); ry < hiTop + p.highlightH && ry < H; ry++) {
       const ex = edges[ry];
       // fade the highlight into the body colour over the last `inset` px
       const bodyRow = pal.rows[Math.min(H - 1, hiTop + p.highlightH + 1)];
@@ -510,7 +522,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
 
   // Step 6: spirit-level bubble — filled ellipse (darkened body) with 1 px bright rim
   if (p.bubble) {
-    const bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - s.acrossShift * p.bubbleRollGain;
+    const bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - (H - 1) / 2 * s.acrossTilt * p.bubbleRollGain;   // bubble rises toward the high wall
     const rx = p.bubbleW / 2, ry_ = p.bubbleH / 2;
     if (bx - rx > 2) {
       for (let yy = Math.floor(by - ry_); yy <= Math.ceil(by + ry_); yy++) {
@@ -542,8 +554,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
 /** Full frame. Bridge zone and margins stay black (we never draw there). */
 export function renderFrame(hours: TubeState, minutes: TubeState, p: Params): void {
   fb.fill(0);
-  const palH = buildPalette(p, hours.acrossShift);
-  const palM = hours.acrossShift === minutes.acrossShift ? palH : buildPalette(p, minutes.acrossShift);
+  const palH = buildPalette(p, hours.light);
+  const palM = hours.light === minutes.light ? palH : buildPalette(p, minutes.light);
   const lay = tubeLayout(p);
   drawTube(0, lay.yH, hours, p, palH, 12);
   drawTube(1, lay.yM, minutes, p, palM, 60);

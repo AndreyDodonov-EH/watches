@@ -4,6 +4,14 @@
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static inline float dz(float v, float d) { return fabsf(v) < d ? 0 : v - (v > 0 ? d : -d); }
 
+// Highlight rest angle: world-up in the tube cross-section, halved (specular seen along the
+// normal), blended with the fixed style angle by lightPhys. See sim lightRest.
+float lightRest(float along, float across, const Params &p) {
+  float n = sqrtf(fmaxf(0, 1 - along * along - across * across));
+  float phys = atan2f(across, n) * 180 / (float)M_PI / 2;
+  return p.lightAngle + (phys - p.lightAngle) * p.lightPhys;
+}
+
 void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   const float along = dz(in.along, p.deadzone);
   const float across = dz(in.across, p.deadzone);
@@ -23,12 +31,12 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   if (s.angle > aMax) { s.angle = aMax; s.angleVel = fminf(0, s.angleVel); }
   if (s.angle < -aMax) { s.angle = -aMax; s.angleVel = fmaxf(0, s.angleVel); }
 
-  const float acrossRest = across * p.acrossShiftGain;
-  const float acrossAcc = -p.acrossK * (s.acrossShift - acrossRest) - p.acrossDamp * s.acrossVel + in.gyroAlong * p.acrossGyroGain * 10;
-  s.acrossVel += acrossAcc * dt;
-  s.acrossShift += s.acrossVel * dt;
-  if (s.acrossShift > ACROSS_MAX_PX) { s.acrossShift = ACROSS_MAX_PX; s.acrossVel = fminf(0, s.acrossVel); }
-  if (s.acrossShift < -ACROSS_MAX_PX) { s.acrossShift = -ACROSS_MAX_PX; s.acrossVel = fmaxf(0, s.acrossVel); }
+  const float rest = lightRest(along, across, p);
+  const float lightAcc = -p.acrossK * (s.light - rest) - p.acrossDamp * s.lightVel + in.gyroAlong * p.acrossGyroGain * 10;
+  s.lightVel += lightAcc * dt;
+  s.light += s.lightVel * dt;
+  if (s.light > LIGHT_MAX_DEG) { s.light = LIGHT_MAX_DEG; s.lightVel = fminf(0, s.lightVel); }
+  if (s.light < -LIGHT_MAX_DEG) { s.light = -LIGHT_MAX_DEG; s.lightVel = fmaxf(0, s.lightVel); }
 
   const float shake = fminf(1, ((fabsf(in.gyroAcross) + fabsf(in.gyroAlong)) / 200) * p.shakeGain);
   s.agitation += (shake - s.agitation) * fminf(1, (shake > s.agitation ? 20 : 2) * dt);

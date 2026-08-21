@@ -16,7 +16,7 @@ is the dominant controllable power cost after the AMOLED itself. It also dictate
 
 **Levers, in the order we would take them:**
 1. **Frame skipping at rest** — render only when something changed: any edge moved ≥ 1 px (compare the
-   per-row `edges[]` against the last pushed set, or just `xe`, `angle`, `edgeLight`, `acrossShift`
+   per-row `edges[]` against the last pushed set, or just `xe`, `angle`, `edgeLight`, `light`
    quantised), a param changed, or fizz is on. Idle → CPU sleeps between IMU samples. Cheapest, biggest win.
 2. **Dirty-rect push** — when only the edge region moved, push only the columns
    `[min(oldEdge, newEdge) − frontBright, max(...) + edgeGlow]` (panel supports arbitrary column windows
@@ -38,10 +38,7 @@ is the dominant controllable power cost after the AMOLED itself. It also dictate
 incrementality makes every render bug harder to see, so it comes after the visuals are stable.
 
 ## Other
-- Lighting is a stylised fixed light from screen-top (side view): highlight band at rows 2..13, cylinder
-  shading bright at 1/3. Face-up on the wrist the light is along the screen normal and the acrylic rod gives
-  real specular. Kept as style. If ever made physical: light direction from `across`/`up`, highlight row from
-  it; `acrossShift` then becomes redundant.
+- Light model (`lightPhys`): physical mode ignores the light's along-axis component (it only dims, does not move the highlight) and the face-down case (`n` clamped ≥ 0).
 - `edgeLight -> lightK` is a proxy: pressure into the end fills the cap (modelled via `meniscusTiltGain`);
   the brightness change stands in for the stronger caustic of a fuller cap.
 - Gyro about the screen normal (IMU z) is dropped in both mains; it is the rate that physically kicks the

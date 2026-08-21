@@ -93,7 +93,7 @@ for (const [name, samples] of scenarios) {
     maxIn = Math.max(maxIn, Math.abs(inp.along), Math.abs(inp.across));
     for (const tube of tubes) {
       stepTube(tube, inp, p);
-      if (!(isFinite(tube.fillPos) && isFinite(tube.angle) && isFinite(tube.acrossShift) && isFinite(tube.edgeLight)))
+      if (!(isFinite(tube.fillPos) && isFinite(tube.angle) && isFinite(tube.light) && isFinite(tube.edgeLight)))
         { fail(`${name}: non-finite state`); break; }
       for (const ry of [0, TUBE_HEIGHT_PX >> 1, TUBE_HEIGHT_PX - 1]) {
         const dev = Math.abs(edgeX(ry, tube.fillTarget * TUBE_LENGTH_PX + tube.fillPos, tube.angle, tube.edgeLight) - tube.fillTarget * TUBE_LENGTH_PX);
