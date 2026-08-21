@@ -148,18 +148,20 @@ static const int SPRITE_FONT = NUM_FONTS;
 // ---------------------------------------------------------------------------------------------
 struct ScaledGlyph { int w, h; uint16_t *c; uint8_t *a; };
 struct ScaledSet {
-  int sheet = -1, bw = 0, bh = 0; float brightness = -1, tintAmt = -1; uint32_t tint = 0;
+  int sheet = -1, bw = 0, bh = 0; float brightness = -1, tintAmt = -1, tone = 0; uint32_t tint = 0;
   ScaledGlyph g[10] = {};
 };
 static ScaledSet scaledSets[2];   // 0 = hours, 1 = minutes
 
-static ScaledGlyph *scaledGlyphs(int slot, int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt) {
+static ScaledGlyph *scaledGlyphs(int slot, int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone) {
   if (sheetIdx < 0 || sheetIdx >= NUM_SPRITE_SHEETS) return nullptr;
   ScaledSet &S = scaledSets[slot];
-  if (S.sheet == sheetIdx && S.bw == bw && S.bh == bh && S.brightness == brightness && S.tint == tintHex && S.tintAmt == tintAmt) return S.g;
+  if (S.sheet == sheetIdx && S.bw == bw && S.bh == bh && S.brightness == brightness && S.tint == tintHex && S.tintAmt == tintAmt && S.tone == tone) return S.g;
   const SpriteSheet &sp = *SPRITE_SHEETS[sheetIdx];
   RGB tint = hexToRgb(tintHex);
   auto tm = [&](float v, float ch) { return v * (1 - tintAmt) + v * (ch / 255.0f) * tintAmt; };
+  float t = fmaxf(-1, fminf(1, tone));
+  auto tn = [&](float v) { return t < 0 ? v * (1 + t) : v + (255 - v) * t; };
   float sy = (float)bh / sp.cellH;
   for (int d = 0; d < 10; d++) {
     int gw = (int)fmaxf(1, jround(sp.widths[d] * (float)bw / sp.cellW));
@@ -179,12 +181,12 @@ static ScaledGlyph *scaledGlyphs(int slot, int sheetIdx, int bw, int bh, float b
       }
       int k = y * gw + x;
       if (al > 0) {
-        S.g[d].c[k] = q(scale({ tm(r / al, tint.r), tm(g / al, tint.g), tm(b / al, tint.b) }, brightness));
+        S.g[d].c[k] = q(scale({ tn(tm(r / al, tint.r)), tn(tm(g / al, tint.g)), tn(tm(b / al, tint.b)) }, brightness));
         S.g[d].a[k] = (uint8_t)jround(al / n);
       }
     }
   }
-  S.sheet = sheetIdx; S.bw = bw; S.bh = bh; S.brightness = brightness; S.tint = tintHex; S.tintAmt = tintAmt;
+  S.sheet = sheetIdx; S.bw = bw; S.bh = bh; S.brightness = brightness; S.tint = tintHex; S.tintAmt = tintAmt; S.tone = tone;
   return S.g;
 }
 
@@ -251,7 +253,7 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, Labels &
   int bw = (int)fmaxf(1, jround((useSprite ? 5 : font->w) * kx));
   int bh = (int)fmaxf(1, jround((useSprite ? 7 : font->h) * ky));
   if (bh > 96) bh = 96;
-  ScaledGlyph *sprite = useSprite ? scaledGlyphs(slot, idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, p.digitTint, p.digitTintAmount) : nullptr;
+  ScaledGlyph *sprite = useSprite ? scaledGlyphs(slot, idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, p.digitTint, p.digitTintAmount, p.digitTone) : nullptr;
   int gap = sprite ? (int)fmaxf(1, jround(bw / 5.0f)) : (int)fmaxf(1, jround(kx));
   int shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   int yBase = y0 + H - 1 - (int)bottom, yTop = yBase - bh + 1;

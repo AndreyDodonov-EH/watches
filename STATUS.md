@@ -82,7 +82,7 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
   liquid. `tubeBack` follows the panel dimmer only.
 - Digits include five bitmap fonts and seven generated image fonts: steel, brass steampunk, copper gauge,
   forged iron, ivory enamel, carved slate, and amber resin. Image fonts remain behind the liquid/glass layers
-  and support brightness and tint controls in the simulator and firmware.
+  and support brightness, tint, and black-to-white tone controls in the simulator and firmware.
 - **Autosave** (`sim/src/persist.ts`): every edit — params *and* view state (zoom, cuff/lens/gloss, layout grid,
   pause, time mode, tilt) — is written to `localStorage['liquid-watch-session-v1']`, debounced 250 ms, flushed on
   pagehide. One delegated `input` listener on `#app` covers every control. Nothing is lost on reload, so

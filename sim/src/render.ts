@@ -186,12 +186,14 @@ function loadSprite(url: string): Promise<SpriteSheet> {
   });
 }
 /** Box-filter the sheet glyph d into bw x bh device pixels (once per size; firmware ships the result). */
-function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number, tint: [number, number, number], tintAmt: number): ScaledGlyph[] | null {
+function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number, tint: [number, number, number], tintAmt: number, tone: number): ScaledGlyph[] | null {
   const sprite = sprites[sheet]; if (!sprite) return null;
-  const key = `${sheet}:${bw}x${bh}@${brightness}/${tint}/${tintAmt}`; const hit = scaledCache.get(key); if (hit) return hit;
+  const key = `${sheet}:${bw}x${bh}@${brightness}/${tint}/${tintAmt}/${tone}`; const hit = scaledCache.get(key); if (hit) return hit;
   const out: ScaledGlyph[] = [];
   // tint = multiply by colour (greyscale sheets become bronze/gold/etc.), blended by tintAmt
   const tm = (v: number, ch: number) => v * (1 - tintAmt) + v * (tint[ch] / 255) * tintAmt;
+  const t = Math.max(-1, Math.min(1, tone));
+  const tn = (v: number) => t < 0 ? v * (1 + t) : v + (255 - v) * t;
   const sy = bh / sprite.cellH;
   for (let d = 0; d < 10; d++) {
     const gw = Math.max(1, Math.round(sprite.widths[d] * bw / sprite.cellW));
@@ -206,7 +208,7 @@ function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number,
         r += sprite.data[i] * pa; g += sprite.data[i + 1] * pa; b += sprite.data[i + 2] * pa; al += pa; n++;
       }
       const k = y * gw + x;
-      if (al > 0) { c[k] = q(scale([tm(r / al, 0), tm(g / al, 1), tm(b / al, 2)], brightness)); a[k] = Math.round(al / n); }
+      if (al > 0) { c[k] = q(scale([tn(tm(r / al, 0)), tn(tm(g / al, 1)), tn(tm(b / al, 2))], brightness)); a[k] = Math.round(al / n); }
     }
     out.push({ w: gw, h: bh, c, a });
   }
@@ -276,7 +278,7 @@ function layoutLabels(y0: number, p: Params, ticksN: number): Labels | null {
   const bw = Math.max(1, Math.round((useSprite ? 5 : font.w) * kx));
   const bh = Math.max(1, Math.round((useSprite ? 7 : font.h) * ky));
   const sprite = useSprite
-    ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, hexToRgb(p.digitTint), p.digitTintAmount)
+    ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, hexToRgb(p.digitTint), p.digitTintAmount, p.digitTone)
     : null;
   const gap = sprite ? Math.max(1, Math.round(bw / 5)) : Math.max(1, Math.round(kx));
   const shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;

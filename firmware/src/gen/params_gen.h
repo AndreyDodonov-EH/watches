@@ -76,6 +76,7 @@ struct Params {
   uint32_t digitShadowColor;
   uint32_t digitTint;
   float digitTintAmount;
+  float digitTone;
   float digitFont;
   float digitScaleX;
   float digitScaleY;
@@ -115,8 +116,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 109
-#define PARAMS_SCHEMA_CRC 0xb6b9233bu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 110
+#define PARAMS_SCHEMA_CRC 0xac0963acu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -193,6 +194,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"digitShadowColor", 'c', (uint16_t)offsetof(Params, digitShadowColor)},
   {"digitTint", 'c', (uint16_t)offsetof(Params, digitTint)},
   {"digitTintAmount", 'f', (uint16_t)offsetof(Params, digitTintAmount)},
+  {"digitTone", 'f', (uint16_t)offsetof(Params, digitTone)},
   {"digitFont", 'f', (uint16_t)offsetof(Params, digitFont)},
   {"digitScaleX", 'f', (uint16_t)offsetof(Params, digitScaleX)},
   {"digitScaleY", 'f', (uint16_t)offsetof(Params, digitScaleY)},
@@ -234,7 +236,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  4, // v
+  5, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -306,6 +308,7 @@ static const Params PRESET_1 = {
   0x101010, // digitShadowColor
   0x6D6617, // digitTint
   0.65f, // digitTintAmount
+  0.0f, // digitTone
   5.0f, // digitFont
   6.0f, // digitScaleX
   5.0f, // digitScaleY

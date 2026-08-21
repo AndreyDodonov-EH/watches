@@ -33,7 +33,7 @@ FIELDS = [
  ('tickMajorWidthM','float'),('tickColorM','rgb'),('tickMajorColorM','rgb'),('tickPosM','float'),
  ('ticksOnTop','bool'),
  ('digits','bool'),('digitColor','rgb'),('digitColor2','rgb'),('digitShadow','bool'),('digitShadowColor','rgb'),
- ('digitTint','rgb'),('digitTintAmount','float'),('digitFont','float'),
+ ('digitTint','rgb'),('digitTintAmount','float'),('digitTone','float'),('digitFont','float'),
  ('digitScaleX','float'),('digitScaleY','float'),('digitScaleXMin','float'),('digitScaleYMin','float'),
  ('digitBottomMin','float'),('digitBottom','float'),('digitsOnTop','bool'),
  ('liquidTransparency','float'),('markContrast','float'),('digitsLeadingZero','bool'),
