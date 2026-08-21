@@ -10,6 +10,7 @@
     "check:imu": "tsc tools/replay-check.ts --outDir node_modules/.cache/replay-check --module commonjs --target es2021 --moduleResolution node --esModuleInterop && node -e \"require('fs').writeFileSync('node_modules/.cache/replay-check/package.json','{}')\" && node node_modules/.cache/replay-check/tools/replay-check.js"
   },
   "devDependencies": {
+    "playwright": "^1.61.1",
     "typescript": "^5.6.0",
     "vite": "^6.0.0"
   }

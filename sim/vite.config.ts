@@ -6,5 +6,5 @@ const basePath = process.env.BASE_PATH;
 export default defineConfig({
   base: basePath ? `${basePath.replace(/\/$/, '')}/` : '/',
   resolve: { alias: { '@spec': fileURLToPath(new URL('../spec', import.meta.url)) } },
-  server: { fs: { allow: ['..'] } },
+  server: { port: 5190, strictPort: true, fs: { allow: ['..'] } },
 });
