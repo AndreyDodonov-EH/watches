@@ -1,5 +1,8 @@
 {
   "v": 3,
+  "tubeHeight": 72,
+  "hoursY": 0,
+  "minutesY": 168,
   "remaining": false,
   "liquid": "#346a2a",
   "liquidHi": "#b6ffa0",

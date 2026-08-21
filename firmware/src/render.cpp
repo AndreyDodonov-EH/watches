@@ -40,11 +40,17 @@ static inline uint16_t blend565(uint16_t a, uint16_t b, float t) {
 }
 static inline float luma(RGB c) { return 0.299f * c.r + 0.587f * c.g + 0.114f * c.b; }
 
-// The current tube is drawn into a TUBE_HEIGHT_PX x PANEL_W strip buffer; panel-row y maps to
-// strip row y - baseY. Anything outside the strip is clipped (the sim never draws there either).
+TubeLayout tubeLayout(const Params &p) {
+  int H = (int)jround(p.tubeHeight); H = H < 4 ? 4 : H > TUBE_HEIGHT_MAX ? TUBE_HEIGHT_MAX : H;
+  auto y = [&](float v) { int r = (int)jround(v); return r < 0 ? 0 : r > PANEL_H - H ? PANEL_H - H : r; };
+  return { H, y(p.hoursY), y(p.minutesY) };
+}
+
+// The current tube is drawn into an H x PANEL_W strip buffer (H ≤ TUBE_HEIGHT_MAX); panel-row y maps
+// to strip row y - baseY. Anything outside the strip is clipped (the sim never draws there either).
 static uint16_t *FB = nullptr;
-static int baseY = 0;
-static const int H = TUBE_HEIGHT_PX, L = TUBE_LENGTH_PX;
+static int baseY = 0, H = TUBE_HEIGHT_PX;
+static const int L = TUBE_LENGTH_PX;
 
 static inline bool inStrip(int x, int y) { return x >= 0 && x < PANEL_W && y >= baseY && y < baseY + H; }
 static inline uint16_t rd(int x, int y) { return __builtin_bswap16(FB[(y - baseY) * PANEL_W + x]); }
@@ -71,7 +77,7 @@ static inline void pxa(int x, int y, uint16_t c, float t) {
 // ---------------------------------------------------------------------------------------------
 // palette
 // ---------------------------------------------------------------------------------------------
-struct Palette { uint16_t rows[TUBE_HEIGHT_PX]; uint16_t bubbleIn[TUBE_HEIGHT_PX]; uint16_t body, glass, bubbleRim; };
+struct Palette { uint16_t rows[TUBE_HEIGHT_MAX]; uint16_t bubbleIn[TUBE_HEIGHT_MAX]; uint16_t body, glass, bubbleRim; };
 
 static void buildPalette(const Params &p, float acrossShift, Palette &pal) {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
@@ -324,7 +330,7 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
     Fizz &f = fizz[i][k];
     f.y -= speed * f.v * up * dt;
     f.x = clampf(f.x + vx * f.v * dt, 0, 1);
-    if (f.y < 3) { f.y = H - 3; f.x = frand(); f.v = 0.5f + frand(); }
+    if (f.y < 3 || f.y >= H) { f.y = H - 3; f.x = frand(); f.v = 0.5f + frand(); }
   }
 }
 
@@ -350,7 +356,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   ensureFizz(idx, p, clampf(xe / L, 0, 1), s.agitation);
 
   // 1 + 3: glass (only where the column does not cover it) and the liquid column
-  static float edges[TUBE_HEIGHT_PX];
+  static float edges[TUBE_HEIGHT_MAX];
   for (int ry = 0; ry < H; ry++) {
     float ex = edgeX(ry, xe, s.angle, p, s.edgeLight);
     edges[ry] = ex;
@@ -375,7 +381,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   // 3a: front brightening, weighted by row luma
   if (p.frontBright > 0) {
     uint16_t hiC = q(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright));
-    float w[TUBE_HEIGHT_PX]; float lmax = 1;
+    float w[TUBE_HEIGHT_MAX]; float lmax = 1;
     for (int ry = 0; ry < H; ry++) { w[ry] = luma(to888(pal.rows[ry])); lmax = fmaxf(lmax, w[ry]); }
     for (int ry = 0; ry < H; ry++) {
       int xi = (int)floorf(edges[ry]); float rowK = w[ry] / lmax;
@@ -475,7 +481,8 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
 
 void renderTube(int idx, const TubeState &s, const Params &p, uint16_t *strip) {
   static Palette pal;
-  FB = strip; baseY = idx == 0 ? HOURS_TUBE_Y : MINUTES_TUBE_Y;
+  TubeLayout lay = tubeLayout(p);
+  FB = strip; H = lay.H; baseY = idx == 0 ? lay.yH : lay.yM;
   buildPalette(p, s.acrossShift, pal);
   drawTube(idx, baseY, s, p, pal, idx == 0 ? 12 : 60);
 }

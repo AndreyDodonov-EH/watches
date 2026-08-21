@@ -11,7 +11,7 @@ bool display_init(void);
 void display_push_frame(const uint16_t *fb);
 // Push a horizontal band [y0, y1) of a full-width framebuffer (staged through the strips, blocking).
 void display_push_rows(const uint16_t *fb, int y0, int y1);
-// The two TUBE_HEIGHT_PX-row strip buffers (internal DMA RAM) owned by the display module.
+// The two TUBE_HEIGHT_MAX-row strip buffers (internal DMA RAM) owned by the display module.
 uint16_t *display_strip(int i);
 void display_set_brightness(uint8_t v);   // 0..255 (cmd 0x51)
 // Queue a push of `rows` full-width rows starting at panel row y0, read by DMA straight from

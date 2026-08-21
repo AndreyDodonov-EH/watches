@@ -2,7 +2,7 @@
 // operations that port 1:1 to the MCU: per-row horizontal spans, a per-row colour LUT,
 // a few filled ellipses/dots. Documented step-by-step in docs/render-routine.md.
 import {
-  PANEL_W, PANEL_H, TUBE_LENGTH_PX, TUBE_HEIGHT_PX, HOURS_TUBE_Y, MINUTES_TUBE_Y,
+  PANEL_W, PANEL_H, TUBE_LENGTH_PX, TUBE_HEIGHT_MAX,
   rgb565, rgb565to888,
 } from '@spec/layout';
 import type { Params } from './params';
@@ -30,8 +30,16 @@ function blend565(a: number, b: number, t: number): number {
   return q(mix(A, B, t));
 }
 
+export interface TubeLayout { H: number; yH: number; yM: number; }
+/** Tube geometry from params, clamped to the panel and the strip buffer. */
+export function tubeLayout(p: Params): TubeLayout {
+  const H = Math.max(4, Math.min(TUBE_HEIGHT_MAX, Math.round(p.tubeHeight)));
+  const y = (v: number) => Math.max(0, Math.min(PANEL_H - H, Math.round(v)));
+  return { H, yH: y(p.hoursY), yM: y(p.minutesY) };
+}
+
 export interface Palette {
-  rows: Uint16Array;     // TUBE_HEIGHT_PX colours: body shade per row incl. highlight band
+  rows: Uint16Array;     // H colours: body shade per row incl. highlight band
   body: number; glass: number; bubbleRim: number; bubbleIn: Uint16Array;
 }
 
@@ -39,13 +47,14 @@ export interface Palette {
 export function buildPalette(p: Params, acrossShift = 0): Palette {
   const body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
   const br = p.brightness * p.liquidBright;   // glass stays on the panel dimmer alone (see below)
-  const rows = new Uint16Array(TUBE_HEIGHT_PX);
-  const bubbleIn = new Uint16Array(TUBE_HEIGHT_PX);
+  const H = tubeLayout(p).H;
+  const rows = new Uint16Array(H);
+  const bubbleIn = new Uint16Array(H);
   const hiTop = Math.round(2 + acrossShift);
   const roll = acrossShift * p.shadeRollGain;   // rows the shading rotates with roll
-  for (let y = 0; y < TUBE_HEIGHT_PX; y++) {
+  for (let y = 0; y < H; y++) {
     // cylinder shading: brightest around 1/3 from top, darkest at the bottom
-    const t = Math.max(0, Math.min(1, (y - roll) / (TUBE_HEIGHT_PX - 1)));
+    const t = Math.max(0, Math.min(1, (y - roll) / (H - 1)));
     let c: [number, number, number];
     if (t < 0.33) c = mix(mix(body, lo, 0.25), body, t / 0.33);
     else c = mix(body, lo, ((t - 0.33) / 0.67) * p.shadeDepth);
@@ -173,7 +182,7 @@ const luma = (c: [number, number, number]): number => 0.299 * c[0] + 0.587 * c[1
  *  scaled by the layer's brightness trim, so dimming a layer also relaxes its legibility floor —
  *  otherwise the floor would simply undo the dimming wherever the mark sits over liquid.
  *  Firmware note: the liquid behind a mark is the per-row LUT colour, so this whole function
- *  collapses into one extra TUBE_HEIGHT_PX table per mark colour, built when params change. */
+ *  collapses into one extra H-row table per mark colour, built when params change. */
 function throughLiquid(bg: number, mark: number, p: Params, contrast: number): number {
   const B = rgb565to888(bg);
   let c = mix(B, rgb565to888(mark), p.liquidTransparency);
@@ -187,7 +196,7 @@ function throughLiquid(bg: number, mark: number, p: Params, contrast: number): n
 }
 /** Mark compositor for one tube. `onTop` marks ignore the liquid and are drawn opaque. */
 function markFn(y0: number, edges: Float32Array, p: Params, onTop: boolean, contrast: number): MarkFn {
-  const H = TUBE_HEIGHT_PX;
+  const H = edges.length;
   return (x, y, c, cov = 1) => {
     const ry = y - y0;
     const inside = p.remaining ? x >= edges[ry] : x < edges[ry];
@@ -229,7 +238,7 @@ function layoutLabels(y0: number, p: Params, ticksN: number): Labels | null {
     : null;
   const gap = sprite ? Math.max(1, Math.round(bw / 5)) : Math.max(1, Math.round(kx));
   const shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
-  const yBase = y0 + TUBE_HEIGHT_PX - 1 - bottom, yTop = yBase - bh + 1;
+  const yBase = y0 + tubeLayout(p).H - 1 - bottom, yTop = yBase - bh + 1;
   const list: Label[] = [];
   for (let i = every; i < ticksN; i += every) {
     const text = minutes && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
@@ -294,7 +303,7 @@ function drawLabels(lb: Labels, mark: MarkFn): void {
 function drawTicks(y0: number, p: Params, ticksN: number, lb: Labels | null, mark: MarkFn): void {
   const minutes = ticksN === 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
-  const H = TUBE_HEIGHT_PX, L = TUBE_LENGTH_PX;
+  const H = tubeLayout(p).H, L = TUBE_LENGTH_PX;
   const step = Math.max(1, Math.round(minutes ? p.tickStepM : p.tickStepH));
   const majorEvery = Math.max(0, Math.round(minutes ? p.tickMajorEveryM : p.tickMajorEveryH));
   const hMin = Math.max(0, Math.round(minutes ? p.tickMinorHeightM : p.tickMinorHeightH));
@@ -329,7 +338,8 @@ export const fizz: Fizz[][] = [[], []];
 function ensureFizz(i: number, p: Params, fill: number, agitation = 0): void {
   const arr = fizz[i];
   const want = Math.min(64, Math.floor(p.fizzCount * fill * (1 + (agitation < 0.05 ? 0 : agitation))));
-  while (arr.length < want) arr.push({ x: Math.random(), y: Math.random() * TUBE_HEIGHT_PX, v: 0.5 + Math.random() });
+  const H = tubeLayout(p).H;
+  while (arr.length < want) arr.push({ x: Math.random(), y: Math.random() * H, v: 0.5 + Math.random() });
   if (arr.length > want) arr.length = want;
 }
 /** Fizz rises against gravity: along-tilt steers it toward the high end (`fizzDriftGain` = steering gain),
@@ -338,10 +348,11 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
   const speed = p.fizzSpeed * (1 + 3 * agitation);
   const up = Math.sqrt(Math.max(0.05, 1 - along * along - across * across));
   const vx = (-along * p.fizzDriftGain * speed) / TUBE_LENGTH_PX;
+  const H = tubeLayout(p).H;
   for (let i = 0; i < 2; i++) for (const f of fizz[i]) {
     f.y -= speed * f.v * up * dt;
     f.x = Math.max(0, Math.min(1, f.x + vx * f.v * dt));
-    if (f.y < 3) { f.y = TUBE_HEIGHT_PX - 3; f.x = Math.random(); f.v = 0.5 + Math.random(); }
+    if (f.y < 3 || f.y >= H) { f.y = H - 3; f.x = Math.random(); f.v = 0.5 + Math.random(); }
   }
 }
 
@@ -352,7 +363,7 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
  *  (a thin tail: bottom contact line extends, top retracts). At rest a mild bottom-cling
  *  remains — liquid in a horizontal tube always sags onto the lower wall. */
 export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt = 0): number {
-  const H = TUBE_HEIGHT_PX, yc = (H - 1) / 2;
+  const H = tubeLayout(p).H, yc = (H - 1) / 2;
   const d = (ry - yc) / yc;                  // -1..1
   const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
   const asymEff = p.meniscusAsym * Math.max(0, Math.min(1, 0.4 - 0.6 * tilt));
@@ -365,7 +376,7 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
  *  rendered in a mirrored frame (edge from the right, along-axis signs flipped), the tube rows are then
  *  flipped in place, and the scale is drawn last in panel coordinates. */
 export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number): void {
-  const H = TUBE_HEIGHT_PX, L = TUBE_LENGTH_PX;
+  const H = pal.rows.length, L = TUBE_LENGTH_PX;
   const s = p.remaining ? { ...state, fillPos: -state.fillPos, angle: -state.angle, edgeLight: -state.edgeLight } : state;
   const xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;   // edge centre
   // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
@@ -504,8 +515,9 @@ export function renderFrame(hours: TubeState, minutes: TubeState, p: Params): vo
   fb.fill(0);
   const palH = buildPalette(p, hours.acrossShift);
   const palM = hours.acrossShift === minutes.acrossShift ? palH : buildPalette(p, minutes.acrossShift);
-  drawTube(0, HOURS_TUBE_Y, hours, p, palH, 12);
-  drawTube(1, MINUTES_TUBE_Y, minutes, p, palM, 60);
+  const lay = tubeLayout(p);
+  drawTube(0, lay.yH, hours, p, palH, 12);
+  drawTube(1, lay.yM, minutes, p, palM, 60);
 }
 
 /** Blit RGB565 framebuffer to a canvas ImageData (exact 565 expansion). */

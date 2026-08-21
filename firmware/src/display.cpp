@@ -45,7 +45,7 @@ static SemaphoreHandle_t done_sem = NULL;
 // Two tube-strip buffers in internal DMA RAM. The liquid face renders straight into them and the
 // panel DMA reads them directly; full-frame pushes from the PSRAM canvas are staged through them too.
 #define BAND_ROWS 40                 // max rows per DMA transfer (spi max_transfer_sz)
-#define STRIP_ROWS TUBE_HEIGHT_PX
+#define STRIP_ROWS TUBE_HEIGHT_MAX
 static uint16_t *strips[2];
 static int pending = 0;
 

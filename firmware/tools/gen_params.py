@@ -16,6 +16,7 @@ SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge']  # di
 # (name, ctype) — order defines the struct layout. Mirrors sim/src/params.ts `Params`.
 FIELDS = [
  ('v','int'),
+ ('tubeHeight','float'),('hoursY','float'),('minutesY','float'),
  ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('glass','rgb'),('bubbleRim','rgb'),
  ('remaining','bool'),('highlightH','float'),('highlightInset','float'),('highlightBright','float'),('highlightSharp','float'),('shadeRollGain','float'),('shadeDepth','float'),('meniscusDepth','float'),
  ('meniscusPow','float'),('meniscusTiltGain','float'),('meniscusAsym','float'),('edgeSoft','float'),

@@ -1,8 +1,8 @@
 import './style.css';
-import { PANEL_W, PANEL_H, HOURS_TUBE_Y, MINUTES_TUBE_Y, TUBE_HEIGHT_PX, BRIDGE_Y0, BRIDGE_Y1 } from '@spec/layout';
+import { PANEL_W, PANEL_H } from '@spec/layout';
 import { PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
-import { renderFrame, blit, stepFizz, fb, loadSprites } from './render';
+import { renderFrame, blit, stepFizz, fb, loadSprites, tubeLayout } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
 import { DEFAULT_VIEW, loadSession, saveSession } from './persist';
 import { buildPanel } from './ui';
@@ -88,7 +88,7 @@ const gridc = document.getElementById('gridc') as HTMLCanvasElement;
 const fbctx = fbc.getContext('2d')!;
 const img = fbctx.createImageData(PANEL_W, PANEL_H);
 const ovlDom = buildOverlayDom(wrap);
-applyOverlay(ovlDom, overlay);
+applyOverlay(ovlDom, overlay, tubeLayout(params));
 
 // ---------- persistence ----------
 // One delegated listener covers every control on the page (top bar, time, tilt, params panel);
@@ -106,13 +106,13 @@ const setScale = () => {
 };
 setScale();
 $('scale').oninput = (e) => { scale = +(e.target as HTMLSelectElement).value; setScale(); };
-$('ovl').oninput = (e) => { overlay.enabled = (e.target as HTMLInputElement).checked; applyOverlay(ovlDom, overlay); setScale(); };
-$('leather').oninput = (e) => { overlay.leather = (e.target as HTMLSelectElement).value as any; applyOverlay(ovlDom, overlay); };
+$('ovl').oninput = (e) => { overlay.enabled = (e.target as HTMLInputElement).checked; applyOverlay(ovlDom, overlay, tubeLayout(params)); setScale(); };
+$('leather').oninput = (e) => { overlay.leather = (e.target as HTMLSelectElement).value as any; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
 $('lens').oninput = (e) => { overlay.lens = +(e.target as HTMLInputElement).value; };
 $('lenscurve').oninput = (e) => { overlay.lensCurve = +(e.target as HTMLInputElement).value; };
 $('lenssmooth').oninput = (e) => { overlay.lensSmooth = (e.target as HTMLInputElement).checked; };
-$('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay); };
-$('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay); };
+$('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
+$('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
 $('grid').oninput = (e) => { showGrid = (e.target as HTMLInputElement).checked; drawGrid(); };
 $('pause').oninput = (e) => { paused = (e.target as HTMLInputElement).checked; };
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name=tm]')) r.oninput = () => { timeMode = r.value as any; demoClock = Date.now(); };
@@ -148,7 +148,7 @@ function syncView(): void {
   $<HTMLInputElement>('setm').value = String(setClock.m);
   $<HTMLInputElement>(`tm-${timeMode}`).checked = true;
   syncSliders();
-  applyOverlay(ovlDom, overlay); setScale(); drawGrid();
+  applyOverlay(ovlDom, overlay, tubeLayout(params)); setScale(); drawGrid();
 }
 let kick = 0;
 $('flick').onclick = () => { kick = 400; };
@@ -217,7 +217,11 @@ $('pushall').onclick = async () => { if (!transport.connected) return; await tra
 $('settime').onclick = async () => { const d = new Date(); await transport.setTime(d.getTime(), -d.getTimezoneOffset()); $('serialst').textContent = 'time set'; };
 
 // params panel
-const panelUi = buildPanel($('panel'), params, { onChange: (key) => { save(); pushParam(key); } });
+const LAYOUT_KEYS: (keyof Params)[] = ['tubeHeight', 'hoursY', 'minutesY'];
+const panelUi = buildPanel($('panel'), params, { onChange: (key) => {
+  save(); pushParam(key);
+  if (!key || LAYOUT_KEYS.includes(key)) { applyOverlay(ovlDom, overlay, tubeLayout(params)); drawGrid(); }
+} });
 
 // URL params, applied on top of the restored session — for reproducible states / screenshots:
 //   ?fresh=1 (ignore the saved session) &preset=neon|mint|concept &t=10:09 &demo=120 &settle=1
@@ -242,7 +246,6 @@ const panelUi = buildPanel($('panel'), params, { onChange: (key) => { save(); pu
   if (u.has('lenssmooth')) overlay.lensSmooth = u.get('lenssmooth') === '1';
   if (u.has('leather')) overlay.leather = u.get('leather') as typeof overlay.leather;
   if (u.has('grid')) showGrid = u.get('grid') === '1';
-  if (u.has('settle')) for (let i = 0; i < 250; i++) physics(PHYS_DT); // springs at rest for screenshots
   panelUi.refresh(); syncView();
 }
 
@@ -251,10 +254,12 @@ function drawGrid() {
   g.clearRect(0, 0, PANEL_W, PANEL_H);
   if (!showGrid) return;
   g.strokeStyle = 'rgba(255,255,255,0.6)'; g.lineWidth = 1; g.setLineDash([4, 4]);
-  for (const y of [HOURS_TUBE_Y, HOURS_TUBE_Y + TUBE_HEIGHT_PX, MINUTES_TUBE_Y, MINUTES_TUBE_Y + TUBE_HEIGHT_PX]) { g.beginPath(); g.moveTo(0, y + 0.5); g.lineTo(PANEL_W, y + 0.5); g.stroke(); }
-  g.fillStyle = 'rgba(255,0,0,0.25)'; g.fillRect(0, BRIDGE_Y0, PANEL_W, BRIDGE_Y1 - BRIDGE_Y0);
+  const { H, yH, yM } = tubeLayout(params);
+  for (const y of [yH, yH + H, yM, yM + H]) { g.beginPath(); g.moveTo(0, y + 0.5); g.lineTo(PANEL_W, y + 0.5); g.stroke(); }
+  const b0 = Math.min(yH, yM) + H, b1 = Math.max(yH, yM);
+  g.fillStyle = 'rgba(255,0,0,0.25)'; g.fillRect(0, b0, PANEL_W, b1 - b0);
   g.fillStyle = '#fff'; g.font = '10px monospace';
-  g.fillText(`hours y=${HOURS_TUBE_Y}`, 4, HOURS_TUBE_Y - 3); g.fillText(`minutes y=${MINUTES_TUBE_Y}`, 4, MINUTES_TUBE_Y - 3); g.fillText('bridge (must stay black)', 4, BRIDGE_Y0 + 14);
+  g.fillText(`hours y=${yH}`, 4, yH + 10); g.fillText(`minutes y=${yM}`, 4, yM + 10); g.fillText('bridge (must stay black)', 4, b0 + 14);
 }
 
 // ---------- IMU scope: raw (dim) vs filtered (bright) accel + gyro, ~6 s window ----------
@@ -328,7 +333,7 @@ function frame(now: number) {
   if (!paused) { acc += dt; while (acc >= PHYS_DT) { physics(PHYS_DT); acc -= PHYS_DT; } }
   renderFrame(hours, minutes, params);
   blit(img); fbctx.putImageData(img, 0, 0);
-  if (overlay.enabled && overlay.lens > 0) { lensc.style.display = 'block'; drawLens(fbc, lensc, overlay); } else lensc.style.display = 'none';
+  if (overlay.enabled && overlay.lens > 0) { lensc.style.display = 'block'; drawLens(fbc, lensc, overlay, tubeLayout(params)); } else lensc.style.display = 'none';
   drawScope();
   frames++;
   if (now - fpsT > 1000) {
@@ -341,6 +346,7 @@ function frame(now: number) {
   $('imuraw').textContent = `filtered  along ${f2(input.along)}  across ${f2(input.across)}  gyro ${String(Math.round(input.gyroAcross)).padStart(5)}`
     + (transport.connected ? ` | ${serial.raw}`.slice(0, 46).padEnd(46) : ''); // fixed length: never widens the box
 }
+if (url.has('settle')) for (let i = 0; i < 250; i++) physics(PHYS_DT); // springs at rest for screenshots
 requestAnimationFrame(frame);
 
 // dev hook
