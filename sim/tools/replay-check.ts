@@ -22,7 +22,7 @@ const mapSample = (s: number[], d: number): TiltInput =>
   ({ along: -s[1] / d, across: -s[0] / d, gyroAlong: s[4], gyroAcross: s[3] });
 function edgeX(ry: number, xe: number, angleDeg: number, tilt: number): number {
   const yc = (TUBE_HEIGHT_PX - 1) / 2, d = (ry - yc) / yc, P = DEFAULT_PARAMS;
-  const asymEff = P.meniscusAsym * Math.max(0, Math.min(1, 0.4 - 0.6 * tilt));
+  const asymEff = P.meniscusAsym * Math.max(0, Math.min(1, 0.4 - 0.6 * tilt)) * Math.sqrt(Math.max(0, 1 - tilt * tilt)); // no sag when vertical
   const depth = P.meniscusDepth * (1 + P.meniscusTiltGain * tilt) * (1 - asymEff * d);
   return xe + Math.tan((angleDeg * Math.PI) / 180) * (ry - yc) + depth * Math.pow(Math.abs(d), P.meniscusPow);
 }
