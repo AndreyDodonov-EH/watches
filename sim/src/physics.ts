@@ -17,8 +17,9 @@ export interface TiltInput {
 // shaking may only nudge the fill edge and shift the light, never relocate the column.
 // These are hard caps applied on top of whatever the params say, so no gain/filter tuning
 // can ever make the liquid run off the end of the tube. Ported to firmware as-is.
-export const FILL_SLOSH_MAX_PX = 14;  // |fillPos| cap
-export const ANGLE_HARD_MAX_DEG = 12; // |angle| cap (params.angleMax tightens it, never widens)
+export const FILL_SLOSH_MAX_PX = 30;  // |fillPos| cap
+export const ANGLE_HARD_MAX_DEG = 20; // |angle| cap (params.angleMax tightens it, never widens)
+export const ACROSS_MAX_PX = 40;      // |acrossShift| cap
 
 export interface TubeState {
   fillTarget: number;  // 0..1 from time
@@ -26,12 +27,14 @@ export interface TubeState {
   fillVel: number;
   angle: number;       // deg, surface tilt (+ = top of meniscus further right)
   angleVel: number;
-  acrossShift: number; // px, low-passed vertical offset for highlight/depth
+  acrossShift: number; // px, spring-damped roll swing: highlight, shading, bubble height
+  acrossVel: number;
+  agitation: number;   // 0..1, gyro energy with fast attack / slow decay: fizz speed, edge glow
   edgeLight: number;   // -1..1, slow along-tilt follower — brightens/dims the fill edge (render only)
 }
 
 export function newTube(): TubeState {
-  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, acrossShift: 0, edgeLight: 0 };
+  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, acrossShift: 0, acrossVel: 0, agitation: 0, edgeLight: 0 };
 }
 
 function dz(v: number, d: number): number {
@@ -61,9 +64,18 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   if (s.angle > aMax) { s.angle = aMax; s.angleVel = Math.min(0, s.angleVel); }
   if (s.angle < -aMax) { s.angle = -aMax; s.angleVel = Math.max(0, s.angleVel); }
 
-  // Across tilt: low-pass
-  const target = across * p.acrossShiftGain;
-  s.acrossShift += (target - s.acrossShift) * Math.min(1, 8 * dt);
+  // Roll: the liquid swings around the tube axis — spring toward the across-tilt rest, kicked by roll rate.
+  const acrossRest = across * p.acrossShiftGain;
+  const acrossAcc = -p.acrossK * (s.acrossShift - acrossRest) - p.acrossDamp * s.acrossVel
+    + inp.gyroAlong * p.acrossGyroGain * 10;
+  s.acrossVel += acrossAcc * dt;
+  s.acrossShift += s.acrossVel * dt;
+  if (s.acrossShift > ACROSS_MAX_PX) { s.acrossShift = ACROSS_MAX_PX; s.acrossVel = Math.min(0, s.acrossVel); }
+  if (s.acrossShift < -ACROSS_MAX_PX) { s.acrossShift = -ACROSS_MAX_PX; s.acrossVel = Math.max(0, s.acrossVel); }
+
+  // Agitation: fast attack on gyro energy, slow decay.
+  const shake = Math.min(1, ((Math.abs(inp.gyroAcross) + Math.abs(inp.gyroAlong)) / 200) * p.shakeGain);
+  s.agitation += (shake - s.agitation) * Math.min(1, (shake > s.agitation ? 20 : 2) * dt);
 
   // Edge light: slow follower of along-tilt. +1 = gravity presses the liquid into the right
   // end (edge glows brighter), -1 = drains away from it (edge dims). Consumed by the renderer.
@@ -96,12 +108,14 @@ export class GravityNorm {
 /** IMU conditioning: accel low-pass (gravity), gyro high-pass + deadzone + clamp (transients only).
  *  The accel path is two cascaded one-poles (12 dB/oct): a single pole lets enough of a sharp
  *  wrist-jerk spike through to visibly kick the springs. One-pole maths; same goes into firmware. */
+export const GYRO_LP_HZ = 12; // smooths both gyro outputs: sensor noise otherwise twitches fizz/agitation
 export class ImuFilter {
   private lpAlong = 0; private lpAcross = 0;   // stage 1
   private lpAlong2 = 0; private lpAcross2 = 0; // stage 2
   private hpPrevIn = 0; private hpPrevOut = 0;
+  private lpGyroAcross = 0; private lpGyroAlong = 0;
   private init = false;
-  reset(): void { this.init = false; this.hpPrevIn = this.hpPrevOut = 0; }
+  reset(): void { this.init = false; this.hpPrevIn = this.hpPrevOut = 0; this.lpGyroAcross = this.lpGyroAlong = 0; }
   step(raw: TiltInput, p: Params, dt = PHYS_DT): TiltInput {
     // A tilt (gravity direction) can never exceed 1 g — anything beyond is linear acceleration.
     // Clip before filtering so a hard knock carries bounded energy into the springs.
@@ -123,8 +137,13 @@ export class ImuFilter {
       g = k * (this.hpPrevOut + raw.gyroAcross - this.hpPrevIn);
       this.hpPrevIn = raw.gyroAcross; this.hpPrevOut = g;
     }
-    g = Math.abs(g) < p.gyroDeadzone ? 0 : g - Math.sign(g) * p.gyroDeadzone;
-    g = Math.max(-p.gyroMax, Math.min(p.gyroMax, g));
-    return { along: this.lpAlong2 * p.inputGain, across: this.lpAcross2 * p.inputGain, gyroAlong: raw.gyroAlong, gyroAcross: g * p.inputGain };
+    const cond = (v: number): number => {
+      v = Math.abs(v) < p.gyroDeadzone ? 0 : v - Math.sign(v) * p.gyroDeadzone;
+      return Math.max(-p.gyroMax, Math.min(p.gyroMax, v));
+    };
+    const gl = 1 - Math.exp(-2 * Math.PI * GYRO_LP_HZ * dt);
+    this.lpGyroAcross += (cond(g) - this.lpGyroAcross) * gl;
+    this.lpGyroAlong += (cond(raw.gyroAlong) - this.lpGyroAlong) * gl;
+    return { along: this.lpAlong2 * p.inputGain, across: this.lpAcross2 * p.inputGain, gyroAlong: this.lpGyroAlong * p.inputGain, gyroAcross: this.lpGyroAcross * p.inputGain };
   }
 }

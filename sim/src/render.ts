@@ -42,15 +42,16 @@ export function buildPalette(p: Params, acrossShift = 0): Palette {
   const rows = new Uint16Array(TUBE_HEIGHT_PX);
   const bubbleIn = new Uint16Array(TUBE_HEIGHT_PX);
   const hiTop = Math.round(2 + acrossShift);
+  const roll = acrossShift * p.shadeRollGain;   // rows the shading rotates with roll
   for (let y = 0; y < TUBE_HEIGHT_PX; y++) {
     // cylinder shading: brightest around 1/3 from top, darkest at the bottom
-    const t = y / (TUBE_HEIGHT_PX - 1);
+    const t = Math.max(0, Math.min(1, (y - roll) / (TUBE_HEIGHT_PX - 1)));
     let c: [number, number, number];
     if (t < 0.33) c = mix(mix(body, lo, 0.25), body, t / 0.33);
     else c = mix(body, lo, ((t - 0.33) / 0.67) * p.shadeDepth);
     if (y >= hiTop && y < hiTop + p.highlightH) {
-      const k = 1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2; // tent
-      c = mix(c, hi, 0.35 + 0.65 * k);
+      const k = Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp); // tent
+      c = mix(c, hi, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
     }
     rows[y] = q(scale(c, br));
     bubbleIn[y] = q(scale(mix(c, [0, 0, 0], p.bubbleDark), br));
@@ -189,7 +190,8 @@ function markFn(y0: number, edges: Float32Array, p: Params, onTop: boolean, cont
   const H = TUBE_HEIGHT_PX;
   return (x, y, c, cov = 1) => {
     const ry = y - y0;
-    if (!onTop && ry >= 0 && ry < H && x >= 0 && x < PANEL_W && y >= 0 && y < PANEL_H && x < edges[ry])
+    const inside = p.remaining ? x >= edges[ry] : x < edges[ry];
+    if (!onTop && ry >= 0 && ry < H && x >= 0 && x < PANEL_W && y >= 0 && y < PANEL_H && inside)
       c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast);
     pxa(x, y, c, cov);
   };
@@ -322,14 +324,23 @@ function drawTicks(y0: number, p: Params, ticksN: number, lb: Labels | null, mar
 export interface Fizz { x: number; y: number; v: number; }
 export const fizz: Fizz[][] = [[], []];
 
-function ensureFizz(i: number, p: Params): void {
+/** `fizzCount` is the count for a full tube; density stays constant as the column shortens (`fill` = liquid
+ *  length / L). Shake nucleates bubbles: up to 2x with agitation, shrinking back as it decays. */
+function ensureFizz(i: number, p: Params, fill: number, agitation = 0): void {
   const arr = fizz[i];
-  while (arr.length < p.fizzCount) arr.push({ x: Math.random(), y: Math.random() * TUBE_HEIGHT_PX, v: 0.5 + Math.random() });
-  if (arr.length > p.fizzCount) arr.length = p.fizzCount;
+  const want = Math.min(64, Math.floor(p.fizzCount * fill * (1 + (agitation < 0.05 ? 0 : agitation))));
+  while (arr.length < want) arr.push({ x: Math.random(), y: Math.random() * TUBE_HEIGHT_PX, v: 0.5 + Math.random() });
+  if (arr.length > want) arr.length = want;
 }
-export function stepFizz(p: Params, dt: number): void {
+/** Fizz rises against gravity: along-tilt steers it toward the high end (`fizzDriftGain` = steering gain),
+ *  roll tips the rise out of the screen plane (slower on-screen rise), shake (`agitation`) speeds it up. */
+export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
+  const speed = p.fizzSpeed * (1 + 3 * agitation);
+  const up = Math.sqrt(Math.max(0.05, 1 - along * along - across * across));
+  const vx = (-along * p.fizzDriftGain * speed) / TUBE_LENGTH_PX;
   for (let i = 0; i < 2; i++) for (const f of fizz[i]) {
-    f.y -= p.fizzSpeed * f.v * dt;
+    f.y -= speed * f.v * up * dt;
+    f.x = Math.max(0, Math.min(1, f.x + vx * f.v * dt));
     if (f.y < 3) { f.y = TUBE_HEIGHT_PX - 3; f.x = Math.random(); f.v = 0.5 + Math.random(); }
   }
 }
@@ -349,14 +360,18 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
   return xe + skew + depth * Math.pow(Math.abs(d), p.meniscusPow); // liquid climbs the wall
 }
 
-/** Draw one tube. y0 = top of tube in panel coords. */
-export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: Palette, ticksN: number): void {
+/** Draw one tube. y0 = top of tube in panel coords.
+ *  `remaining` mode: the liquid sits at the right end and drains as time passes. The liquid layer is
+ *  rendered in a mirrored frame (edge from the right, along-axis signs flipped), the tube rows are then
+ *  flipped in place, and the scale is drawn last in panel coordinates. */
+export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number): void {
   const H = TUBE_HEIGHT_PX, L = TUBE_LENGTH_PX;
-  const xe = s.fillTarget * L + s.fillPos;   // edge centre
+  const s = p.remaining ? { ...state, fillPos: -state.fillPos, angle: -state.angle, edgeLight: -state.edgeLight } : state;
+  const xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;   // edge centre
   // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
   // liquid into the right end brightens the cap glow, draining away from it dims it.
-  const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight);
-  ensureFizz(idx, p);
+  const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
+  ensureFizz(idx, p, Math.max(0, Math.min(1, xe / L)), s.agitation);
 
   // Step 1: glass background (empty tube) — whole strip
   if (pal.glass !== 0) for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.glass);
@@ -434,10 +449,13 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
   // Step 4b: scale (ticks + labels). Outside the liquid they are opaque; inside they are blended by
   // liquidTransparency and held to markContrast — unless ticksOnTop / digitsOnTop print them on the
   // glass in front of the liquid instead. `edges` from step 3 gives inside/outside.
-  const mark = (onTop: boolean, trim: number): MarkFn => markFn(y0, edges, p, onTop, p.markContrast * trim);
-  const labels = layoutLabels(y0, p, ticksN);
-  drawTicks(y0, p, ticksN, labels, mark(p.ticksOnTop, p.tickBright));
-  if (labels) drawLabels(labels, mark(p.digitsOnTop, p.digitBright));
+  const drawScale = (): void => {
+    const mark = (onTop: boolean, trim: number): MarkFn => markFn(y0, edges, p, onTop, p.markContrast * trim);
+    const labels = layoutLabels(y0, p, ticksN);
+    drawTicks(y0, p, ticksN, labels, mark(p.ticksOnTop, p.tickBright));
+    if (labels) drawLabels(labels, mark(p.digitsOnTop, p.digitBright));
+  };
+  if (!p.remaining) drawScale();
 
   // Step 5: fizz dots (inside liquid only)
   if (p.fizz) for (const f of fizz[idx]) {
@@ -452,7 +470,7 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
 
   // Step 6: spirit-level bubble — filled ellipse (darkened body) with 1 px bright rim
   if (p.bubble) {
-    const bx = xe - p.bubbleGap, by = (H - 1) * p.bubbleY - s.acrossShift * 0.5;
+    const bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - s.acrossShift * p.bubbleRollGain;
     const rx = p.bubbleW / 2, ry_ = p.bubbleH / 2;
     if (bx - rx > 2) {
       for (let yy = Math.floor(by - ry_); yy <= Math.ceil(by + ry_); yy++) {
@@ -469,6 +487,15 @@ export function drawTube(idx: number, y0: number, s: TubeState, p: Params, pal: 
       hspan(y0 + yt, Math.round(bx - rx * 0.45), Math.round(bx + rx * 0.45) + 1, pal.bubbleRim);
       hspan(y0 + yb, Math.round(bx - rx * 0.45), Math.round(bx + rx * 0.45) + 1, pal.bubbleRim);
     }
+  }
+
+  if (p.remaining) {  // flip liquid layer into panel frame, then the scale on top
+    for (let ry = 0; ry < H; ry++) {
+      const row = (y0 + ry) * PANEL_W;
+      for (let a = 0, b = L - 1; a < b; a++, b--) { const t = fb[row + a]; fb[row + a] = fb[row + b]; fb[row + b] = t; }
+      edges[ry] = L - edges[ry];
+    }
+    drawScale();
   }
 }
 

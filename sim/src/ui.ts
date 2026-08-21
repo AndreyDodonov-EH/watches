@@ -1,7 +1,8 @@
 // Minimal control panel generated from PARAM_META. No framework.
 import { DEFAULT_PARAMS, PARAM_META, migrateParams, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, PRESET_USER_V1, type Params } from './params';
 
-export interface UiHooks { onChange: () => void; }
+/** `key` is set for a single-field edit; absent for preset/import/reset (whole struct changed). */
+export interface UiHooks { onChange: (key?: keyof Params) => void; }
 
 export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refresh: () => void } {
   const inputs = new Map<string, HTMLInputElement>();
@@ -24,15 +25,15 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
     const val = document.createElement('output');
     if (typeof v === 'boolean') {
       inp.type = 'checkbox'; inp.checked = v;
-      inp.oninput = () => { (p as any)[key] = inp.checked; hooks.onChange(); };
+      inp.oninput = () => { (p as any)[key] = inp.checked; hooks.onChange(key); };
     } else if (typeof v === 'string') {
       inp.type = 'color'; inp.value = v;
-      inp.oninput = () => { (p as any)[key] = inp.value; val.textContent = inp.value; hooks.onChange(); };
+      inp.oninput = () => { (p as any)[key] = inp.value; val.textContent = inp.value; hooks.onChange(key); };
       val.textContent = v;
     } else {
       inp.type = 'range'; inp.min = String(meta.min ?? 0); inp.max = String(meta.max ?? 100); inp.step = String(meta.step ?? 1);
       inp.value = String(v); val.textContent = String(v);
-      inp.oninput = () => { (p as any)[key] = parseFloat(inp.value); val.textContent = inp.value; hooks.onChange(); };
+      inp.oninput = () => { (p as any)[key] = parseFloat(inp.value); val.textContent = inp.value; hooks.onChange(key); };
     }
     row.appendChild(inp); row.appendChild(val);
     grp(meta.group).appendChild(row);

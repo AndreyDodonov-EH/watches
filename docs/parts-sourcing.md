@@ -6,6 +6,7 @@ Prices approximate, incl. VAT where known. AliExpress item pages can't be scrape
 
 ## 0. Board facts (verified from Waveshare dimension drawing)
 
+Local copies in `vendor/waveshare/`: schematic PDF, `…-details-size-1.jpg` (dimension drawing), `…-details-inter.jpg` (pinout, battery +/− silkscreen), `…-details-17.jpg` (component photo), `ProductLink.txt`.
 Source drawing: `https://docs.waveshare.com/assets/images/ESP32-S3-AMOLED-1.91-ProductSize-b5bb67c1fbdb6ea1335dbf9d2d76d0b9.webp`
 Product photo: `https://www.waveshare.com/media/catalog/product/cache/1/image/560x560/9df78eab33525d08d6e5fb8d27136e95/e/s/esp32-s3-amoled-1.91-1.jpg`
 
@@ -15,9 +16,9 @@ Product photo: `https://www.waveshare.com/media/catalog/product/cache/1/image/56
 | Thickness | 4.0 mm board+display (no headers); 14.1 mm with pin headers fitted → buy the version **without** soldered headers or desolder them |
 | Active area | 44.22 × 19.80 mm (±0.1), 536 × 240 px → ~12.1 px/mm |
 | AA offset from top edge | 2.35 mm; glass lip 2.35 mm each side |
-| Mounting holes | 4×, 38.0 mm apart (long axis), ~17.8 mm apart (short axis), M2 |
-| USB-C | bottom short edge, centred; buttons (BOOT/RESET) flank it |
-| Battery | onboard 3.7 V **MX1.25 (Molex PicoBlade 1.25 mm) 2-pin** header + charger. Waveshare docs do not print the polarity; check the silkscreen (+/−) next to the header / the schematic PDF before plugging in |
+| Mounting holes | 4×, 38.0 mm (long axis) × 17.78 mm (short axis), M2, brass standoffs fitted, same height as the battery header and TF slot → removing them gains nothing. Keep them: they define the bearing plane on the back and take M2 screws from inside the cuff (through lining/carrier); battery goes between them under the PCB. Hole row sits 12.0 mm from the USB edge |
+| USB-C | bottom short edge, centred, 10.5 mm wide; BOOT/RESET buttons flank it, 3.36 mm in from each long edge, 7.44 mm tall zone; 40-pin header rows on 2.54 mm pitch, 48.26 mm long |
+| Battery | onboard 3.7 V **MX1.25 (Molex PicoBlade 1.25 mm) 2-pin** header + PL4054 charger, charge LED next to USB. **Polarity (from the official pinout photo, board viewed from the back, USB at top): left pin = +, right pin = −**, marked on silkscreen above the header. Battery red wire must be on the "+" side; meter once before first plug-in |
 | Price | USD 26–36 (waveshare.com), ~€30 on AliExpress Waveshare store |
 
 Two tube slots of 44 × 6 mm with a 4 mm gap = 16 mm tall → fits inside the 19.8 mm AA with ~1.9 mm margin top/bottom.
@@ -107,7 +108,7 @@ A 6 mm slot punch is €36+ — for a one-off, drill/punch Ø6 holes at both slo
 | alt | eckstein-shop.de LP503035 500 mAh **JST-PH 2.0**, with PCM, 5 mm thick — back-order to 31.08.2026; needs re-termination to a PicoBlade 1.25 pigtail | https://eckstein-shop.de/LiPo-Battery-Lithium-Ion-Polymer-Battery-37V-500mAh-with-JST-PHR-2-Connector-LP503035-EN | €5.19 |
 | ✗ | The Pi Hut PKCELL PicoBlade — **ships to England/Wales only**, drop it | — | — |
 
-**Polarity, now confirmed from the schematic** (https://files.waveshare.com/wiki/ESP32-S3-AMOLED-1.91/ESP32-S3-AMOLED-1.91.pdf): charger is a **PL4054**; BAT1 symbol pin 1 = BAT (+, also goes to PL4054 pin 3 and the 10k/1k divider → BAT_ADC on GPIO1), pin 2 = GND. The physical socket orientation is not drawn, so before plugging in: meter continuity from each socket pin to USB shell/GND — the pin **not** shorted to GND is +. Match to the battery's red wire; swap crimps if needed. Dimensions zip: https://files.waveshare.com/wiki/ESP32-S3-AMOLED-1.91/Esp32-s3-amoled-1_91-M.zip
+**Polarity, confirmed from schematic + silkscreen ("+" left / "−" right, back view, USB up)** (https://files.waveshare.com/wiki/ESP32-S3-AMOLED-1.91/ESP32-S3-AMOLED-1.91.pdf): charger is a **PL4054**; BAT1 symbol pin 1 = BAT (+, also goes to PL4054 pin 3 and the 10k/1k divider → BAT_ADC on GPIO1), pin 2 = GND. The physical socket orientation is not drawn, so before plugging in: meter continuity from each socket pin to USB shell/GND — the pin **not** shorted to GND is +. Match to the battery's red wire; swap crimps if needed. Dimensions zip: https://files.waveshare.com/wiki/ESP32-S3-AMOLED-1.91/Esp32-s3-amoled-1_91-M.zip
 
 ### Verified-basket total (one cuff)
 
@@ -176,7 +177,7 @@ Target (updated): veg-tan, **65–80 mm wide** (board across the band), 2.8–3.
 
 ## 4. Battery — 3.7 V LiPo, MX1.25 / PicoBlade 2-pin, ≤5 mm thick
 
-Board space behind PCB ≈ 57 × 24 mm; keep cell ≤ 50 × 22 mm. Candidates (cell size code = T×W×L in 0.1 mm):
+Placement: **beside the board along the band, on the underside of the wrist** (not stacked — stacking would make ~10.6 mm). Cell width is then unconstrained by the board; ≤5 mm thick keeps the cuff uniform. Lead must reach ~80–90 mm → order an MX1.25 2-pin extension pigtail (AliExpress `MX1.25 2P extension cable 150mm`, ~€2) or re-terminate. Keep the cell off the wrist's side bend; closure goes to one side, not the underside. Candidates (cell size code = T×W×L in 0.1 mm):
 
 | # | Product | Where | Price | Image | Note |
 |---|---|---|---|---|---|
@@ -203,7 +204,7 @@ Board space behind PCB ≈ 57 × 24 mm; keep cell ≤ 50 × 22 mm. Candidates (c
 ## 6. Other parts / ideas
 
 - **Bezel/carrier (recommended):** a 3D-printed (PETG/TPU) or laser-cut 3 mm black acrylic frame, 57.5 × 24.5 mm pocket + two 44 × 6 mm windows with 8 mm half-round grooves, gap bar 4 mm. It registers the board, the rods and the slots to each other (hand-punched leather will be ±0.5 mm). Print services: JLC3DP / Craftcloud; laser: any local FabLab. Cost €3–10. Leather is then glued over the frame with the slots cut slightly oversize (6.5 mm) so the frame defines the edge.
-- **M2 × 4 mm screws + nuts** (board mounting holes, 38.0 × 17.8 mm pattern) — AliExpress M2 assortment €3.
+- **M2 × 4–6 mm screws** into the fitted standoffs (38.0 × 17.78 mm pattern) from inside the cuff — AliExpress M2 assortment €3.
 - **Short angled USB-C cable** or leave a USB-C cutout at the bottom edge for charging/flashing (connector is centred on the bottom short edge).
 - **Slide switch** (MSK-12C02, 3 mm) in the battery lead if the board doesn't expose a power switch — €2/10 pcs.
 - **Thin double-sided tape (3M 9448 / VHB 0.5 mm)** to fix the rods' flat face onto the leather without glue squeeze-out — €3.

@@ -1,60 +1,20 @@
-// Web Serial bridge to the board's `i` IMU stream (t_ms,ax,ay,az,gx,gy,gz at 50 Hz).
-// Chrome/Edge only. Maps IMU axes to tube frame using spec/layout IMU_* constants.
+// IMU feed over the serial transport: the board's `i` stream (t_ms,ax,ay,az,gx,gy,gz at 50 Hz),
+// mapped to the tube frame using spec/layout IMU_* constants.
 import { IMU_AXIS_ALONG_TUBE, IMU_ALONG_TUBE_SIGN, IMU_AXIS_ACROSS_TUBE, IMU_ACROSS_TUBE_SIGN } from '@spec/layout';
 import { GravityNorm, type TiltInput } from './physics';
+import type { SerialTransport } from './transport/serial';
 
 export class SerialImu {
-  port: any = null;
-  reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   last: TiltInput = { along: 0, across: 0, gyroAlong: 0, gyroAcross: 0 };
   raw = '';
-  connected = false;
   private norm = new GravityNorm();
-  onStatus: (s: string) => void = () => {};
 
-  get supported(): boolean { return 'serial' in navigator; }
+  constructor(private t: SerialTransport) { t.onLine = (l) => this.parse(l); }
 
-  async connect(): Promise<void> {
-    const nav = navigator as any;
-    this.port = await nav.serial.requestPort();
-    await this.port.open({ baudRate: 115200 });
-    this.connected = true;
-    this.onStatus('connected');
-    const w = this.port.writable.getWriter();
-    await w.write(new TextEncoder().encode('i'));
-    w.releaseLock();
-    this.readLoop();
-  }
-
-  async disconnect(): Promise<void> {
-    try {
-      if (this.port?.writable) { const w = this.port.writable.getWriter(); await w.write(new TextEncoder().encode('i')); w.releaseLock(); }
-      await this.reader?.cancel();
-      await this.port?.close();
-    } catch { /* ignore */ }
-    this.connected = false; this.onStatus('disconnected');
-  }
-
-  private async readLoop(): Promise<void> {
-    const dec = new TextDecoder();
-    let buf = '';
-    while (this.port?.readable && this.connected) {
-      const reader: ReadableStreamDefaultReader<Uint8Array> = this.port.readable.getReader();
-      this.reader = reader;
-      try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          let nl: number;
-          while ((nl = buf.indexOf('\n')) >= 0) {
-            const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-            this.parse(line);
-          }
-        }
-      } catch (e) { this.onStatus('error: ' + e); }
-      finally { reader.releaseLock(); }
-    }
+  /** `i` toggles on the board; the reply states the resulting state, so re-send if it mismatches. */
+  async setStream(on: boolean): Promise<void> {
+    const r = await this.t.request('i');
+    if (r.includes('off') === on) await this.t.request('i');
   }
 
   private parse(line: string): void {

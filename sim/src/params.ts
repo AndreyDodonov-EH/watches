@@ -10,8 +10,12 @@ export interface Params {
   glass: string;         // empty part of the tube (very dark; 0 = off for AMOLED power)
   bubbleRim: string;
   // --- shape ---
+  remaining: boolean;    // true = liquid at the right end, draining as time passes; false = fills from the left
   highlightH: number;    // px, height of highlight strip at top of column
-  highlightInset: number;// px, highlight starts this far from left and ends this far before the edge
+  highlightInset: number;
+  highlightBright: number; // 0..1.5 strength of the specular band
+  highlightSharp: number;  // 0.3..4 band profile exponent (high = narrow, glossy)
+  shadeRollGain: number;   // 0..2 rows the cylinder shading rotates per px of acrossShift// px, highlight starts this far from left and ends this far before the edge
   shadeDepth: number;    // 0..1, how dark the bottom rows get (cylinder shading)
   meniscusDepth: number; // px, how far the liquid climbs the wall at top/bottom vs centre (>0 concave)
   meniscusPow: number;   // curve exponent (2 = parabola)
@@ -30,11 +34,14 @@ export interface Params {
   bubbleGap: number;     // px, distance from fill edge to bubble centre
   bubbleY: number;       // 0..1 vertical position in the tube (0.5 = centre, like a spirit level)
   bubbleDark: number;    // 0..1, darkening of bubble interior
+  bubbleRollGain: number; // px of bubble height per px of acrossShift
+  bubbleTiltGain: number; // px the bubble slides toward the high end per g of along-tilt
   // --- fizz (small drifting bubbles, like the reference photo) ---
   fizz: boolean;
   fizzCount: number;
   fizzSize: number;      // px (1..3)
-  fizzSpeed: number;     // px/s upward drift
+  fizzSpeed: number;
+  fizzDriftGain: number; // 0..2 steering: fraction of rise speed that goes toward the high end per g of along-tilt     // px/s upward drift
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
@@ -88,6 +95,10 @@ export interface Params {
   angleGyroGain: number; // deg impulse per (dps) of along-axis rotation rate
   angleMax: number;      // deg clamp
   acrossShiftGain: number; // px vertical shift of highlight per g of across-tube tilt
+  acrossK: number;       // spring stiffness of the across (roll) swing
+  acrossDamp: number;
+  acrossGyroGain: number; // px impulse per dps of roll rate (gyro about the tube axis)
+  shakeGain: number;     // 0..2 agitation sensitivity to gyro energy (fizz speed, edge glow)
   deadzone: number;      // g, ignore tiny accelerations
   // --- IMU conditioning (applied to board / phone input before the springs; ported to firmware) ---
   accelLpHz: number;     // low-pass cutoff for accel (gravity direction), Hz
@@ -108,12 +119,16 @@ export const PARAMS_VERSION = 3;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
+  remaining: false,
   liquid: '#346a2a',
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
   glass: '#000000',
   bubbleRim: '#b0c7a9',
   highlightH: 11,
+  highlightBright: 1,
+  highlightSharp: 1,
+  shadeRollGain: 0,
   highlightInset: 0,
   shadeDepth: 0.49,
   meniscusDepth: -12,
@@ -131,10 +146,13 @@ export const DEFAULT_PARAMS: Params = {
   bubbleH: 19,
   bubbleGap: 22,
   bubbleY: 0.2,
+  bubbleRollGain: 0.5,
+  bubbleTiltGain: 0,
   bubbleDark: 1,
   fizz: true,
   fizzCount: 10,
   fizzSize: 2,
+  fizzDriftGain: 1,
   fizzSpeed: 14,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 16, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
@@ -168,6 +186,10 @@ export const DEFAULT_PARAMS: Params = {
   angleGyroGain: 0.37,
   angleMax: 6,
   acrossShiftGain: 0,
+  acrossK: 200,
+  acrossDamp: 20,
+  acrossGyroGain: 0,
+  shakeGain: 0,
   deadzone: 0,
   accelLpHz: 15.2,
   gyroHpHz: 5,
@@ -225,7 +247,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
     // response defaults. Old physics/IMU tunings produced runaway visuals on real accelerometer
     // input, so drop them and fall back to the new defaults instead of carrying them over.
     for (const k of ['fillK', 'fillDamp', 'fillSloshGain', 'angleK', 'angleDamp', 'angleTiltGain',
-      'angleGyroGain', 'angleMax', 'acrossShiftGain', 'deadzone', 'accelLpHz', 'gyroHpHz',
+      'angleGyroGain', 'angleMax', 'acrossShiftGain', 'acrossK', 'acrossDamp', 'acrossGyroGain', 'shakeGain', 'deadzone', 'accelLpHz', 'gyroHpHz',
       'gyroDeadzone', 'gyroMax', 'inputGain']) delete r[k];
   }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
@@ -241,8 +263,12 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   liquidBright: { group: 'Colour', label: '· liquid trim', min: 0, max: 2, step: 0.01 },
   tickBright: { group: 'Colour', label: '· ticks trim', min: 0, max: 2, step: 0.01 },
   digitBright: { group: 'Colour', label: '· digits trim', min: 0, max: 2, step: 0.01 },
+  remaining: { group: 'Shape', label: 'liquid = remaining' },
   highlightH: { group: 'Shape', min: 0, max: 30, step: 1 },
   highlightInset: { group: 'Shape', min: 0, max: 40, step: 1 },
+  highlightBright: { group: 'Shape', min: 0, max: 1.5, step: 0.05 },
+  highlightSharp: { group: 'Shape', min: 0.3, max: 4, step: 0.1 },
+  shadeRollGain: { group: 'Shape', label: 'shading rotates with roll', min: 0, max: 2, step: 0.05 },
   shadeDepth: { group: 'Shape', min: 0, max: 1, step: 0.01 },
   meniscusDepth: { group: 'Shape', min: -12, max: 20, step: 0.5 },
   meniscusPow: { group: 'Shape', min: 1, max: 4, step: 0.1 },
@@ -260,10 +286,13 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   bubbleGap: { group: 'Bubble', min: 0, max: 80, step: 1 },
   bubbleY: { group: 'Bubble', min: 0.1, max: 0.9, step: 0.01 },
   bubbleDark: { group: 'Bubble', min: 0, max: 1, step: 0.01 },
+  bubbleRollGain: { group: 'Bubble', label: 'bubble height vs roll', min: 0, max: 2, step: 0.05 },
+  bubbleTiltGain: { group: 'Bubble', label: 'bubble slides to high end px/g', min: 0, max: 80, step: 1 },
   fizz: { group: 'Bubble' },
-  fizzCount: { group: 'Bubble', min: 0, max: 60, step: 1 },
+  fizzCount: { group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 60, step: 1 },
   fizzSize: { group: 'Bubble', min: 1, max: 4, step: 1 },
   fizzSpeed: { group: 'Bubble', min: 0, max: 60, step: 1 },
+  fizzDriftGain: { group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
   ticksH: { group: 'Ticks · hours', label: 'show ticks' },
   tickStepH: { group: 'Ticks · hours', label: 'minor every N h', min: 1, max: 6, step: 1 },
   tickMajorEveryH: { group: 'Ticks · hours', label: 'major every N h (0 = none)', min: 0, max: 12, step: 1 },
@@ -306,15 +335,19 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   digitScaleXMin: { group: 'Digits · minutes', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
   digitScaleYMin: { group: 'Digits · minutes', label: 'scale Y', min: 0.5, max: 6, step: 0.25 },
   digitBottomMin: { group: 'Digits · minutes', label: 'baseline from bottom', min: 0, max: 40, step: 1 },
-  fillK: { group: 'Physics', min: 1, max: 400, step: 1 },
+  fillK: { group: 'Physics', min: 1, max: 800, step: 1 },
   fillDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },
-  fillSloshGain: { group: 'Physics', label: 'slosh px/g (capped 14)', min: 0, max: 14, step: 0.5 },
-  angleK: { group: 'Physics', min: 1, max: 400, step: 1 },
+  fillSloshGain: { group: 'Physics', label: 'slosh px/g (capped 30)', min: 0, max: 30, step: 0.5 },
+  angleK: { group: 'Physics', min: 1, max: 800, step: 1 },
   angleDamp: { group: 'Physics', min: 0, max: 40, step: 0.1 },
-  angleTiltGain: { group: 'Physics', label: 'tilt deg/g', min: 0, max: 12, step: 0.5 },
-  angleGyroGain: { group: 'Physics', min: 0, max: 1, step: 0.005 },
-  angleMax: { group: 'Physics', label: 'angle clamp (hard cap 12)', min: 0, max: 12, step: 1 },
-  acrossShiftGain: { group: 'Physics', min: 0, max: 30, step: 0.5 },
+  angleTiltGain: { group: 'Physics', label: 'tilt deg/g', min: 0, max: 20, step: 0.5 },
+  angleGyroGain: { group: 'Physics', min: 0, max: 3, step: 0.005 },
+  angleMax: { group: 'Physics', label: 'angle clamp (hard cap 20)', min: 0, max: 20, step: 1 },
+  acrossShiftGain: { group: 'Physics', label: 'roll shift px/g', min: 0, max: 40, step: 0.5 },
+  acrossK: { group: 'Physics', label: 'roll spring K', min: 1, max: 800, step: 1 },
+  acrossDamp: { group: 'Physics', label: 'roll damping', min: 0, max: 40, step: 0.1 },
+  acrossGyroGain: { group: 'Physics', label: 'roll kick px/dps', min: 0, max: 2, step: 0.01 },
+  shakeGain: { group: 'Physics', label: 'shake → fizz/glow', min: 0, max: 2, step: 0.05 },
   deadzone: { group: 'Physics', min: 0, max: 0.2, step: 0.005 },
   accelLpHz: { group: 'IMU filter', min: 0.2, max: 25, step: 0.1 },
   gyroHpHz: { group: 'IMU filter', min: 0, max: 5, step: 0.05 },

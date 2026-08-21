@@ -10,8 +10,12 @@ struct Params {
   uint32_t liquidLo;
   uint32_t glass;
   uint32_t bubbleRim;
+  bool remaining;
   float highlightH;
   float highlightInset;
+  float highlightBright;
+  float highlightSharp;
+  float shadeRollGain;
   float shadeDepth;
   float meniscusDepth;
   float meniscusPow;
@@ -29,10 +33,13 @@ struct Params {
   float bubbleGap;
   float bubbleY;
   float bubbleDark;
+  float bubbleRollGain;
+  float bubbleTiltGain;
   bool fizz;
   float fizzCount;
   float fizzSize;
   float fizzSpeed;
+  float fizzDriftGain;
   bool ticksH;
   float tickStepH;
   float tickMajorEveryH;
@@ -81,6 +88,10 @@ struct Params {
   float angleGyroGain;
   float angleMax;
   float acrossShiftGain;
+  float acrossK;
+  float acrossDamp;
+  float acrossGyroGain;
+  float shakeGain;
   float deadzone;
   float accelLpHz;
   float gyroHpHz;
@@ -93,7 +104,7 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 87
+#define PARAMS_NUM_FIELDS 98
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -104,8 +115,12 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"liquidLo", 'c', (uint16_t)offsetof(Params, liquidLo)},
   {"glass", 'c', (uint16_t)offsetof(Params, glass)},
   {"bubbleRim", 'c', (uint16_t)offsetof(Params, bubbleRim)},
+  {"remaining", 'b', (uint16_t)offsetof(Params, remaining)},
   {"highlightH", 'f', (uint16_t)offsetof(Params, highlightH)},
   {"highlightInset", 'f', (uint16_t)offsetof(Params, highlightInset)},
+  {"highlightBright", 'f', (uint16_t)offsetof(Params, highlightBright)},
+  {"highlightSharp", 'f', (uint16_t)offsetof(Params, highlightSharp)},
+  {"shadeRollGain", 'f', (uint16_t)offsetof(Params, shadeRollGain)},
   {"shadeDepth", 'f', (uint16_t)offsetof(Params, shadeDepth)},
   {"meniscusDepth", 'f', (uint16_t)offsetof(Params, meniscusDepth)},
   {"meniscusPow", 'f', (uint16_t)offsetof(Params, meniscusPow)},
@@ -123,10 +138,13 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"bubbleGap", 'f', (uint16_t)offsetof(Params, bubbleGap)},
   {"bubbleY", 'f', (uint16_t)offsetof(Params, bubbleY)},
   {"bubbleDark", 'f', (uint16_t)offsetof(Params, bubbleDark)},
+  {"bubbleRollGain", 'f', (uint16_t)offsetof(Params, bubbleRollGain)},
+  {"bubbleTiltGain", 'f', (uint16_t)offsetof(Params, bubbleTiltGain)},
   {"fizz", 'b', (uint16_t)offsetof(Params, fizz)},
   {"fizzCount", 'f', (uint16_t)offsetof(Params, fizzCount)},
   {"fizzSize", 'f', (uint16_t)offsetof(Params, fizzSize)},
   {"fizzSpeed", 'f', (uint16_t)offsetof(Params, fizzSpeed)},
+  {"fizzDriftGain", 'f', (uint16_t)offsetof(Params, fizzDriftGain)},
   {"ticksH", 'b', (uint16_t)offsetof(Params, ticksH)},
   {"tickStepH", 'f', (uint16_t)offsetof(Params, tickStepH)},
   {"tickMajorEveryH", 'f', (uint16_t)offsetof(Params, tickMajorEveryH)},
@@ -175,6 +193,10 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"angleGyroGain", 'f', (uint16_t)offsetof(Params, angleGyroGain)},
   {"angleMax", 'f', (uint16_t)offsetof(Params, angleMax)},
   {"acrossShiftGain", 'f', (uint16_t)offsetof(Params, acrossShiftGain)},
+  {"acrossK", 'f', (uint16_t)offsetof(Params, acrossK)},
+  {"acrossDamp", 'f', (uint16_t)offsetof(Params, acrossDamp)},
+  {"acrossGyroGain", 'f', (uint16_t)offsetof(Params, acrossGyroGain)},
+  {"shakeGain", 'f', (uint16_t)offsetof(Params, shakeGain)},
   {"deadzone", 'f', (uint16_t)offsetof(Params, deadzone)},
   {"accelLpHz", 'f', (uint16_t)offsetof(Params, accelLpHz)},
   {"gyroHpHz", 'f', (uint16_t)offsetof(Params, gyroHpHz)},
@@ -195,8 +217,12 @@ static const Params PRESET_1 = {
   0x1E7515, // liquidLo
   0x000000, // glass
   0xB0C7A9, // bubbleRim
+  false, // remaining
   11.0f, // highlightH
   0.0f, // highlightInset
+  1.0f, // highlightBright
+  1.0f, // highlightSharp
+  0.0f, // shadeRollGain
   0.49f, // shadeDepth
   -12.0f, // meniscusDepth
   3.2f, // meniscusPow
@@ -214,10 +240,13 @@ static const Params PRESET_1 = {
   22.0f, // bubbleGap
   0.2f, // bubbleY
   1.0f, // bubbleDark
+  0.5f, // bubbleRollGain
+  0.0f, // bubbleTiltGain
   true, // fizz
   10.0f, // fizzCount
   2.0f, // fizzSize
   14.0f, // fizzSpeed
+  1.0f, // fizzDriftGain
   true, // ticksH
   1.0f, // tickStepH
   3.0f, // tickMajorEveryH
@@ -266,6 +295,10 @@ static const Params PRESET_1 = {
   0.37f, // angleGyroGain
   6.0f, // angleMax
   0.0f, // acrossShiftGain
+  200.0f, // acrossK
+  20.0f, // acrossDamp
+  0.0f, // acrossGyroGain
+  0.0f, // shakeGain
   0.0f, // deadzone
   15.2f, // accelLpHz
   5.0f, // gyroHpHz
