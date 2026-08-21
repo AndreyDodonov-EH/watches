@@ -31,4 +31,4 @@
 #define IMU_AXIS_ALONG_TUBE   1      // 0=x 1=y 2=z
 #define IMU_ALONG_TUBE_SIGN  -1      // tilt_along = IMU_ALONG_TUBE_SIGN * ay  → positive = right end down
 #define IMU_AXIS_ACROSS_TUBE  0
-#define IMU_ACROSS_TUBE_SIGN -1      // positive = far edge down
+#define IMU_ACROSS_TUBE_SIGN  1      // positive = top (far) edge down; verified by fizz direction 2026-08-21
