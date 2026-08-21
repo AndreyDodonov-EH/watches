@@ -25,6 +25,7 @@
   "meniscusPow": 3.2,
   "meniscusTiltGain": 0.55,
   "meniscusAsym": 0.5,
+  "meniscusRollGain": 0.25,
   "edgeSoft": 2.6,
   "frontBright": 21,
   "edgeGlow": 15,

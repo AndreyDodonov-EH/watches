@@ -32,6 +32,7 @@ export interface Params {
   meniscusPow: number;   // curve exponent (2 = parabola)
   meniscusTiltGain: number; // 0..1: tilt into the end bulges the drop (deeper meniscus), away flattens it
   meniscusAsym: number;  // 0..1: the bulge sags toward gravity (bottom wall extends, top retracts)
+  meniscusRollGain: number; // deg of front skew per px of roll swing (acrossShift): the lower wall leads
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
   frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
   edgeGlow: number;      // px, dim glow fading out past the fill edge (0 = off)
@@ -155,6 +156,7 @@ export const DEFAULT_PARAMS: Params = {
   meniscusPow: 3.2,
   meniscusTiltGain: 0.55,
   meniscusAsym: 0.5,
+  meniscusRollGain: 0.25,
   edgeSoft: 2.6,
   frontBright: 21,
   edgeGlow: 15,
@@ -303,6 +305,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   meniscusPow: { group: 'Shape', min: 1, max: 4, step: 0.1 },
   meniscusTiltGain: { group: 'Shape', label: 'meniscus bulge vs tilt', min: 0, max: 1, step: 0.05 },
   meniscusAsym: { group: 'Shape', label: 'meniscus bottom-cling (max end-up)', min: 0, max: 1, step: 0.05 },
+  meniscusRollGain: { group: 'Shape', label: 'front skew vs roll (deg/px)', min: 0, max: 1, step: 0.01 },
   edgeSoft: { group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { group: 'Shape', min: 0, max: 40, step: 1 },
   edgeGlow: { group: 'Shape', min: 0, max: 40, step: 1 },
