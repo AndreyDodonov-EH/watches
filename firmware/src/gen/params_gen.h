@@ -115,6 +115,7 @@ struct Params {
 };
 
 #define PARAMS_NUM_FIELDS 108
+#define PARAMS_SCHEMA_CRC 0x6571bee2u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
