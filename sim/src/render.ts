@@ -262,7 +262,7 @@ interface Labels {
   sprite: ScaledGlyph[] | null; font: Font; gap: number; rows: Uint16Array; shadow: number;
 }
 
-/** Destination tube row to source row for digits recessed behind the liquid. */
+/** Destination tube row to source row for marks on the rear tube surface. */
 function markSourceRows(H: number, lens: number): Int16Array {
   const out = new Int16Array(H), k = Math.max(0, Math.min(1, lens));
   for (let yd = 0; yd < H; yd++) {
@@ -362,8 +362,9 @@ function drawLabels(lb: Labels, mark: MarkFn): void {
 
 /** Tick ladder. Majors are both longer AND wider than minors, and are placed every
  *  `tickMajorEvery` UNITS (hours / minutes), not every N-th minor, so they stay put
- *  when the minor step changes. Ticks that would collide with a label are skipped. */
-function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array, mark: MarkFn): void {
+ *  when the minor step changes. */
+function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array, mark: MarkFn,
+  dx = 0, dy = 0): void {
   const minutes = ticksN === 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   const H = tubeLayout(p).H, L = TUBE_LENGTH_PX;
@@ -383,17 +384,43 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
     }
     return [a, b];
   };
+  const emboss = Math.max(0, Math.min(1, p.tickEmboss));
+  const drawSegment = (x0: number, w: number, c: number, range: [number, number], top: boolean): void => {
+    if (range[1] < 0) return;
+    const outer = top ? 0 : H - 1;
+    const inner = Math.max(0, Math.min(H - 1, top ? range[1] : range[0]));
+    const dir = inner >= outer ? 1 : -1;
+    const radius = Math.max(1, (H - 1) / 2), centre = (H - 1) / 2;
+    const hi = q(mix(rgb565to888(c), [255, 255, 255], 0.7));
+    const lo = q(scale(rgb565to888(c), 0.25));
+    const point = (baseY: number): [number, number] => {
+      const qy = (baseY - centre) / radius;
+      const depth = Math.sqrt(Math.max(0, 1 - qy * qy));
+      return [x0 + Math.round(dx * depth), baseY + Math.round(dy * depth)];
+    };
+    const plot = (x: number, ry: number): void => {
+      if (ry < 0 || ry >= H) return;
+      if (emboss > 0) { mark(x - 1, y0 + ry, hi, emboss); mark(x + w, y0 + ry, lo, emboss); }
+      for (let k = 0; k < w; k++) mark(x + k, y0 + ry, c);
+    };
+    let [px0, py0] = point(outer); plot(px0, py0);
+    if (outer === inner) return;
+    for (let baseY = outer + dir; ; baseY += dir) {
+      const [px1, py1] = point(baseY);
+      const n = Math.max(1, Math.abs(px1 - px0), Math.abs(py1 - py0));
+      for (let j = 1; j <= n; j++) plot(Math.round(px0 + (px1 - px0) * j / n), Math.round(py0 + (py1 - py0) * j / n));
+      px0 = px1; py0 = py1;
+      if (baseY === inner) break;
+    }
+  };
   for (let i = step; i < ticksN; i += step) {
     const xc = Math.round((i * L) / ticksN);
     const major = majorEvery > 0 && i % majorEvery === 0;
     const h = major ? hMaj : hMin; if (h <= 0) continue;
     const w = major ? wMaj : 1, x0 = xc - ((w - 1) >> 1), c = major ? cMaj : cMin;
     const topRange = warpedRange(0, h - 1), botRange = warpedRange(H - h, H - 1);
-    for (let k = 0; k < w; k++) {
-      const x = x0 + k;
-      if (pos !== 1) for (let ry = topRange[0]; ry <= topRange[1]; ry++) mark(x, y0 + ry, c);
-      if (pos !== 0) for (let ry = botRange[0]; ry <= botRange[1]; ry++) mark(x, y0 + ry, c);
-    }
+    if (pos !== 1) drawSegment(x0, w, c, topRange, true);
+    if (pos !== 0) drawSegment(x0, w, c, botRange, false);
   }
 }
 
@@ -539,12 +566,14 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     }
   }
 
-  // Bottom marks are composited through the liquid, before bubbles. Top marks are drawn last.
+  // Rear marks are composited through the liquid, before bubbles. Front marks are drawn last.
   const labels = layoutLabels(y0, p, ticksN);
   const drawScaleLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
-      const rows = markSourceRows(H, onTop ? 0 : p.bottomLens);
-      drawTicks(y0, p, ticksN, rows, markFn(y0, edges, p, onTop, p.markContrast * p.tickBright));
+      const rows = markSourceRows(H, onTop ? 0 : p.tickLens);
+      const dx = onTop ? 0 : -state.edgeLight * p.tickParallax;
+      const dy = onTop ? 0 : state.acrossTilt * p.tickParallax;
+      drawTicks(y0, p, ticksN, rows, markFn(y0, edges, p, onTop, p.markContrast * p.tickBright), dx, dy);
     }
     if (labels && p.digitsOnTop === onTop)
       drawLabels(labels, markFn(y0, edges, p, onTop, p.markContrast * p.digitBright));

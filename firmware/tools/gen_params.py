@@ -31,7 +31,7 @@ FIELDS = [
  ('tickMajorWidthH','float'),('tickColorH','rgb'),('tickMajorColorH','rgb'),('tickPosH','float'),
  ('ticksM','bool'),('tickStepM','float'),('tickMajorEveryM','float'),('tickMinorHeightM','float'),('tickMajorHeightM','float'),
  ('tickMajorWidthM','float'),('tickColorM','rgb'),('tickMajorColorM','rgb'),('tickPosM','float'),
- ('ticksOnTop','bool'),
+ ('ticksOnTop','bool'),('tickLens','float'),('tickParallax','float'),('tickEmboss','float'),
  ('digits','bool'),('digitColor','rgb'),('digitColor2','rgb'),('digitShadow','bool'),('digitShadowColor','rgb'),
  ('digitTint','rgb'),('digitTintAmount','float'),('digitTone','float'),('digitFont','float'),
  ('digitScaleX','float'),('digitScaleY','float'),('digitScaleXMin','float'),('digitScaleYMin','float'),

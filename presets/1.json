@@ -1,5 +1,5 @@
 {
-  "v": 5,
+  "v": 10,
   "tubeHeight": 72,
   "hoursY": 0,
   "minutesY": 168,
@@ -64,6 +64,9 @@
   "tickMajorColorM": "#303030",
   "tickPosM": 2,
   "ticksOnTop": false,
+  "tickLens": 0.35,
+  "tickParallax": 3,
+  "tickEmboss": 0.25,
   "digits": true,
   "digitColor": "#e3e3e3",
   "digitColor2": "#20312f",

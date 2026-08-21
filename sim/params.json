@@ -1,5 +1,5 @@
 {
-  "v": 6,
+  "v": 10,
   "liquid": "#346a2a",
   "liquidHi": "#b6ffa0",
   "liquidLo": "#1e7515",
@@ -47,6 +47,9 @@
   "tickMajorColorM": "#303030",
   "tickPosM": 2,
   "ticksOnTop": false,
+  "tickLens": 0.35,
+  "tickParallax": 3,
+  "tickEmboss": 0.25,
   "digits": true,
   "digitColor": "#e3e3e3",
   "digitColor2": "#20312f",
