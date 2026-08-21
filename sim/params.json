@@ -1,5 +1,5 @@
 {
-  "v": 5,
+  "v": 6,
   "liquid": "#346a2a",
   "liquidHi": "#b6ffa0",
   "liquidLo": "#1e7515",
@@ -63,6 +63,7 @@
   "digitBottomMin": 19,
   "digitBottom": 16,
   "digitsOnTop": false,
+  "bottomLens": 0.35,
   "liquidTransparency": 0.17,
   "markContrast": 0,
   "digitsLeadingZero": false,

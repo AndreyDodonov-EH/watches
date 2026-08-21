@@ -227,11 +227,20 @@ struct Mark {
   }
 };
 
-struct Label { int x0, x1; char text[3]; int len; int adv[2]; };
+struct Label { int x0; char text[3]; int len; int adv[2]; };
 struct Labels {
   Label list[12]; int n; int bw, bh, ry0, ry1, yTop; ScaledGlyph *sprite; const Font *font; int gap;
-  uint16_t rows[96]; int shadow;
+  uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow;
 };
+
+static void markSourceRows(int height, float lens, int16_t *out) {
+  float k = clampf(lens, 0, 1);
+  for (int yd = 0; yd < height; yd++) {
+    float d = (yd + 0.5f - height / 2.0f) / (height / 2.0f), u = fabsf(d);
+    float s = (d < 0 ? -1 : 1) * ((1 - k) * u + k * u * u * u);
+    out[yd] = (int16_t)clampf(floorf(height / 2.0f + s * height / 2.0f), 0, height - 1);
+  }
+}
 
 static void digitRowColors(const Params &p, int bh, uint16_t *out) {
   int n = bh < 1 ? 1 : bh; if (n > 96) n = 96;
@@ -258,6 +267,13 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, Labels &
   int shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   int yBase = y0 + H - 1 - (int)bottom, yTop = yBase - bh + 1;
   // NB: sim uses yBase = y0+H-1-bottom with fractional `bottom` possible; presets use integers.
+  markSourceRows(H, p.digitsOnTop ? 0 : p.bottomLens, lb.sourceRows);
+  int sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
+  lb.ry0 = H; lb.ry1 = -1;
+  for (int ry = 0; ry < H; ry++) if (lb.sourceRows[ry] >= sourceRy0 && lb.sourceRows[ry] <= sourceRy1) {
+    if (ry < lb.ry0) lb.ry0 = ry;
+    if (ry > lb.ry1) lb.ry1 = ry;
+  }
   lb.n = 0;
   for (int i = every; i < ticksN && lb.n < 12; i += every) {
     Label &l = lb.list[lb.n++];
@@ -267,48 +283,53 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, Labels &
     int w = -gap;
     for (int k = 0; k < l.len; k++) { l.adv[k] = sprite ? sprite[l.text[k] - '0'].w : bw; w += l.adv[k] + gap; }
     l.x0 = (int)jround((float)i * L / ticksN - w / 2.0f);
-    l.x1 = l.x0 + w - 1 + (shadow >= 0 ? 1 : 0);
   }
-  lb.bw = bw; lb.bh = bh; lb.yTop = yTop; lb.ry0 = yTop - y0; lb.ry1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
+  lb.bw = bw; lb.bh = bh; lb.yTop = yTop;
   lb.sprite = sprite; lb.font = font; lb.gap = gap; lb.shadow = shadow;
   digitRowColors(p, bh, lb.rows);
   return true;
 }
 
-static void drawSpriteGlyph(const ScaledGlyph &g, int x, int yTop, const Mark &mark) {
-  for (int dy = 0; dy < g.h; dy++) for (int dx = 0; dx < g.w; dx++) {
-    uint8_t a = g.a[dy * g.w + dx]; if (!a) continue;
-    mark(x + dx, yTop + dy, g.c[dy * g.w + dx], a / 255.0f);
+static void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Mark &mark) {
+  int sourceTop = lb.yTop - y0;
+  for (int ry = lb.ry0; ry <= lb.ry1; ry++) {
+    int dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
+    for (int dx = 0; dx < g.w; dx++) {
+      uint8_t a = g.a[dy * g.w + dx]; if (!a) continue;
+      mark(x + dx, y0 + ry, g.c[dy * g.w + dx], a / 255.0f);
+    }
   }
 }
-static void drawBitmapGlyph(const Font &f, int d, int x, int yTop, int bw, int bh, const uint16_t *rowColors, int shadow, const Mark &mark) {
+static void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Mark &mark) {
   const uint8_t *g = f.g[d];
   int msb = 1 << (f.w - 1);
-  for (int pass = shadow >= 0 ? 0 : 1; pass < 2; pass++) {
+  for (int pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
     int off = pass == 0 ? 1 : 0;
-    for (int dy = 0; dy < bh; dy++) {
-      int row = g[(dy * f.h / bh) < f.h - 1 ? dy * f.h / bh : f.h - 1];
-      for (int dx = 0; dx < bw; dx++) {
-        int col = (dx * f.w / bw) < f.w - 1 ? dx * f.w / bw : f.w - 1;
+    int sourceTop = lb.yTop - y0 + off;
+    for (int ry = lb.ry0; ry <= lb.ry1; ry++) {
+      int dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
+      int row = g[(dy * f.h / lb.bh) < f.h - 1 ? dy * f.h / lb.bh : f.h - 1];
+      for (int dx = 0; dx < lb.bw; dx++) {
+        int col = (dx * f.w / lb.bw) < f.w - 1 ? dx * f.w / lb.bw : f.w - 1;
         if (!(row & (msb >> col))) continue;
-        mark(x + dx + off, yTop + dy + off, pass == 0 ? (uint16_t)shadow : rowColors[dy]);
+        mark(x + dx + off, y0 + ry, pass == 0 ? (uint16_t)lb.shadow : lb.rows[dy]);
       }
     }
   }
 }
-static void drawLabels(const Labels &lb, const Mark &mark) {
+static void drawLabels(int y0, const Labels &lb, const Mark &mark) {
   for (int i = 0; i < lb.n; i++) {
     const Label &l = lb.list[i]; int x = l.x0;
     for (int k = 0; k < l.len; k++) {
       int d = l.text[k] - '0';
-      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, lb.yTop, mark);
-      else drawBitmapGlyph(*lb.font, d, x, lb.yTop, lb.bw, lb.bh, lb.rows, lb.shadow, mark);
+      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, y0, lb, mark);
+      else drawBitmapGlyph(*lb.font, d, x, y0, lb, mark);
       x += l.adv[k] + lb.gap;
     }
   }
 }
 
-static void drawTicks(int y0, const Params &p, int ticksN, const Labels *lb, const Mark &mark) {
+static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *sourceRows, const Mark &mark) {
   bool minutes = ticksN == 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   int step = (int)fmaxf(1, jround(minutes ? p.tickStepM : p.tickStepH));
@@ -320,21 +341,24 @@ static void drawTicks(int y0, const Params &p, int ticksN, const Labels *lb, con
   uint16_t cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   uint16_t cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   int pos = (int)jround(minutes ? p.tickPosM : p.tickPosH);
-  auto hitsLabel = [&](int x, int ryA, int ryB) {
-    if (!lb || !(ryB >= lb->ry0 && ryA <= lb->ry1)) return false;
-    for (int i = 0; i < lb->n; i++) if (x >= lb->list[i].x0 - 1 && x <= lb->list[i].x1 + 1) return true;
-    return false;
+  auto warpedRange = [&](int sourceA, int sourceB, int &a, int &b) {
+    a = H; b = -1;
+    for (int ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceA && sourceRows[ry] <= sourceB) {
+      if (ry < a) a = ry;
+      if (ry > b) b = ry;
+    }
   };
   for (int i = step; i < ticksN; i += step) {
     int xc = (int)jround((float)i * L / ticksN);
     bool major = majorEvery > 0 && i % majorEvery == 0;
     int h = major ? hMaj : hMin; if (h <= 0) continue;
     int w = major ? wMaj : 1, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
-    bool topHit = hitsLabel(xc, 0, h - 1), botHit = hitsLabel(xc, H - h, H - 1);
-    for (int k = 0; k < w; k++) for (int ry = 0; ry < h; ry++) {
+    int topA, topB, botA, botB;
+    warpedRange(0, h - 1, topA, topB); warpedRange(H - h, H - 1, botA, botB);
+    for (int k = 0; k < w; k++) {
       int x = x0 + k;
-      if (pos != 1 && !topHit) mark(x, y0 + ry, c);
-      if (pos != 0 && !botHit) mark(x, y0 + H - 1 - ry, c);
+      if (pos != 1) for (int ry = topA; ry <= topB; ry++) mark(x, y0 + ry, c);
+      if (pos != 0) for (int ry = botA; ry <= botB; ry++) mark(x, y0 + ry, c);
     }
   }
 }
@@ -381,8 +405,8 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
   return xe + skew + depth * powf(fabsf(d), p.meniscusPow);
 }
 
-// `remaining`: liquid at the right end, draining. The liquid layer is rendered in a mirrored frame
-// (edge from the right, along-axis signs flipped; across-axis state is invariant), rows are flipped in place, scale drawn last.
+// `remaining`: liquid at the right end, draining. Its base is rendered in a mirrored frame, then
+// flipped before panel-coordinate marks and bubbles are composited.
 static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, int ticksN) {
   TubeState s = st;
   if (p.remaining) { s.fillPos = -st.fillPos; s.edgeLight = -st.edgeLight; }
@@ -461,16 +485,35 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     }
   }
 
-  // 4b: scale
-  auto drawScale = [&]() {
-    static Labels labels;
-    bool haveLabels = layoutLabels(idx, y0, p, ticksN, labels);
-    Mark tickMark { y0, edges, &p, p.ticksOnTop, p.markContrast * p.tickBright };
-    Mark digitMark { y0, edges, &p, p.digitsOnTop, p.markContrast * p.digitBright };
-    drawTicks(y0, p, ticksN, haveLabels ? &labels : nullptr, tickMark);
-    if (haveLabels) drawLabels(labels, digitMark);
+  if (p.remaining) {
+    for (int ry = 0; ry < H; ry++) {
+      uint16_t *row = FB + ry * PANEL_W;
+      for (int a = 0, b = L - 1; a < b; a++, b--) { uint16_t t = row[a]; row[a] = row[b]; row[b] = t; }
+      edges[ry] = L - edges[ry];
+    }
+  }
+
+  // Bottom marks are composited through the liquid, before bubbles. Top marks are drawn last.
+  static Labels labels;
+  bool haveLabels = layoutLabels(idx, y0, p, ticksN, labels);
+  auto drawScaleLayer = [&](bool onTop) {
+    if (p.ticksOnTop == onTop) {
+      int16_t rows[TUBE_HEIGHT_MAX];
+      markSourceRows(H, onTop ? 0 : p.bottomLens, rows);
+      Mark tickMark { y0, edges, &p, onTop, p.markContrast * p.tickBright };
+      drawTicks(y0, p, ticksN, rows, tickMark);
+    }
+    if (haveLabels && p.digitsOnTop == onTop) {
+      Mark digitMark { y0, edges, &p, onTop, p.markContrast * p.digitBright };
+      drawLabels(y0, labels, digitMark);
+    }
   };
-  if (!p.remaining) drawScale();
+  drawScaleLayer(false);
+  auto mapX = [&](int x) { return p.remaining ? L - 1 - x : x; };
+  auto span = [&](int y, int xa, int xb, uint16_t c) {
+    if (p.remaining) hspan(y, L - 1 - xb, L - xa, c);
+    else hspan(y, xa, xb + 1, c);
+  };
 
   // 5: fizz
   if (p.fizz) for (int k = 0; k < fizzN[idx]; k++) {
@@ -481,7 +524,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     int sz = (int)p.fizzSize;
     for (int dy = 0; dy < sz; dy++) for (int dx = 0; dx < sz; dx++) {
       bool inner = sz >= 3 && dx > 0 && dy > 0 && dx < sz - 1 && dy < sz - 1;
-      px(fx + dx, y0 + fy + dy, inner ? pal.bubbleIn[fy] : pal.bubbleRim);
+      px(mapX(fx + dx), y0 + fy + dy, inner ? pal.bubbleIn[fy] : pal.bubbleRim);
     }
   }
 
@@ -496,23 +539,15 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
         float hw = sqrtf(1 - dy * dy) * rx;
         int xa = (int)jround(bx - hw), xb = (int)jround(bx + hw);
         int ryi = yy < 0 ? 0 : yy > H - 1 ? H - 1 : yy;
-        hspan(y0 + yy, xa, xb + 1, pal.bubbleIn[ryi]);
-        px(xa, y0 + yy, pal.bubbleRim); px(xb, y0 + yy, pal.bubbleRim);
+        span(y0 + yy, xa, xb, pal.bubbleIn[ryi]);
+        px(mapX(xa), y0 + yy, pal.bubbleRim); px(mapX(xb), y0 + yy, pal.bubbleRim);
       }
       int yt = (int)jround(by - ry_), yb = (int)jround(by + ry_);
-      hspan(y0 + yt, (int)jround(bx - rx * 0.45f), (int)jround(bx + rx * 0.45f) + 1, pal.bubbleRim);
-      hspan(y0 + yb, (int)jround(bx - rx * 0.45f), (int)jround(bx + rx * 0.45f) + 1, pal.bubbleRim);
+      span(y0 + yt, (int)jround(bx - rx * 0.45f), (int)jround(bx + rx * 0.45f), pal.bubbleRim);
+      span(y0 + yb, (int)jround(bx - rx * 0.45f), (int)jround(bx + rx * 0.45f), pal.bubbleRim);
     }
   }
-
-  if (p.remaining) {
-    for (int ry = 0; ry < H; ry++) {
-      uint16_t *row = FB + ry * PANEL_W;
-      for (int a = 0, b = L - 1; a < b; a++, b--) { uint16_t t = row[a]; row[a] = row[b]; row[b] = t; }
-      edges[ry] = L - edges[ry];
-    }
-    drawScale();
-  }
+  drawScaleLayer(true);
 }
 
 void renderTube(int idx, const TubeState &s, const Params &p, uint16_t *strip) {

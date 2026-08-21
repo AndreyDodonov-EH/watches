@@ -80,6 +80,7 @@
   "digitBottomMin": 19,
   "digitBottom": 16,
   "digitsOnTop": false,
+  "bottomLens": 0.35,
   "liquidTransparency": 0.17,
   "markContrast": 0,
   "digitsLeadingZero": false,

@@ -1,7 +1,6 @@
 # Kaizen — continuous-improvement backlog
 
 ## Visual / layout
-- Apply extra lens specifically to DIGITS - they are the only thing "at the bottom" - then they do not read at the same level as liquid.
 - Even if hour has passed, edge might be before it, example is 06:01
 - Empty space at the top and bottom of the real screen? Move tubes further away from one another?
 

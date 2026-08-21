@@ -93,6 +93,7 @@ export interface Params {
   digitBottomMin: number; // minutes tube baseline (px from bottom edge)
   digitBottom: number;   // hours tube: px from the tube's bottom edge to the digit baseline
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
+  bottomLens: number;    // 0..1 depth warp for ticks/digits printed behind the liquid
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
   markContrast: number;  // min luma difference a tick/digit must keep from the liquid behind it (0 = off)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
@@ -129,7 +130,7 @@ export interface Params {
   digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
-export const PARAMS_VERSION = 5;
+export const PARAMS_VERSION = 6;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -197,6 +198,7 @@ export const DEFAULT_PARAMS: Params = {
   digitBottomMin: 19,
   digitBottom: 16,
   digitsOnTop: false,
+  bottomLens: 0.35,
   liquidTransparency: 0.17,
   markContrast: 0,
   digitsLeadingZero: false,
@@ -368,7 +370,8 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   digitColor2: { help: 'Bottom of glyph.', group: 'Digits', label: 'colour bottom' },
   digitShadow: { help: '1 px darker copy offset down-right (emboss).', group: 'Digits', label: 'emboss shadow' },
   digitShadowColor: { help: 'Emboss shadow colour.', group: 'Digits', label: 'shadow colour' },
-  digitsOnTop: { help: 'Printed on the glass, opaque over the liquid. Off: behind the liquid, seen through it by liquidTransparency.', group: 'Digits', label: 'print on top of liquid' },
+  digitsOnTop: { help: 'Printed on the glass, opaque and undistorted. Off: behind the liquid, seen through it and depth-warped.', group: 'Digits', label: 'print on top of liquid' },
+  bottomLens: { help: 'Depth warp for ticks and digits behind the liquid. Top marks ignore it.', group: 'Digits', label: 'bottom lens', min: 0, max: 1, step: 0.05 },
   // digits — hours tube
   digitHourStep: { help: 'Label every N hours.', group: 'Digits · hours', label: 'label every N h', min: 1, max: 6, step: 1 },
   digitScaleX: { help: 'Hours tube horizontal scale (nearest-neighbour).', group: 'Digits · hours', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
