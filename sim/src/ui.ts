@@ -5,7 +5,7 @@ import { DEFAULT_PARAMS, PARAM_META, migrateParams, PRESET_CONCEPT, PRESET_MINT,
 export interface UiHooks { onChange: (key?: keyof Params) => void; }
 
 export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refresh: () => void } {
-  const inputs = new Map<string, HTMLInputElement>();
+  const inputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
   const groups = new Map<string, HTMLElement>();
   const grp = (name: string): HTMLElement => {
     let g = groups.get(name);
@@ -21,9 +21,13 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
     const row = document.createElement('label'); row.className = 'row';
     const name = document.createElement('span'); name.textContent = meta.label ?? key; name.title = meta.help ? key + '\n' + meta.help : key; row.appendChild(name);
     const v = p[key];
-    const inp = document.createElement('input');
+    const inp = typeof v === 'number' && meta.options ? document.createElement('select') : document.createElement('input');
     const val = document.createElement('output');
-    if (typeof v === 'boolean') {
+    if (inp instanceof HTMLSelectElement) {
+      meta.options!.forEach((text, value) => inp.add(new Option(`${value} · ${text}`, String(value))));
+      inp.value = String(v);
+      inp.oninput = () => { (p as any)[key] = parseFloat(inp.value); hooks.onChange(key); };
+    } else if (typeof v === 'boolean') {
       inp.type = 'checkbox'; inp.checked = v;
       inp.oninput = () => { (p as any)[key] = inp.checked; hooks.onChange(key); };
     } else if (typeof v === 'string') {
@@ -46,10 +50,10 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   const refresh = () => {
     for (const [k, inp] of inputs) {
       const v = (p as any)[k];
-      if (inp.type === 'checkbox') inp.checked = v; else inp.value = String(v);
+      if (inp instanceof HTMLInputElement && inp.type === 'checkbox') inp.checked = v; else inp.value = String(v);
       const out = inp.nextElementSibling as HTMLElement | null;
       if (out instanceof HTMLInputElement) out.value = String(v);
-      else if (out) out.textContent = inp.type === 'checkbox' ? '' : String(v);
+      else if (out) out.textContent = inp instanceof HTMLInputElement && inp.type === 'checkbox' ? '' : String(v);
     }
   };
 

@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-20 (session 4, Phase 3: liquid face running on the board)_
+_Last update: 2026-08-21 (Phase 3: liquid face and expanded digit sprites)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -80,6 +80,9 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
   `tickBright` / `digitBright` in the Colour group. Dimming the digits sits them in the shadow at the bottom
   wall of the tube; the trim also scales that layer's `markContrast` floor, so the shadow survives over the
   liquid. `glass` follows the panel dimmer only.
+- Digits include five bitmap fonts and seven generated image fonts: steel, brass steampunk, copper gauge,
+  forged iron, ivory enamel, carved slate, and amber resin. Image fonts remain behind the liquid/glass layers
+  and support brightness and tint controls in the simulator and firmware.
 - **Autosave** (`sim/src/persist.ts`): every edit — params *and* view state (zoom, cuff/lens/gloss, layout grid,
   pause, time mode, tilt) — is written to `localStorage['liquid-watch-session-v1']`, debounced 250 ms, flushed on
   pagehide. One delegated `input` listener on `#app` covers every control. Nothing is lost on reload, so
@@ -118,7 +121,7 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
 ## Phase 3 — firmware liquid face (2026-08-20, session 4)
 - `firmware/src/render.cpp` / `physics.cpp` are line-for-line ports of `sim/src/render.ts` / `physics.ts`
   (incl. JS `Math.round` semantics, all 5 bitmap fonts, sprite digits box-filtered **on device** from the
-  RGBA sheets embedded in flash — `gen/sprites_gen.h`, 294 KB — so `digitFont`/scale/tint stay live params).
+  seven RGBA sheets embedded in flash — `gen/sprites_gen.h`, 712 KB raw — so `digitFont`/scale/tint stay live params).
   Only deliberate deviation: per-pixel blends (`blend565`, `throughLiquid`) are integer fixed-point
   (t in 1/256, luma in 1/1000) → ±1 LSB on gradient pixels, verified 0 pixels off by >12/255.
 - `Params` is a runtime struct generated from the sim preset: `python3 firmware/tools/gen_params.py presets/1.json`
