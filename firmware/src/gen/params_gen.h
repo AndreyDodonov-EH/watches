@@ -50,6 +50,7 @@ struct Params {
   float fizzSize;
   float fizzSpeed;
   float fizzDriftGain;
+  float fizzAcrossGain;
   bool ticksH;
   float tickStepH;
   float tickMajorEveryH;
@@ -114,8 +115,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 108
-#define PARAMS_SCHEMA_CRC 0x6571bee2u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 109
+#define PARAMS_SCHEMA_CRC 0x5605077fu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -166,6 +167,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"fizzSize", 'f', (uint16_t)offsetof(Params, fizzSize)},
   {"fizzSpeed", 'f', (uint16_t)offsetof(Params, fizzSpeed)},
   {"fizzDriftGain", 'f', (uint16_t)offsetof(Params, fizzDriftGain)},
+  {"fizzAcrossGain", 'f', (uint16_t)offsetof(Params, fizzAcrossGain)},
   {"ticksH", 'b', (uint16_t)offsetof(Params, ticksH)},
   {"tickStepH", 'f', (uint16_t)offsetof(Params, tickStepH)},
   {"tickMajorEveryH", 'f', (uint16_t)offsetof(Params, tickMajorEveryH)},
@@ -278,6 +280,7 @@ static const Params PRESET_1 = {
   2.0f, // fizzSize
   14.0f, // fizzSpeed
   1.0f, // fizzDriftGain
+  1.0f, // fizzAcrossGain
   true, // ticksH
   1.0f, // tickStepH
   3.0f, // tickMajorEveryH

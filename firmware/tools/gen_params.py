@@ -22,7 +22,7 @@ FIELDS = [
  ('meniscusPow','float'),('meniscusTiltGain','float'),('meniscusAsym','float'),('meniscusRollGain','float'),('edgeSoft','float'),
  ('frontBright','float'),('edgeGlow','float'),('glowStrength','float'),('cornerR','float'),('edgeLightGain','float'),
  ('bubble','bool'),('bubbleW','float'),('bubbleH','float'),('bubbleGap','float'),('bubbleY','float'),('bubbleDark','float'),('bubbleRollGain','float'),('bubbleTiltGain','float'),
- ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSpeed','float'),('fizzDriftGain','float'),
+ ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSpeed','float'),('fizzDriftGain','float'),('fizzAcrossGain','float'),
  ('ticksH','bool'),('tickStepH','float'),('tickMajorEveryH','float'),('tickMinorHeightH','float'),('tickMajorHeightH','float'),
  ('tickMajorWidthH','float'),('tickColorH','rgb'),('tickMajorColorH','rgb'),('tickPosH','float'),
  ('ticksM','bool'),('tickStepM','float'),('tickMajorEveryM','float'),('tickMinorHeightM','float'),('tickMajorHeightM','float'),

@@ -53,7 +53,8 @@ export interface Params {
   fizzCount: number;
   fizzSize: number;      // px (1..3)
   fizzSpeed: number;
-  fizzDriftGain: number; // 0..2 steering: fraction of rise speed that goes toward the high end per g of along-tilt     // px/s upward drift
+  fizzDriftGain: number; // 0..2 steering: fraction of rise speed that goes toward the high end per g of along-tilt
+  fizzAcrossGain: number; // 0..2, across-tilt → on-screen rise direction (1 = rises toward the physically high edge)
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
@@ -175,6 +176,7 @@ export const DEFAULT_PARAMS: Params = {
   fizzCount: 10,
   fizzSize: 2,
   fizzDriftGain: 1,
+  fizzAcrossGain: 1,
   fizzSpeed: 14,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 16, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
@@ -325,6 +327,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; min?: n
   fizzSize: { group: 'Bubble', min: 1, max: 4, step: 1 },
   fizzSpeed: { group: 'Bubble', min: 0, max: 60, step: 1 },
   fizzDriftGain: { group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
+  fizzAcrossGain: { group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },
   ticksH: { group: 'Ticks · hours', label: 'show ticks' },
   tickStepH: { group: 'Ticks · hours', label: 'minor every N h', min: 1, max: 6, step: 1 },
   tickMajorEveryH: { group: 'Ticks · hours', label: 'major every N h (0 = none)', min: 0, max: 12, step: 1 },
