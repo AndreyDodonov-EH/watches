@@ -329,7 +329,8 @@ static void drawLabels(int y0, const Labels &lb, const Mark &mark) {
   }
 }
 
-static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *sourceRows, const Mark &mark) {
+static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *sourceRows, const Mark &mark,
+                      float dx = 0, float dy = 0) {
   bool minutes = ticksN == 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   int step = (int)fmaxf(1, jround(minutes ? p.tickStepM : p.tickStepH));
@@ -348,6 +349,35 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
       if (ry > b) b = ry;
     }
   };
+  float emboss = clampf(p.tickEmboss, 0, 1);
+  auto drawSegment = [&](int x0, int w, uint16_t c, int rangeA, int rangeB, bool top) {
+    if (rangeB < 0) return;
+    int outer = top ? 0 : H - 1;
+    int inner = top ? rangeB : rangeA; if (inner < 0) inner = 0; if (inner >= H) inner = H - 1;
+    int dir = inner >= outer ? 1 : -1;
+    float radius = fmaxf(1, (H - 1) / 2.0f), centre = (H - 1) / 2.0f;
+    uint16_t hi = q(mix(to888(c), {255, 255, 255}, 0.7f));
+    uint16_t lo = q(scale(to888(c), 0.25f));
+    auto point = [&](int baseY, int &x, int &y) {
+      float qy = (baseY - centre) / radius;
+      float depth = sqrtf(fmaxf(0, 1 - qy * qy));
+      x = x0 + (int)jround(dx * depth); y = baseY + (int)jround(dy * depth);
+    };
+    auto plot = [&](int x, int ry) {
+      if (ry < 0 || ry >= H) return;
+      if (emboss > 0) { mark(x - 1, y0 + ry, hi, emboss); mark(x + w, y0 + ry, lo, emboss); }
+      for (int k = 0; k < w; k++) mark(x + k, y0 + ry, c);
+    };
+    int px0, py0; point(outer, px0, py0); plot(px0, py0);
+    if (outer == inner) return;
+    for (int baseY = outer + dir;; baseY += dir) {
+      int px1, py1; point(baseY, px1, py1);
+      int n = abs(px1 - px0); if (abs(py1 - py0) > n) n = abs(py1 - py0); if (n < 1) n = 1;
+      for (int j = 1; j <= n; j++) plot((int)jround(px0 + (float)(px1 - px0) * j / n), (int)jround(py0 + (float)(py1 - py0) * j / n));
+      px0 = px1; py0 = py1;
+      if (baseY == inner) break;
+    }
+  };
   for (int i = step; i < ticksN; i += step) {
     int xc = (int)jround((float)i * L / ticksN);
     bool major = majorEvery > 0 && i % majorEvery == 0;
@@ -355,11 +385,8 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
     int w = major ? wMaj : 1, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
     int topA, topB, botA, botB;
     warpedRange(0, h - 1, topA, topB); warpedRange(H - h, H - 1, botA, botB);
-    for (int k = 0; k < w; k++) {
-      int x = x0 + k;
-      if (pos != 1) for (int ry = topA; ry <= topB; ry++) mark(x, y0 + ry, c);
-      if (pos != 0) for (int ry = botA; ry <= botB; ry++) mark(x, y0 + ry, c);
-    }
+    if (pos != 1) drawSegment(x0, w, c, topA, topB, true);
+    if (pos != 0) drawSegment(x0, w, c, botA, botB, false);
   }
 }
 
@@ -493,15 +520,17 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     }
   }
 
-  // Bottom marks are composited through the liquid, before bubbles. Top marks are drawn last.
+  // Rear marks are composited through the liquid, before bubbles. Front marks are drawn last.
   static Labels labels;
   bool haveLabels = layoutLabels(idx, y0, p, ticksN, labels);
   auto drawScaleLayer = [&](bool onTop) {
     if (p.ticksOnTop == onTop) {
       int16_t rows[TUBE_HEIGHT_MAX];
-      markSourceRows(H, onTop ? 0 : p.bottomLens, rows);
+      markSourceRows(H, onTop ? 0 : p.tickLens, rows);
       Mark tickMark { y0, edges, &p, onTop, p.markContrast * p.tickBright };
-      drawTicks(y0, p, ticksN, rows, tickMark);
+      float dx = onTop ? 0 : -st.edgeLight * p.tickParallax;
+      float dy = onTop ? 0 : st.acrossTilt * p.tickParallax;
+      drawTicks(y0, p, ticksN, rows, tickMark, dx, dy);
     }
     if (haveLabels && p.digitsOnTop == onTop) {
       Mark digitMark { y0, edges, &p, onTop, p.markContrast * p.digitBright };

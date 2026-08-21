@@ -74,8 +74,10 @@ export interface Params {
   tickColorM: string;
   tickMajorColorM: string;
   tickPosM: number;
-  ticksOnTop: boolean;   // like digitsOnTop, for both tubes' ticks: printed on the glass in front of the
-                         // liquid (opaque) instead of seen through it by liquidTransparency/markContrast
+  ticksOnTop: boolean;   // false rear/bottom surface, true front/top surface
+  tickLens: number;      // 0..1 rear-surface depth warp
+  tickParallax: number;  // px rear-surface shift per g of tilt
+  tickEmboss: number;    // 0..1 glass-cut edge strength
   // --- digits along the bottom of the tube (3x5 pixel font) ---
   digits: boolean;
   digitColor: string;    // top of glyph
@@ -93,7 +95,7 @@ export interface Params {
   digitBottomMin: number; // minutes tube baseline (px from bottom edge)
   digitBottom: number;   // hours tube: px from the tube's bottom edge to the digit baseline
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
-  bottomLens: number;    // 0..1 depth warp for ticks/digits printed behind the liquid
+  bottomLens: number;    // 0..1 depth warp for digits printed behind the liquid
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
   markContrast: number;  // min luma difference a tick/digit must keep from the liquid behind it (0 = off)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
@@ -130,7 +132,7 @@ export interface Params {
   digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
-export const PARAMS_VERSION = 6;
+export const PARAMS_VERSION = 10;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -182,6 +184,9 @@ export const DEFAULT_PARAMS: Params = {
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 16, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
   ticksOnTop: false,
+  tickLens: 0.35,
+  tickParallax: 3,
+  tickEmboss: 0.25,
   digits: true,
   digitColor: '#e3e3e3',
   digitColor2: '#20312f',
@@ -264,6 +269,8 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   if ('tick' in r) { r.tickColorH = r.tickColorM = r.tickMajorColorH = r.tickMajorColorM = r.tick; delete r.tick; }
   if ('digitScale' in r) { r.digitScaleX = r.digitScaleY = r.digitScaleXMin = r.digitScaleYMin = r.digitScale; delete r.digitScale; }
   if ('digitFontBig' in r) { r.digitFont = r.digitFontBig ? 2 : 0; delete r.digitFontBig; }
+  if ('tickLayer' in r) { r.ticksOnTop = r.tickLayer === 1; delete r.tickLayer; }
+  if (!('tickLens' in r) && typeof r.bottomLens === 'number') r.tickLens = r.bottomLens;
   if (from < 2) {
     // v1 counted "major every N-th minor tick"; v2 counts units (hours / minutes).
     for (const [every, step] of [['tickMajorEveryH', 'tickStepH'], ['tickMajorEveryM', 'tickStepM']] as const) {
@@ -332,6 +339,10 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzDriftGain: { help: 'Fraction of rise speed steered toward the high end per g of along-tilt.', group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
   fizzAcrossGain: { help: 'Across-tilt → on-screen rise direction. 1 = rises toward the physically high edge.', group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },
   fizzFlatRise: { help: 'On-screen rise speed when the face points up (bubbles rise toward the viewer).', group: 'Bubble', label: 'fizz rise when face up', min: 0, max: 1, step: 0.05 },
+  ticksOnTop: { help: 'Off: distorted rear/bottom surface. On: flat, opaque front/top surface.', group: 'Ticks', label: 'ticks on top' },
+  tickLens: { help: 'Cylinder depth warp for rear ticks. Front ticks stay flat.', group: 'Ticks', label: 'rear lens', min: 0, max: 1, step: 0.05 },
+  tickParallax: { help: 'Rear tick displacement at the tube centre per g of tilt. Circular depth bows the mark while its edge stays attached to the silhouette.', group: 'Ticks', label: 'rear parallax px/g', min: 0, max: 10, step: 0.25 },
+  tickEmboss: { help: 'Highlight and shadow around ticks, like grooves cut into glass. 0 = flat.', group: 'Ticks', label: 'glass-cut emboss', min: 0, max: 1, step: 0.05 },
   ticksH: { help: 'Show the hours tick ladder.', group: 'Ticks · hours', label: 'show ticks' },
   tickStepH: { help: 'Minor tick every N hours.', group: 'Ticks · hours', label: 'minor every N h', min: 1, max: 6, step: 1 },
   tickMajorEveryH: { help: 'Major tick every N hours (units, not every N-th minor). 0 = none.', group: 'Ticks · hours', label: 'major every N h (0 = none)', min: 0, max: 12, step: 1 },
@@ -340,7 +351,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   tickMajorWidthH: { help: 'Major tick width, px. Minors are 1 px.', group: 'Ticks · hours', label: 'major width', min: 1, max: 5, step: 1 },
   tickColorH: { help: 'Minor tick colour.', group: 'Ticks · hours', label: 'minor colour' },
   tickMajorColorH: { help: 'Major tick colour.', group: 'Ticks · hours', label: 'major colour' },
-  tickPosH: { help: 'Tick side: 0 top, 1 bottom, 2 both.', group: 'Ticks · hours', label: 'position (0 top · 1 bottom · 2 both)', min: 0, max: 2, step: 1 },
+  tickPosH: { help: 'Tube edge used by the hours ladder.', group: 'Ticks · hours', label: 'edge', min: 0, max: 2, step: 1, options: ['top', 'bottom', 'both'] },
   ticksM: { help: 'Show the minutes tick ladder.', group: 'Ticks · minutes', label: 'show ticks' },
   tickStepM: { help: 'Minor tick every N minutes.', group: 'Ticks · minutes', label: 'minor every N min', min: 1, max: 30, step: 1 },
   tickMajorEveryM: { help: 'Major tick every N minutes. 0 = none.', group: 'Ticks · minutes', label: 'major every N min (0 = none)', min: 0, max: 30, step: 1 },
@@ -349,9 +360,8 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   tickMajorWidthM: { help: 'Major tick width, px. Minors are 1 px.', group: 'Ticks · minutes', label: 'major width', min: 1, max: 5, step: 1 },
   tickColorM: { help: 'Minor tick colour.', group: 'Ticks · minutes', label: 'minor colour' },
   tickMajorColorM: { help: 'Major tick colour.', group: 'Ticks · minutes', label: 'major colour' },
-  tickPosM: { help: 'Tick side: 0 top, 1 bottom, 2 both.', group: 'Ticks · minutes', label: 'position (0 top · 1 bottom · 2 both)', min: 0, max: 2, step: 1 },
+  tickPosM: { help: 'Tube edge used by the minutes ladder.', group: 'Ticks · minutes', label: 'edge', min: 0, max: 2, step: 1, options: ['top', 'bottom', 'both'] },
   liquidTransparency: { help: 'How much of ticks/digits shows through the liquid. 0 = opaque liquid.', group: 'Shape', min: 0, max: 1, step: 0.01 },
-  ticksOnTop: { help: 'Ticks printed on the glass in front of the liquid (opaque) instead of seen through it.', group: 'Shape', label: 'ticks on top of liquid' },
   markContrast: { help: 'Min luma difference a tick/digit keeps from the liquid behind it. 0 = off.', group: 'Shape', label: 'mark contrast in liquid', min: 0, max: 120, step: 2 },
   // digits — shared
   digits: { help: 'Show numeric labels along the bottom of the tube.', group: 'Digits', label: 'show digits' },
@@ -371,7 +381,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   digitShadow: { help: '1 px darker copy offset down-right (emboss).', group: 'Digits', label: 'emboss shadow' },
   digitShadowColor: { help: 'Emboss shadow colour.', group: 'Digits', label: 'shadow colour' },
   digitsOnTop: { help: 'Printed on the glass, opaque and undistorted. Off: behind the liquid, seen through it and depth-warped.', group: 'Digits', label: 'print on top of liquid' },
-  bottomLens: { help: 'Depth warp for ticks and digits behind the liquid. Top marks ignore it.', group: 'Digits', label: 'bottom lens', min: 0, max: 1, step: 0.05 },
+  bottomLens: { help: 'Depth warp for digits behind the liquid. Front digits ignore it.', group: 'Digits', label: 'rear lens', min: 0, max: 1, step: 0.05 },
   // digits — hours tube
   digitHourStep: { help: 'Label every N hours.', group: 'Digits · hours', label: 'label every N h', min: 1, max: 6, step: 1 },
   digitScaleX: { help: 'Hours tube horizontal scale (nearest-neighbour).', group: 'Digits · hours', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
