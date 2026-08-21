@@ -77,10 +77,25 @@ static inline void pxa(int x, int y, uint16_t c, float t) {
 // ---------------------------------------------------------------------------------------------
 // palette
 // ---------------------------------------------------------------------------------------------
-struct Palette { uint16_t rows[TUBE_HEIGHT_MAX]; uint16_t bubbleIn[TUBE_HEIGHT_MAX]; uint16_t body, glass, bubbleRim; };
+struct Palette { uint16_t rows[TUBE_HEIGHT_MAX]; uint16_t bubbleIn[TUBE_HEIGHT_MAX]; uint16_t glassRows[TUBE_HEIGHT_MAX]; uint16_t body, glass, bubbleRim; };
+
+// Glass wall shading weight 0..1 per row (sim: glassW): ambient cylinder shade, specular tent on the
+// top wall, faint band on the lower wall, brighter outermost rows.
+static float glassW(const Params &p, int y, int hiTop) {
+  float t = (float)y / (H - 1);
+  float w = p.glassBody * (0.5f + 0.5f * cosf((t - 0.3f) * (float)M_PI * 1.6f));
+  if (y >= hiTop && y < hiTop + p.highlightH)
+    w += p.glassHiBright * powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
+  float d = (t - 0.82f) / 0.07f;
+  w += p.glassReflect * expf(-d * d);
+  int rim = y < H - 1 - y ? y : H - 1 - y;
+  if (rim < 2) w += p.glassRim * (rim == 0 ? 1 : 0.4f);
+  return fminf(1, w);
+}
 
 static void buildPalette(const Params &p, float acrossShift, Palette &pal) {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
+  RGB glass = hexToRgb(p.glass), ghi = hexToRgb(p.glassHi);
   float br = p.brightness * p.liquidBright;
   int hiTop = (int)jround(2 + acrossShift);
   float roll = acrossShift * p.shadeRollGain;
@@ -93,11 +108,14 @@ static void buildPalette(const Params &p, float acrossShift, Palette &pal) {
       float k = powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
       c = mix(c, hi, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
+    float gw = glassW(p, y, hiTop);
+    pal.glassRows[y] = q(scale(mix(glass, ghi, gw), p.brightness));
+    c = mix(c, ghi, gw * p.glassOverLiquid);
     pal.rows[y] = q(scale(c, br));
     pal.bubbleIn[y] = q(scale(mix(c, {0, 0, 0}, p.bubbleDark), br));
   }
   pal.body = q(scale(body, br));
-  pal.glass = q(scale(hexToRgb(p.glass), p.brightness));
+  pal.glass = q(scale(glass, p.brightness));
   pal.bubbleRim = q(scale(hexToRgb(p.bubbleRim), br));
 }
 
@@ -366,14 +384,14 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
       if (dy > yc - r) { float k = (dy - (yc - r)) / r; x0 = (int)jround(r - sqrtf(fmaxf(0, 1 - k * k)) * r); }
     }
     int xi = (int)floorf(ex); float frac = ex - xi;
-    if (x0 > 0) hspan(y0 + ry, 0, x0, pal.glass);
-    hspan(y0 + ry, x0 > xi ? x0 : xi, L, pal.glass);
+    if (x0 > 0) hspan(y0 + ry, 0, x0, pal.glassRows[ry]);
+    hspan(y0 + ry, x0 > xi ? x0 : xi, L, pal.glassRows[ry]);
     hspan(y0 + ry, x0, xi, pal.rows[ry]);
     if (p.edgeSoft > 0) {
       int w = (int)fmaxf(1, jround(p.edgeSoft));
       for (int k = 0; k < w; k++) {
         float t = clampf((frac - k) + (w > 1 ? 0.5f : 0), 0, 1);
-        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.glass, pal.rows[ry], t));
+        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.glassRows[ry], pal.rows[ry], t));
       }
     } else if (frac >= 0.5f) px(xi, y0 + ry, pal.rows[ry]);
   }
@@ -399,7 +417,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
       int xs = (int)ceilf(edges[ry] + (p.edgeSoft > 0 ? jround(p.edgeSoft) : 0));
       for (int k = 0; k < p.edgeGlow; k++) {
         float t = 1 - k / p.edgeGlow;
-        uint16_t c = blend565(pal.glass, pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK));
+        uint16_t c = blend565(pal.glassRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK));
         if (xs + k < L) px(xs + k, y0 + ry, c);
       }
     }

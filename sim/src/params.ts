@@ -8,6 +8,13 @@ export interface Params {
   liquidHi: string;      // specular highlight strip
   liquidLo: string;      // bottom shade (cylinder shading)
   glass: string;         // empty part of the tube (very dark; 0 = off for AMOLED power)
+  // --- glass tube shading (empty part; specular also over the liquid) ---
+  glassHi: string;       // specular colour of the glass wall
+  glassBody: number;     // 0..1 ambient cylinder shade of the empty wall (0 = pure black, AMOLED off)
+  glassHiBright: number; // 0..1 strength of the specular band (same rows as the liquid highlight)
+  glassReflect: number;  // 0..1 faint second reflection on the lower wall
+  glassRim: number;      // 0..1 brightening of the outermost rows (wall edges catch light)
+  glassOverLiquid: number; // 0..1 how much of the glass specular is laid over the liquid too
   bubbleRim: string;
   // --- layout (px) ---
   tubeHeight: number;    // across-tube size, ≤ TUBE_HEIGHT_MAX
@@ -131,6 +138,12 @@ export const DEFAULT_PARAMS: Params = {
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
   glass: '#000000',
+  glassHi: '#a8c0c8',
+  glassBody: 0.1,
+  glassHiBright: 0.55,
+  glassReflect: 0.22,
+  glassRim: 0.4,
+  glassOverLiquid: 0.4,
   bubbleRim: '#b0c7a9',
   highlightH: 11,
   highlightBright: 1,
@@ -266,6 +279,12 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
 export const PARAM_META: Record<string, { group: string; label?: string; min?: number; max?: number; step?: number }> = {
   liquid: { group: 'Colour' }, liquidHi: { group: 'Colour' }, liquidLo: { group: 'Colour' },
   glass: { group: 'Colour' }, bubbleRim: { group: 'Colour' },
+  glassHi: { group: 'Glass', label: 'specular colour' },
+  glassBody: { group: 'Glass', label: 'ambient body', min: 0, max: 0.5, step: 0.01 },
+  glassHiBright: { group: 'Glass', label: 'specular', min: 0, max: 1, step: 0.01 },
+  glassReflect: { group: 'Glass', label: 'lower reflection', min: 0, max: 1, step: 0.01 },
+  glassRim: { group: 'Glass', label: 'wall rims', min: 0, max: 1, step: 0.01 },
+  glassOverLiquid: { group: 'Glass', label: 'specular over liquid', min: 0, max: 1, step: 0.01 },
   brightness: { group: 'Colour', label: 'brightness (panel)', min: 0.1, max: 1, step: 0.01 },
   liquidBright: { group: 'Colour', label: '· liquid trim', min: 0, max: 2, step: 0.01 },
   tickBright: { group: 'Colour', label: '· ticks trim', min: 0, max: 2, step: 0.01 },

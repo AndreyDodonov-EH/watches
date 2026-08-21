@@ -4,9 +4,9 @@
 import { createRequire } from 'node:module';
 const { chromium } = createRequire(`${process.cwd()}/`)('playwright');
 const [out = 'shot.png', query = ''] = process.argv.slice(2);
-const url = `http://localhost:5190/?fresh=1&scale=2&settle=1&${query}`;
+const url = `http://localhost:5190/?${query}&fresh=1&scale=2&settle=1`  // user query first: URLSearchParams.get takes the first occurrence;
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1700, height: 1000 } });
+const page = await browser.newPage({ viewport: { width: 2300, height: 1000 } });
 page.on('console', (m) => m.type() === 'error' && console.log('console error:', m.text()));
 page.on('pageerror', (e) => console.log('pageerror:', e.message));
 await page.goto(url, { waitUntil: 'networkidle' });
