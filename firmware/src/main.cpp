@@ -260,7 +260,7 @@ static void handleLine(char *line) {
       if (arg[0] == '?') dumpParams();
       else if (arg[0] == '!') { params = PRESET_DEFAULT; Serial.println("params reset"); }
       else { char *eq = strchr(arg, '='); if (!eq) { Serial.println("usage: p<name>=<value> | p? | p!"); break; }
-        *eq = 0; Serial.println(setParam(arg, eq + 1) ? "ok" : "unknown param"); }
+        *eq = 0; Serial.printf(setParam(arg, eq + 1) ? "ok %s\n" : "unknown param %s\n", arg); }
       break; }
     case 'x': {  // dump state + both strips (hex) for offline comparison with the sim
       display_wait_all();
@@ -306,9 +306,10 @@ void loop() {
   static char line[96]; static int n = 0;
   while (Serial.available()) {
     char c = Serial.read();
-    if (c == '\n' || c == '\r') { Serial.println(); if (n) { line[n] = 0; handleLine(line); n = 0; } }
-    else if (c == 8 || c == 127) { if (n) { n--; Serial.print("\b \b"); } }   // backspace
-    else if (c >= 32 && n < (int)sizeof(line) - 1) { line[n++] = c; Serial.write(c); }  // echo
+    // Echo only for a human terminal: while the IMU stream is on (the sim's mode) it would interleave with CSV lines.
+    if (c == '\n' || c == '\r') { if (!imu_stream) Serial.println(); if (n) { line[n] = 0; handleLine(line); n = 0; } }
+    else if (c == 8 || c == 127) { if (n) { n--; if (!imu_stream) Serial.print("\b \b"); } }   // backspace
+    else if (c >= 32 && n < (int)sizeof(line) - 1) { line[n++] = c; if (!imu_stream) Serial.write(c); }
   }
   imu_poll();
   if (mode == 'l') liquid_tick(); else delay(1);

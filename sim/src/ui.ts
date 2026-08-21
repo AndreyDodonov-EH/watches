@@ -32,8 +32,12 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
       val.textContent = v;
     } else {
       inp.type = 'range'; inp.min = String(meta.min ?? 0); inp.max = String(meta.max ?? 100); inp.step = String(meta.step ?? 1);
-      inp.value = String(v); val.textContent = String(v);
-      inp.oninput = () => { (p as any)[key] = parseFloat(inp.value); val.textContent = inp.value; hooks.onChange(key); };
+      inp.value = String(v);
+      // typed value: same step, but not clamped to the slider range
+      const num = document.createElement('input'); num.type = 'number'; num.step = inp.step; num.value = String(v);
+      inp.oninput = () => { (p as any)[key] = parseFloat(inp.value); num.value = inp.value; hooks.onChange(key); };
+      num.onchange = () => { const x = parseFloat(num.value); if (!Number.isFinite(x)) return; (p as any)[key] = x; inp.value = num.value; hooks.onChange(key); };
+      row.appendChild(inp); row.appendChild(num); grp(meta.group).appendChild(row); inputs.set(key, inp); continue;
     }
     row.appendChild(inp); row.appendChild(val);
     grp(meta.group).appendChild(row);
@@ -43,8 +47,9 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
     for (const [k, inp] of inputs) {
       const v = (p as any)[k];
       if (inp.type === 'checkbox') inp.checked = v; else inp.value = String(v);
-      const out = inp.nextElementSibling as HTMLOutputElement | null;
-      if (out) out.textContent = inp.type === 'checkbox' ? '' : String(v);
+      const out = inp.nextElementSibling as HTMLElement | null;
+      if (out instanceof HTMLInputElement) out.value = String(v);
+      else if (out) out.textContent = inp.type === 'checkbox' ? '' : String(v);
     }
   };
 
