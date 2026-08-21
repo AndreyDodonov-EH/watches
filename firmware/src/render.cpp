@@ -344,7 +344,7 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   const float speed = p.fizzSpeed * (1 + 3 * agitation);
   const float up = sqrtf(fmaxf(0.05f, 1 - along * along - across * across));
   const float a = clampf(across * p.fizzAcrossGain, -1, 1);
-  const float rise = (1 - fabsf(a)) * up - a;   // screen-up; across + = top edge down
+  const float rise = (1 - fabsf(a)) * up * p.fizzFlatRise - a;   // screen-up; across + = top edge down
   const float vx = (-along * p.fizzDriftGain * speed) / L;
   for (int i = 0; i < 2; i++) for (int k = 0; k < fizzN[i]; k++) {
     Fizz &f = fizz[i][k];
