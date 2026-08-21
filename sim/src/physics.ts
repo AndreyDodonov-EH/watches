@@ -56,7 +56,8 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
 
   // Surface angle: rest angle follows along-tilt; gyro about the across axis gives impulses.
   const aMax = Math.min(p.angleMax, ANGLE_HARD_MAX_DEG);
-  const angleRest = Math.max(-aMax, Math.min(aMax, along * p.angleTiltGain));
+  const lever = along * Math.sqrt(Math.max(0, 1 - along * along));   // gravity torque on the front: 0 when vertical
+  const angleRest = Math.max(-aMax, Math.min(aMax, lever * p.angleTiltGain));
   const angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel
     + inp.gyroAcross * p.angleGyroGain * 10;
   s.angleVel += angleAcc * dt;

@@ -359,7 +359,7 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
   const float yc = (H - 1) / 2.0f;
   float d = (ry - yc) / yc;
   float skew = tanf(angleDeg * (float)M_PI / 180) * (ry - yc);
-  float asymEff = p.meniscusAsym * clampf(0.4f - 0.6f * tilt, 0, 1);
+  float asymEff = p.meniscusAsym * clampf(0.4f - 0.6f * tilt, 0, 1) * sqrtf(fmaxf(0, 1 - tilt * tilt)); // no sag when vertical
   float depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
   return xe + skew + depth * powf(fabsf(d), p.meniscusPow);
 }

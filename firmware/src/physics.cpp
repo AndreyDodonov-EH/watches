@@ -16,7 +16,8 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   if (s.fillPos < -FILL_SLOSH_MAX_PX) { s.fillPos = -FILL_SLOSH_MAX_PX; s.fillVel = fmaxf(0, s.fillVel); }
 
   const float aMax = fminf(p.angleMax, ANGLE_HARD_MAX_DEG);
-  const float angleRest = clampf(along * p.angleTiltGain, -aMax, aMax);
+  const float lever = along * sqrtf(fmaxf(0, 1 - along * along));   // gravity torque on the front: 0 when vertical
+  const float angleRest = clampf(lever * p.angleTiltGain, -aMax, aMax);
   const float angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel + in.gyroAcross * p.angleGyroGain * 10;
   s.angleVel += angleAcc * dt;
   s.angle += s.angleVel * dt;
