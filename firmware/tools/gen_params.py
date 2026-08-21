@@ -11,7 +11,11 @@ from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, 'firmware', 'src', 'gen')
-SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge']  # digitFont 5,6,7
+SHEETS = [
+    'digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge',
+    'digits-forged-iron', 'digits-ivory-enamel', 'digits-carved-slate',
+    'digits-amber-resin',
+]  # digitFont 5..11
 
 # (name, ctype) — order defines the struct layout. Mirrors sim/src/params.ts `Params`.
 FIELDS = [

@@ -84,7 +84,7 @@ export interface Params {
   digitShadowColor: string;
   digitTint: string;     // sprite fonts only: multiply colour (e.g. #cd7f32 bronze)
   digitTintAmount: number; // 0 = untinted sheet, 1 = fully tinted
-  digitFont: number;     // 0 = 3x5, 1 = 4x6 narrow, 2 = 5x7 round, 3 = 5x7 seven-segment, 4 = 6x8 bold, 5 = steel sprite, 6 = brass steampunk sprite, 7 = copper gauge sprite (images)
+  digitFont: number;     // 0..4 bitmap, 5..11 image sprites
   digitScaleX: number;   // hours tube: horizontal scale (0.5..6, fractional OK — nearest-neighbour)
   digitScaleY: number;   // hours tube: vertical scale — keep lower than X to counter the vial's vertical stretch
   digitScaleXMin: number; // minutes tube
@@ -280,7 +280,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
 }
 
 /** UI metadata: [min, max, step] for numeric params; grouping for the panel. */
-export const PARAM_META: Record<string, { group: string; label?: string; help?: string; min?: number; max?: number; step?: number }> = {
+export const PARAM_META: Record<string, { group: string; label?: string; help?: string; min?: number; max?: number; step?: number; options?: readonly string[] }> = {
   liquid: { help: 'Body colour of the liquid.', group: 'Colour' }, liquidHi: { help: 'Specular highlight strip colour.', group: 'Colour' }, liquidLo: { help: 'Bottom shade colour (cylinder shading).', group: 'Colour' },
   glass: { help: 'Empty part of the tube. #000000 = AMOLED pixels off.', group: 'Colour' }, bubbleRim: { help: 'Rim colour of the spirit-level bubble and fizz.', group: 'Colour' },
   glassHi: { help: 'Specular colour of the glass wall.', group: 'Glass', label: 'specular colour' },
@@ -350,7 +350,14 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   markContrast: { help: 'Min luma difference a tick/digit keeps from the liquid behind it. 0 = off.', group: 'Shape', label: 'mark contrast in liquid', min: 0, max: 120, step: 2 },
   // digits — shared
   digits: { help: 'Show numeric labels along the bottom of the tube.', group: 'Digits', label: 'show digits' },
-  digitFont: { help: '0 3x5, 1 4x6 narrow, 2 5x7 round, 3 5x7 seven-segment, 4 6x8 bold; image sheets: 5 steel, 6 brass, 7 copper.', group: 'Digits', label: 'font (0 3x5 · 1 4x6 · 2 5x7 · 3 7-seg · 4 6x8 bold · images: 5 steel · 6 brass · 7 copper)', min: 0, max: 7, step: 1 },
+  digitFont: {
+    help: 'Bitmap fonts are code-rendered. Image fonts preserve rendered material, bevel, and texture.',
+    group: 'Digits',
+    label: 'font',
+    min: 0, max: 11, step: 1,
+    options: ['3×5 bitmap', '4×6 narrow bitmap', '5×7 round bitmap', '5×7 seven-segment', '6×8 bold bitmap',
+      'Steel', 'Brass steampunk', 'Copper gauge', 'Forged iron', 'Ivory enamel', 'Carved slate', 'Amber resin'],
+  },
   digitTint: { help: 'Sprite fonts only: multiply colour.', group: 'Digits', label: 'image tint colour' },
   digitTintAmount: { help: 'Sprite fonts only: 0 = untinted sheet, 1 = fully tinted.', group: 'Digits', label: 'image tint amount', min: 0, max: 1, step: 0.05 },
   digitColor: { help: 'Top of glyph (vertical gradient; set equal to bottom for flat).', group: 'Digits', label: 'colour top' },

@@ -158,7 +158,15 @@ export const SPRITE_FONT = FONTS.length; // digitFont value that selects the ima
 export interface SpriteSheet { cellW: number; cellH: number; widths: number[]; data: Uint8ClampedArray; w: number; h: number; }
 interface ScaledGlyph { w: number; h: number; c: Uint16Array; a: Uint8Array; } // a = 0..255 coverage
 /** Sheet names in digitFont order starting at SPRITE_FONT (files live in public/assets/<name>.png[.json]). */
-export const SPRITE_SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge'];
+export const SPRITE_SHEETS = [
+  'digits-steel',
+  'digits-brass-steampunk',
+  'digits-copper-gauge',
+  'digits-forged-iron',
+  'digits-ivory-enamel',
+  'digits-carved-slate',
+  'digits-amber-resin',
+];
 const sprites: (SpriteSheet | null)[] = SPRITE_SHEETS.map(() => null);
 const scaledCache = new Map<string, ScaledGlyph[]>();
 /** Inject a decoded sheet directly (headless tests / node reference renders). */

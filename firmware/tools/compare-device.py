@@ -15,7 +15,11 @@ from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIM = os.path.join(ROOT, 'sim')
 W, H = 536, 240
-SHEETS = ['digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge']
+SHEETS = [
+    'digits-steel', 'digits-brass-steampunk', 'digits-copper-gauge',
+    'digits-forged-iron', 'digits-ivory-enamel', 'digits-carved-slate',
+    'digits-amber-resin',
+]
 
 def talk(s, cmd, end=b'\n', timeout=10):
     s.reset_input_buffer(); s.write((cmd + '\n').encode()); s.flush()
