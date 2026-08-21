@@ -285,8 +285,8 @@ static void handleLine(char *line) {
       display_wait_all();
       renderTube(0, tubeH, params, strip[0]); renderTube(1, tubeM, params, strip[1]);
       Serial.printf("STATE %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
-                    tubeH.fillTarget, tubeH.fillPos, tubeH.angle, tubeH.acrossShift, tubeH.edgeLight, tubeH.agitation,
-                    tubeM.fillTarget, tubeM.fillPos, tubeM.angle, tubeM.acrossShift, tubeM.edgeLight, tubeM.agitation);
+                    tubeH.fillTarget, tubeH.fillPos, tubeH.angle, tubeH.light, tubeH.edgeLight, tubeH.agitation,
+                    tubeM.fillTarget, tubeM.fillPos, tubeM.angle, tubeM.light, tubeM.edgeLight, tubeM.agitation);
       static char hex[PANEL_W * 4 + 2];
       for (int t = 0; t < 2; t++) for (int y = 0; y < tubeLayout(params).H; y++) {
         const uint16_t *row = strip[t] + y * PANEL_W; char *o = hex;

@@ -6,15 +6,16 @@
 #define PHYS_DT (1.0f / PHYS_HZ)
 #define FILL_SLOSH_MAX_PX 30.0f   // structural caps — params only tighten, never widen
 #define ANGLE_HARD_MAX_DEG 20.0f
-#define ACROSS_MAX_PX 40.0f
+#define LIGHT_MAX_DEG 85.0f
 #define GYRO_LP_HZ 12.0f          // smooths both gyro outputs (sensor noise twitches fizz/agitation)
 
 struct TiltInput { float along, across, gyroAlong, gyroAcross; };
 
 struct TubeState {
-  float fillTarget = 0, fillPos = 0, fillVel = 0, angle = 0, angleVel = 0, acrossShift = 0, acrossVel = 0, agitation = 0, edgeLight = 0, acrossTilt = 0;
+  float fillTarget = 0, fillPos = 0, fillVel = 0, angle = 0, angleVel = 0, light = 0, lightVel = 0, agitation = 0, edgeLight = 0, acrossTilt = 0;
 };
 
+float lightRest(float along, float across, const Params &p);
 void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt = PHYS_DT);
 
 // Slow EMA of |a| used as the gravity divisor (sensor reads ~0.94 g; never divide by instantaneous |a|).

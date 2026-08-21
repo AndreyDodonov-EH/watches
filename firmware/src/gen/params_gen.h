@@ -24,13 +24,11 @@ struct Params {
   float highlightInset;
   float highlightBright;
   float highlightSharp;
-  float shadeRollGain;
   float shadeDepth;
   float meniscusDepth;
   float meniscusPow;
   float meniscusTiltGain;
   float meniscusAsym;
-  float meniscusRollGain;
   float edgeSoft;
   float frontBright;
   float edgeGlow;
@@ -99,7 +97,8 @@ struct Params {
   float angleTiltGain;
   float angleGyroGain;
   float angleMax;
-  float acrossShiftGain;
+  float lightPhys;
+  float lightAngle;
   float acrossK;
   float acrossDamp;
   float acrossGyroGain;
@@ -116,8 +115,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 110
-#define PARAMS_SCHEMA_CRC 0xcb428a0au  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 109
+#define PARAMS_SCHEMA_CRC 0x5264c461u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -142,13 +141,11 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"highlightInset", 'f', (uint16_t)offsetof(Params, highlightInset)},
   {"highlightBright", 'f', (uint16_t)offsetof(Params, highlightBright)},
   {"highlightSharp", 'f', (uint16_t)offsetof(Params, highlightSharp)},
-  {"shadeRollGain", 'f', (uint16_t)offsetof(Params, shadeRollGain)},
   {"shadeDepth", 'f', (uint16_t)offsetof(Params, shadeDepth)},
   {"meniscusDepth", 'f', (uint16_t)offsetof(Params, meniscusDepth)},
   {"meniscusPow", 'f', (uint16_t)offsetof(Params, meniscusPow)},
   {"meniscusTiltGain", 'f', (uint16_t)offsetof(Params, meniscusTiltGain)},
   {"meniscusAsym", 'f', (uint16_t)offsetof(Params, meniscusAsym)},
-  {"meniscusRollGain", 'f', (uint16_t)offsetof(Params, meniscusRollGain)},
   {"edgeSoft", 'f', (uint16_t)offsetof(Params, edgeSoft)},
   {"frontBright", 'f', (uint16_t)offsetof(Params, frontBright)},
   {"edgeGlow", 'f', (uint16_t)offsetof(Params, edgeGlow)},
@@ -217,7 +214,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"angleTiltGain", 'f', (uint16_t)offsetof(Params, angleTiltGain)},
   {"angleGyroGain", 'f', (uint16_t)offsetof(Params, angleGyroGain)},
   {"angleMax", 'f', (uint16_t)offsetof(Params, angleMax)},
-  {"acrossShiftGain", 'f', (uint16_t)offsetof(Params, acrossShiftGain)},
+  {"lightPhys", 'f', (uint16_t)offsetof(Params, lightPhys)},
+  {"lightAngle", 'f', (uint16_t)offsetof(Params, lightAngle)},
   {"acrossK", 'f', (uint16_t)offsetof(Params, acrossK)},
   {"acrossDamp", 'f', (uint16_t)offsetof(Params, acrossDamp)},
   {"acrossGyroGain", 'f', (uint16_t)offsetof(Params, acrossGyroGain)},
@@ -256,13 +254,11 @@ static const Params PRESET_1 = {
   0.0f, // highlightInset
   1.0f, // highlightBright
   1.0f, // highlightSharp
-  0.0f, // shadeRollGain
   0.49f, // shadeDepth
   -12.0f, // meniscusDepth
   3.2f, // meniscusPow
   0.55f, // meniscusTiltGain
   0.5f, // meniscusAsym
-  0.25f, // meniscusRollGain
   2.6f, // edgeSoft
   21.0f, // frontBright
   15.0f, // edgeGlow
@@ -331,7 +327,8 @@ static const Params PRESET_1 = {
   5.5f, // angleTiltGain
   0.37f, // angleGyroGain
   6.0f, // angleMax
-  0.0f, // acrossShiftGain
+  0.0f, // lightPhys
+  53.0f, // lightAngle
   200.0f, // acrossK
   20.0f, // acrossDamp
   0.0f, // acrossGyroGain

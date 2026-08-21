@@ -19,7 +19,7 @@ export interface TiltInput {
 // can ever make the liquid run off the end of the tube. Ported to firmware as-is.
 export const FILL_SLOSH_MAX_PX = 30;  // |fillPos| cap
 export const ANGLE_HARD_MAX_DEG = 20; // |angle| cap (params.angleMax tightens it, never widens)
-export const ACROSS_MAX_PX = 40;      // |acrossShift| cap
+export const LIGHT_MAX_DEG = 85;      // |light| cap
 
 export interface TubeState {
   fillTarget: number;  // 0..1 from time
@@ -27,15 +27,25 @@ export interface TubeState {
   fillVel: number;
   angle: number;       // deg, in-plane front skew (+ = bottom contact line leads); follows across-tilt
   angleVel: number;
-  acrossShift: number; // px, spring-damped roll response of the light (highlight row, shading, bubble height) — style, not liquid motion
-  acrossVel: number;
+  light: number;       // deg, highlight surface-normal angle in the tube cross-section (0 = centre row, + = toward the top edge); spring toward lightRest()
+  lightVel: number;
   agitation: number;   // 0..1, gyro energy with fast attack / slow decay: fizz speed, edge glow
   edgeLight: number;   // -1..1, slow along-tilt follower — brightens/dims the fill edge (render only)
   acrossTilt: number;  // -1..1, slow across-tilt follower — meniscus sag toward the low wall (render only)
 }
 
 export function newTube(): TubeState {
-  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, acrossShift: 0, acrossVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0 };
+  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, light: 0, lightVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0 };
+}
+
+/** Highlight angle the light settles at. Physical: the light is world-up; its direction in the
+ *  tube cross-section is atan2(across, normal) and a specular seen along the normal sits at half
+ *  that angle. Face up → centre row; roll toward the top edge → highlight climbs toward it.
+ *  Blended with the fixed style angle `lightAngle` by `lightPhys`. */
+export function lightRest(along: number, across: number, p: Params): number {
+  const n = Math.sqrt(Math.max(0, 1 - along * along - across * across));
+  const phys = (Math.atan2(across, n) * 180) / Math.PI / 2;
+  return p.lightAngle + (phys - p.lightAngle) * p.lightPhys;
 }
 
 function dz(v: number, d: number): number {
@@ -65,15 +75,14 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   if (s.angle > aMax) { s.angle = aMax; s.angleVel = Math.min(0, s.angleVel); }
   if (s.angle < -aMax) { s.angle = -aMax; s.angleVel = Math.max(0, s.angleVel); }
 
-  // Roll: a full-bore pinned column does not move under roll; acrossShift moves only the LIGHT
-  // (highlight row, shading, bubble height) — a stylised world-fixed light. Spring toward across rest, kicked by roll rate.
-  const acrossRest = across * p.acrossShiftGain;
-  const acrossAcc = -p.acrossK * (s.acrossShift - acrossRest) - p.acrossDamp * s.acrossVel
-    + inp.gyroAlong * p.acrossGyroGain * 10;
-  s.acrossVel += acrossAcc * dt;
-  s.acrossShift += s.acrossVel * dt;
-  if (s.acrossShift > ACROSS_MAX_PX) { s.acrossShift = ACROSS_MAX_PX; s.acrossVel = Math.min(0, s.acrossVel); }
-  if (s.acrossShift < -ACROSS_MAX_PX) { s.acrossShift = -ACROSS_MAX_PX; s.acrossVel = Math.max(0, s.acrossVel); }
+  // Light: a full-bore pinned column does not move under roll; roll moves only the light.
+  // Spring toward the rest angle, kicked by roll rate (gyro about the tube axis).
+  const rest = lightRest(along, across, p);
+  const lightAcc = -p.acrossK * (s.light - rest) - p.acrossDamp * s.lightVel + inp.gyroAlong * p.acrossGyroGain * 10;
+  s.lightVel += lightAcc * dt;
+  s.light += s.lightVel * dt;
+  if (s.light > LIGHT_MAX_DEG) { s.light = LIGHT_MAX_DEG; s.lightVel = Math.min(0, s.lightVel); }
+  if (s.light < -LIGHT_MAX_DEG) { s.light = -LIGHT_MAX_DEG; s.lightVel = Math.max(0, s.lightVel); }
 
   // Agitation: fast attack on gyro energy, slow decay.
   const shake = Math.min(1, ((Math.abs(inp.gyroAcross) + Math.abs(inp.gyroAlong)) / 200) * p.shakeGain);

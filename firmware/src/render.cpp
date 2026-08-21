@@ -81,9 +81,10 @@ struct Palette { uint16_t rows[TUBE_HEIGHT_MAX]; uint16_t bubbleIn[TUBE_HEIGHT_M
 
 // Glass wall shading weight 0..1 per row (sim: glassW): ambient cylinder shade, specular tent on the
 // top wall, faint band on the lower wall, brighter outermost rows.
-static float glassW(const Params &p, int y, int hiTop) {
+static float glassW(const Params &p, int y, int hiTop, float lam) {
   float t = (float)y / (H - 1);
-  float w = p.glassBody * (0.5f + 0.5f * cosf((t - 0.3f) * (float)M_PI * 1.6f));
+  float amb = 0.5f + 0.5f * cosf((t - 0.3f) * (float)M_PI * 1.6f);
+  float w = p.glassBody * (amb + (lam - amb) * p.lightPhys);
   if (y >= hiTop && y < hiTop + p.highlightH)
     w += p.glassHiBright * powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
   float d = (t - 0.82f) / 0.07f;
@@ -93,23 +94,31 @@ static float glassW(const Params &p, int y, int hiTop) {
   return fminf(1, w);
 }
 
-// Stylised fixed light from screen-top (see sim buildPalette); the acrylic rod supplies real specular.
-static void buildPalette(const Params &p, float acrossShift, Palette &pal) {
+// Top row of the highlight band for highlight angle lightDeg (sim highlightTop).
+static int highlightTop(const Params &p, float lightDeg) {
+  float yc = (H - 1) / 2.0f;
+  return (int)jround(yc - yc * sinf(lightDeg * (float)M_PI / 180) - (p.highlightH - 1) / 2);
+}
+
+// Style top light blended (lightPhys) with a Lambert cylinder lit from 2*light (sim buildPalette).
+static void buildPalette(const Params &p, float lightDeg, Palette &pal) {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
   RGB glass = hexToRgb(p.glass), ghi = hexToRgb(p.glassHi);
   float br = p.brightness * p.liquidBright;
-  int hiTop = (int)jround(2 + acrossShift);
-  float roll = acrossShift * p.shadeRollGain;
+  float yc = (H - 1) / 2.0f, lightRad = 2 * lightDeg * (float)M_PI / 180;
+  int hiTop = highlightTop(p, lightDeg);
   for (int y = 0; y < H; y++) {
-    float t = clampf((y - roll) / (H - 1), 0, 1);
+    float t = (float)y / (H - 1);
+    float lam = fmaxf(0, cosf(asinf(clampf((yc - y) / yc, -1, 1)) - lightRad));
     RGB c;
     if (t < 0.33f) c = mix(mix(body, lo, 0.25f), body, t / 0.33f);
     else c = mix(body, lo, ((t - 0.33f) / 0.67f) * p.shadeDepth);
+    if (p.lightPhys > 0) c = mix(c, mix(lo, body, 1 - p.shadeDepth * (1 - lam)), p.lightPhys);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       float k = powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
       c = mix(c, hi, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
-    float gw = glassW(p, y, hiTop);
+    float gw = glassW(p, y, hiTop, lam);
     pal.glassRows[y] = q(scale(mix(glass, ghi, gw), p.brightness));
     c = mix(c, ghi, gw * p.glassOverLiquid);
     pal.rows[y] = q(scale(c, br));
@@ -375,7 +384,7 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
 static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, int ticksN) {
   TubeState s = st;
   if (p.remaining) { s.fillPos = -st.fillPos; s.edgeLight = -st.edgeLight; }
-  float angle = s.angle + s.acrossShift * p.meniscusRollGain;
+  float angle = s.angle;
   float xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;
   float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   ensureFizz(idx, p, clampf(xe / L, 0, 1), s.agitation);
@@ -432,7 +441,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
 
   // 4: highlight inset
   if (p.highlightInset > 0) {
-    int hiTop = (int)jround(2 + s.acrossShift);
+    int hiTop = highlightTop(p, s.light);
     for (int ry = hiTop; ry < hiTop + p.highlightH && ry < H; ry++) {
       if (ry < 0) continue;
       float ex = edges[ry];
@@ -476,7 +485,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
 
   // 6: bubble
   if (p.bubble) {
-    float bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - s.acrossShift * p.bubbleRollGain;
+    float bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - (H - 1) / 2.0f * s.acrossTilt * p.bubbleRollGain;
     float rx = p.bubbleW / 2, ry_ = p.bubbleH / 2;
     if (bx - rx > 2) {
       for (int yy = (int)floorf(by - ry_); yy <= (int)ceilf(by + ry_); yy++) {
@@ -508,6 +517,6 @@ void renderTube(int idx, const TubeState &s, const Params &p, uint16_t *strip) {
   static Palette pal;
   TubeLayout lay = tubeLayout(p);
   FB = strip; H = lay.H; baseY = idx == 0 ? lay.yH : lay.yM;
-  buildPalette(p, s.acrossShift, pal);
+  buildPalette(p, s.light, pal);
   drawTube(idx, baseY, s, p, pal, idx == 0 ? 12 : 60);
 }
