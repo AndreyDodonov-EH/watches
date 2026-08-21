@@ -101,7 +101,7 @@ bool, struct size rounded to 4). Lock it with the static_asserts; if they fire, 
 
 Time: `setTime` = `cmd` `"T <epoch_s> <tz_offset_min>"` → `settimeofday`, store tz offset in NVS.
 
-Presets on device: NVS namespace `lw`, blob `cur` (autosaved params, debounce 2 s after the last write),
+Presets on device: NVS namespace `lw`, blob `cur` (_done 2026-08-21: autosave 2 s after the last write, `crc` = `PARAMS_SCHEMA_CRC` guards layout changes, `p!` erases_),
 blobs `p0..p7` + `n0..n7` names. Commands `P list | P save <name> | P load <name> | P del <name>`.
 `presets/*.json` in the repo stay the "factory" ones, baked in via `gen_params.py presets/1.json presets/calm.json …`.
 
@@ -144,7 +144,7 @@ send full `params` on preset load/import.
    `write(line)` and push `p name=value` on every param edit (throttled), `p?` on connect to pull, `t` on
    "set time". This validates the whole UX loop (live mirror, throttling, pull/push semantics, the
    transport interface) with the board on the desk, before any radio/memory work. ~1–2 h.
-2. **Firmware refactor:** `command.cpp` with output sink; `settimeofday` clock; NVS autosave of `params`;
+2. **Firmware refactor:** `command.cpp` with output sink; `settimeofday` clock (_done_); NVS autosave of `params` (_done_);
    one-strip fallback behind a `#define` and measure fps. Still serial-only, still easy to test with
    `compare-device.py`.
 3. **BLE (NimBLE)** with the characteristics above + the BLE adapter; host the sim build on GitHub Pages

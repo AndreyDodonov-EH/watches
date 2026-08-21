@@ -4,9 +4,11 @@
 //   f  fps benchmark                  i  toggle IMU stream (50 Hz CSV)
 //   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze)
 //   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p meniscusDepth=-10)
-//   p?  dump params as JSON           p!  reset params to the built-in preset
+//   p?  dump params as JSON           p!  reset params to the built-in preset (and erase NVS copy)
+//   params persist in NVS (autosave 2 s after last p write)
 //   b<n> brightness 0..255            r  reboot
 #include <Arduino.h>
+#include <Preferences.h>
 #include <Adafruit_GFX.h>
 #include <sys/time.h>
 #include "esp_heap_caps.h"
@@ -59,6 +61,22 @@ static bool have_imu = false;
 
 // ---- liquid face state ----
 static Params params = PRESET_DEFAULT;
+// NVS autosave: namespace lw, blob cur. Written 2 s after the last change; ignored if the schema CRC differs.
+static Preferences prefs;
+static uint32_t paramsDirtyAt = 0;
+static void paramsLoad() {
+  prefs.begin("lw", false);
+  if (prefs.getUInt("crc") == PARAMS_SCHEMA_CRC && prefs.getBytesLength("cur") == sizeof(Params)) {
+    prefs.getBytes("cur", &params, sizeof(Params)); Serial.println("params: restored from nvs");
+  }
+}
+static void paramsTouch() { paramsDirtyAt = millis() | 1; }
+static void paramsFlush() {
+  if (!paramsDirtyAt || millis() - paramsDirtyAt < 2000) return;
+  paramsDirtyAt = 0;
+  prefs.putBytes("cur", &params, sizeof(Params)); prefs.putUInt("crc", PARAMS_SCHEMA_CRC);
+}
+static void paramsErase() { paramsDirtyAt = 0; prefs.remove("cur"); prefs.remove("crc"); }
 static TubeState tubeH, tubeM;
 static GravityNorm gnorm;
 static ImuFilter imuFilter;
@@ -258,9 +276,10 @@ static void handleLine(char *line) {
     case 'd': demoSpeed = atof(arg); Serial.printf("demo speed x%g\n", demoSpeed); break;
     case 'p': {
       if (arg[0] == '?') dumpParams();
-      else if (arg[0] == '!') { params = PRESET_DEFAULT; Serial.println("params reset"); }
+      else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsErase(); Serial.println("params reset"); }
       else { char *eq = strchr(arg, '='); if (!eq) { Serial.println("usage: p<name>=<value> | p? | p!"); break; }
-        *eq = 0; Serial.printf(setParam(arg, eq + 1) ? "ok %s\n" : "unknown param %s\n", arg); }
+        *eq = 0; bool ok = setParam(arg, eq + 1); if (ok) paramsTouch();
+        Serial.printf(ok ? "ok %s\n" : "unknown param %s\n", arg); }
       break; }
     case 'x': {  // dump state + both strips (hex) for offline comparison with the sim
       display_wait_all();
@@ -295,6 +314,7 @@ void setup() {
   if (!display_init()) Serial.println("display init FAILED");
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   have_imu = imu_init();
+  paramsLoad();
   Serial.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);
   if (time(nullptr) < CLOCK_EPOCH_MIN) setClockLocal(CLOCK_EPOCH_MIN + 10 * 3600 + 9 * 60 + 30);
@@ -312,5 +332,6 @@ void loop() {
     else if (c >= 32 && n < (int)sizeof(line) - 1) { line[n++] = c; if (!imu_stream) Serial.write(c); }
   }
   imu_poll();
+  paramsFlush();
   if (mode == 'l') liquid_tick(); else delay(1);
 }
