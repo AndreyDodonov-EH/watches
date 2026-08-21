@@ -251,18 +251,26 @@ function markFn(y0: number, edges: Float32Array, p: Params, onTop: boolean, cont
 }
 
 // ---------------------------------------------------------------------------
-// Scale = tick ladder + numeric labels. Both are laid out from the same
-// `ticksN` grid, so the labels are measured FIRST and their pixel boxes are
-// handed to the tick pass: a tick that would run through a number is dropped,
-// leaving a clean gap instead of a line drawn across the glyph.
+// Scale = tick ladder + numeric labels, both laid out from the same `ticksN` grid.
 // ---------------------------------------------------------------------------
 
 /** One numeric label: its text, the glyph advances, and the box it occupies. */
-interface Label { text: string; x0: number; x1: number; adv: number[]; }
+interface Label { text: string; x0: number; adv: number[]; }
 /** Everything the draw pass and the tick pass need to know about a tube's labels. */
 interface Labels {
-  list: Label[]; bw: number; bh: number; ry0: number; ry1: number; yTop: number;
+  list: Label[]; bw: number; bh: number; ry0: number; ry1: number; y0: number; yTop: number; sourceRows: Int16Array;
   sprite: ScaledGlyph[] | null; font: Font; gap: number; rows: Uint16Array; shadow: number;
+}
+
+/** Destination tube row to source row for digits recessed behind the liquid. */
+function markSourceRows(H: number, lens: number): Int16Array {
+  const out = new Int16Array(H), k = Math.max(0, Math.min(1, lens));
+  for (let yd = 0; yd < H; yd++) {
+    const d = (yd + 0.5 - H / 2) / (H / 2), u = Math.abs(d);
+    const s = Math.sign(d) * ((1 - k) * u + k * u * u * u);
+    out[yd] = Math.max(0, Math.min(H - 1, Math.floor(H / 2 + s * H / 2)));
+  }
+  return out;
 }
 
 /** Measure (but do not draw) the labels of one tube. Returns null when digits are off. */
@@ -283,38 +291,49 @@ function layoutLabels(y0: number, p: Params, ticksN: number): Labels | null {
   const gap = sprite ? Math.max(1, Math.round(bw / 5)) : Math.max(1, Math.round(kx));
   const shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   const yBase = y0 + tubeLayout(p).H - 1 - bottom, yTop = yBase - bh + 1;
+  const H = tubeLayout(p).H, sourceRows = markSourceRows(H, p.digitsOnTop ? 0 : p.bottomLens);
+  const sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
+  let ry0 = H, ry1 = -1;
+  for (let ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceRy0 && sourceRows[ry] <= sourceRy1) {
+    ry0 = Math.min(ry0, ry); ry1 = Math.max(ry1, ry);
+  }
   const list: Label[] = [];
   for (let i = every; i < ticksN; i += every) {
     const text = minutes && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
     const adv = [...text].map((ch) => sprite?.[ch.charCodeAt(0) - 48]?.w ?? bw);
     const w = adv.reduce((a, b) => a + b + gap, -gap);
     const x0 = Math.round((i * TUBE_LENGTH_PX) / ticksN - w / 2);
-    list.push({ text, x0, x1: x0 + w - 1 + (shadow >= 0 ? 1 : 0), adv });
+    list.push({ text, x0, adv });
   }
-  return { list, bw, bh, yTop, ry0: yTop - y0, ry1: yBase - y0 + (shadow >= 0 ? 1 : 0), sprite, font, gap, rows: digitRowColors(p, bh), shadow };
+  return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, sprite, font, gap, rows: digitRowColors(p, bh), shadow };
 }
 
 /** Image glyph: per-pixel coverage from the pre-scaled sheet. */
-function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, yTop: number, mark: MarkFn): void {
+function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, mark: MarkFn): void {
   if (!g) return;
-  for (let dy = 0; dy < g.h; dy++) for (let dx = 0; dx < g.w; dx++) {
-    const a = g.a[dy * g.w + dx]; if (!a) continue;
-    mark(x + dx, yTop + dy, g.c[dy * g.w + dx], a / 255);
+  const sourceTop = lb.yTop - lb.y0;
+  for (let ry = lb.ry0; ry <= lb.ry1; ry++) {
+    const dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
+    for (let dx = 0; dx < g.w; dx++) {
+      const a = g.a[dy * g.w + dx]; if (!a) continue;
+      mark(x + dx, lb.y0 + ry, g.c[dy * g.w + dx], a / 255);
+    }
   }
 }
 /** Bitmap glyph, nearest-neighbour scaled into bw x bh, optional 1 px emboss shadow. */
-function drawBitmapGlyph(f: Font, d: number, x: number, yTop: number, bw: number, bh: number,
-  rowColors: Uint16Array, shadow: number, mark: MarkFn): void {
+function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, mark: MarkFn): void {
   const g = f.g[d]; if (!g) return;
   const msb = 1 << (f.w - 1);
-  for (let pass = shadow >= 0 ? 0 : 1; pass < 2; pass++) {
+  for (let pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
     const off = pass === 0 ? 1 : 0;
-    for (let dy = 0; dy < bh; dy++) {
-      const row = g[Math.min(f.h - 1, Math.floor((dy * f.h) / bh))];
-      for (let dx = 0; dx < bw; dx++) {
-        const col = Math.min(f.w - 1, Math.floor((dx * f.w) / bw));
+    const sourceTop = lb.yTop - lb.y0 + off;
+    for (let ry = lb.ry0; ry <= lb.ry1; ry++) {
+      const dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
+      const row = g[Math.min(f.h - 1, Math.floor((dy * f.h) / lb.bh))];
+      for (let dx = 0; dx < lb.bw; dx++) {
+        const col = Math.min(f.w - 1, Math.floor((dx * f.w) / lb.bw));
         if (!(row & (msb >> col))) continue;
-        mark(x + dx + off, yTop + dy + off, pass === 0 ? shadow : rowColors[dy]);
+        mark(x + dx + off, lb.y0 + ry, pass === 0 ? lb.shadow : lb.rows[dy]);
       }
     }
   }
@@ -334,8 +353,8 @@ function drawLabels(lb: Labels, mark: MarkFn): void {
     let x = l.x0;
     for (let i = 0; i < l.text.length; i++) {
       const d = l.text.charCodeAt(i) - 48;
-      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, lb.yTop, mark);
-      else drawBitmapGlyph(lb.font, d, x, lb.yTop, lb.bw, lb.bh, lb.rows, lb.shadow, mark);
+      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, lb, mark);
+      else drawBitmapGlyph(lb.font, d, x, lb, mark);
       x += l.adv[i] + lb.gap;
     }
   }
@@ -344,7 +363,7 @@ function drawLabels(lb: Labels, mark: MarkFn): void {
 /** Tick ladder. Majors are both longer AND wider than minors, and are placed every
  *  `tickMajorEvery` UNITS (hours / minutes), not every N-th minor, so they stay put
  *  when the minor step changes. Ticks that would collide with a label are skipped. */
-function drawTicks(y0: number, p: Params, ticksN: number, lb: Labels | null, mark: MarkFn): void {
+function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array, mark: MarkFn): void {
   const minutes = ticksN === 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   const H = tubeLayout(p).H, L = TUBE_LENGTH_PX;
@@ -357,19 +376,23 @@ function drawTicks(y0: number, p: Params, ticksN: number, lb: Labels | null, mar
   const cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   const cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   const pos = Math.round(minutes ? p.tickPosM : p.tickPosH);
-  // A tick is dropped only where it would actually touch a label — same columns AND same rows.
-  const hitsLabel = (x: number, ryA: number, ryB: number): boolean =>
-    !!lb && ryB >= lb.ry0 && ryA <= lb.ry1 && lb.list.some((l) => x >= l.x0 - 1 && x <= l.x1 + 1);
+  const warpedRange = (sourceA: number, sourceB: number): [number, number] => {
+    let a = H, b = -1;
+    for (let ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceA && sourceRows[ry] <= sourceB) {
+      a = Math.min(a, ry); b = Math.max(b, ry);
+    }
+    return [a, b];
+  };
   for (let i = step; i < ticksN; i += step) {
     const xc = Math.round((i * L) / ticksN);
     const major = majorEvery > 0 && i % majorEvery === 0;
     const h = major ? hMaj : hMin; if (h <= 0) continue;
     const w = major ? wMaj : 1, x0 = xc - ((w - 1) >> 1), c = major ? cMaj : cMin;
-    const topHit = hitsLabel(xc, 0, h - 1), botHit = hitsLabel(xc, H - h, H - 1);
-    for (let k = 0; k < w; k++) for (let ry = 0; ry < h; ry++) {
+    const topRange = warpedRange(0, h - 1), botRange = warpedRange(H - h, H - 1);
+    for (let k = 0; k < w; k++) {
       const x = x0 + k;
-      if (pos !== 1 && !topHit) mark(x, y0 + ry, c);
-      if (pos !== 0 && !botHit) mark(x, y0 + H - 1 - ry, c);
+      if (pos !== 1) for (let ry = topRange[0]; ry <= topRange[1]; ry++) mark(x, y0 + ry, c);
+      if (pos !== 0) for (let ry = botRange[0]; ry <= botRange[1]; ry++) mark(x, y0 + ry, c);
     }
   }
 }
@@ -423,8 +446,8 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
 
 /** Draw one tube. y0 = top of tube in panel coords.
  *  `remaining` mode: the liquid sits at the right end and drains as time passes. The liquid layer is
- *  rendered in a mirrored frame (edge from the right, along-axis signs flipped), the tube rows are then
- *  flipped in place, and the scale is drawn last in panel coordinates. */
+ *  rendered in a mirrored frame (edge from the right, along-axis signs flipped), then flipped before
+ *  panel-coordinate marks and bubbles are composited. */
 export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number): void {
   const H = pal.rows.length, L = TUBE_LENGTH_PX;
   // Mirroring flips along-axis quantities only; across-axis ones (angle, light, acrossTilt) are invariant.
@@ -508,16 +531,30 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     }
   }
 
-  // Step 4b: scale (ticks + labels). Outside the liquid they are opaque; inside they are blended by
-  // liquidTransparency and held to markContrast — unless ticksOnTop / digitsOnTop print them on the
-  // glass in front of the liquid instead. `edges` from step 3 gives inside/outside.
-  const drawScale = (): void => {
-    const mark = (onTop: boolean, trim: number): MarkFn => markFn(y0, edges, p, onTop, p.markContrast * trim);
-    const labels = layoutLabels(y0, p, ticksN);
-    drawTicks(y0, p, ticksN, labels, mark(p.ticksOnTop, p.tickBright));
-    if (labels) drawLabels(labels, mark(p.digitsOnTop, p.digitBright));
+  if (p.remaining) {
+    for (let ry = 0; ry < H; ry++) {
+      const row = (y0 + ry) * PANEL_W;
+      for (let a = 0, b = L - 1; a < b; a++, b--) { const t = fb[row + a]; fb[row + a] = fb[row + b]; fb[row + b] = t; }
+      edges[ry] = L - edges[ry];
+    }
+  }
+
+  // Bottom marks are composited through the liquid, before bubbles. Top marks are drawn last.
+  const labels = layoutLabels(y0, p, ticksN);
+  const drawScaleLayer = (onTop: boolean): void => {
+    if (p.ticksOnTop === onTop) {
+      const rows = markSourceRows(H, onTop ? 0 : p.bottomLens);
+      drawTicks(y0, p, ticksN, rows, markFn(y0, edges, p, onTop, p.markContrast * p.tickBright));
+    }
+    if (labels && p.digitsOnTop === onTop)
+      drawLabels(labels, markFn(y0, edges, p, onTop, p.markContrast * p.digitBright));
   };
-  if (!p.remaining) drawScale();
+  drawScaleLayer(false);
+  const mapX = (x: number): number => p.remaining ? L - 1 - x : x;
+  const span = (y: number, xa: number, xb: number, c: number): void => {
+    if (p.remaining) hspan(y, L - 1 - xb, L - xa, c);
+    else hspan(y, xa, xb + 1, c);
+  };
 
   // Step 5: fizz dots (inside liquid only)
   if (p.fizz) for (const f of fizz[idx]) {
@@ -526,7 +563,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     const c = pal.bubbleRim;
     for (let dy = 0; dy < p.fizzSize; dy++) for (let dx = 0; dx < p.fizzSize; dx++) {
       const inner = p.fizzSize >= 3 && dx > 0 && dy > 0 && dx < p.fizzSize - 1 && dy < p.fizzSize - 1;
-      px(fx + dx, y0 + fy + dy, inner ? pal.bubbleIn[fy] : c);
+      px(mapX(fx + dx), y0 + fy + dy, inner ? pal.bubbleIn[fy] : c);
     }
   }
 
@@ -541,24 +578,16 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
         const hw = Math.sqrt(1 - dy * dy) * rx;
         const xa = Math.round(bx - hw), xb = Math.round(bx + hw);
         const ryi = Math.max(0, Math.min(H - 1, yy));
-        hspan(y0 + yy, xa, xb + 1, pal.bubbleIn[ryi]);
-        px(xa, y0 + yy, pal.bubbleRim); px(xb, y0 + yy, pal.bubbleRim);
+        span(y0 + yy, xa, xb, pal.bubbleIn[ryi]);
+        px(mapX(xa), y0 + yy, pal.bubbleRim); px(mapX(xb), y0 + yy, pal.bubbleRim);
       }
       // top/bottom rim rows
       const yt = Math.round(by - ry_), yb = Math.round(by + ry_);
-      hspan(y0 + yt, Math.round(bx - rx * 0.45), Math.round(bx + rx * 0.45) + 1, pal.bubbleRim);
-      hspan(y0 + yb, Math.round(bx - rx * 0.45), Math.round(bx + rx * 0.45) + 1, pal.bubbleRim);
+      span(y0 + yt, Math.round(bx - rx * 0.45), Math.round(bx + rx * 0.45), pal.bubbleRim);
+      span(y0 + yb, Math.round(bx - rx * 0.45), Math.round(bx + rx * 0.45), pal.bubbleRim);
     }
   }
-
-  if (p.remaining) {  // flip liquid layer into panel frame, then the scale on top
-    for (let ry = 0; ry < H; ry++) {
-      const row = (y0 + ry) * PANEL_W;
-      for (let a = 0, b = L - 1; a < b; a++, b--) { const t = fb[row + a]; fb[row + a] = fb[row + b]; fb[row + b] = t; }
-      edges[ry] = L - edges[ry];
-    }
-    drawScale();
-  }
+  drawScaleLayer(true);
 }
 
 /** Full frame. Bridge zone and margins stay black (we never draw there). */
