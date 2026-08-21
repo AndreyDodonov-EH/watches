@@ -11,7 +11,7 @@ struct Params {
   uint32_t liquid;
   uint32_t liquidHi;
   uint32_t liquidLo;
-  uint32_t glass;
+  uint32_t tubeBack;
   uint32_t glassHi;
   float glassBody;
   float glassHiBright;
@@ -116,7 +116,7 @@ struct Params {
 };
 
 #define PARAMS_NUM_FIELDS 109
-#define PARAMS_SCHEMA_CRC 0x5264c461u  // field names+types; guards the NVS blob
+#define PARAMS_SCHEMA_CRC 0xb6b9233bu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -128,7 +128,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"liquid", 'c', (uint16_t)offsetof(Params, liquid)},
   {"liquidHi", 'c', (uint16_t)offsetof(Params, liquidHi)},
   {"liquidLo", 'c', (uint16_t)offsetof(Params, liquidLo)},
-  {"glass", 'c', (uint16_t)offsetof(Params, glass)},
+  {"tubeBack", 'c', (uint16_t)offsetof(Params, tubeBack)},
   {"glassHi", 'c', (uint16_t)offsetof(Params, glassHi)},
   {"glassBody", 'f', (uint16_t)offsetof(Params, glassBody)},
   {"glassHiBright", 'f', (uint16_t)offsetof(Params, glassHiBright)},
@@ -234,14 +234,14 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  3, // v
+  4, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
   0x346A2A, // liquid
   0xB6FFA0, // liquidHi
   0x1E7515, // liquidLo
-  0x000000, // glass
+  0x000000, // tubeBack
   0xA8C0C8, // glassHi
   0.1f, // glassBody
   0.55f, // glassHiBright

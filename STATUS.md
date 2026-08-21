@@ -79,7 +79,7 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
 - Brightness is layered: `brightness` = panel dimmer (0x51), plus per-layer trims `liquidBright` /
   `tickBright` / `digitBright` in the Colour group. Dimming the digits sits them in the shadow at the bottom
   wall of the tube; the trim also scales that layer's `markContrast` floor, so the shadow survives over the
-  liquid. `glass` follows the panel dimmer only.
+  liquid. `tubeBack` follows the panel dimmer only.
 - Digits include five bitmap fonts and seven generated image fonts: steel, brass steampunk, copper gauge,
   forged iron, ivory enamel, carved slate, and amber resin. Image fonts remain behind the liquid/glass layers
   and support brightness and tint controls in the simulator and firmware.
