@@ -30,6 +30,7 @@ struct Params {
   float meniscusPow;
   float meniscusTiltGain;
   float meniscusAsym;
+  float meniscusRollGain;
   float edgeSoft;
   float frontBright;
   float edgeGlow;
@@ -113,7 +114,7 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 107
+#define PARAMS_NUM_FIELDS 108
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -144,6 +145,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"meniscusPow", 'f', (uint16_t)offsetof(Params, meniscusPow)},
   {"meniscusTiltGain", 'f', (uint16_t)offsetof(Params, meniscusTiltGain)},
   {"meniscusAsym", 'f', (uint16_t)offsetof(Params, meniscusAsym)},
+  {"meniscusRollGain", 'f', (uint16_t)offsetof(Params, meniscusRollGain)},
   {"edgeSoft", 'f', (uint16_t)offsetof(Params, edgeSoft)},
   {"frontBright", 'f', (uint16_t)offsetof(Params, frontBright)},
   {"edgeGlow", 'f', (uint16_t)offsetof(Params, edgeGlow)},
@@ -255,6 +257,7 @@ static const Params PRESET_1 = {
   3.2f, // meniscusPow
   0.55f, // meniscusTiltGain
   0.5f, // meniscusAsym
+  0.25f, // meniscusRollGain
   2.6f, // edgeSoft
   21.0f, // frontBright
   15.0f, // edgeGlow

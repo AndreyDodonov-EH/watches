@@ -369,6 +369,7 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
 static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, int ticksN) {
   TubeState s = st;
   if (p.remaining) { s.fillPos = -st.fillPos; s.angle = -st.angle; s.edgeLight = -st.edgeLight; }
+  float angle = s.angle + (p.remaining ? -1 : 1) * s.acrossShift * p.meniscusRollGain;
   float xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;
   float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   ensureFizz(idx, p, clampf(xe / L, 0, 1), s.agitation);
@@ -376,7 +377,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   // 1 + 3: glass (only where the column does not cover it) and the liquid column
   static float edges[TUBE_HEIGHT_MAX];
   for (int ry = 0; ry < H; ry++) {
-    float ex = edgeX(ry, xe, s.angle, p, s.edgeLight);
+    float ex = edgeX(ry, xe, angle, p, s.edgeLight);
     edges[ry] = ex;
     int x0 = 0;
     if (p.cornerR > 0) {
@@ -459,7 +460,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     const Fizz &f = fizz[idx][k];
     int fx = (int)jround(f.x * (xe - 6)), fy = (int)jround(f.y);
     if (fy < 0 || fy >= H) continue;
-    if (fx < 2 || fx >= edgeX(fy, xe, s.angle, p, s.edgeLight) - 2) continue;
+    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight) - 2) continue;
     int sz = (int)p.fizzSize;
     for (int dy = 0; dy < sz; dy++) for (int dx = 0; dx < sz; dx++) {
       bool inner = sz >= 3 && dx > 0 && dy > 0 && dx < sz - 1 && dy < sz - 1;

@@ -398,6 +398,8 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
 export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number): void {
   const H = pal.rows.length, L = TUBE_LENGTH_PX;
   const s = p.remaining ? { ...state, fillPos: -state.fillPos, angle: -state.angle, edgeLight: -state.edgeLight } : state;
+  // roll swings the liquid toward the lower wall: its contact line leads, the front skews
+  const angle = s.angle + (p.remaining ? -1 : 1) * s.acrossShift * p.meniscusRollGain;
   const xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;   // edge centre
   // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
   // liquid into the right end brightens the cap glow, draining away from it dims it.
@@ -410,7 +412,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
   const edges = new Float32Array(H);
   for (let ry = 0; ry < H; ry++) {
-    const ex = edgeX(ry, xe, s.angle, p, s.edgeLight);
+    const ex = edgeX(ry, xe, angle, p, s.edgeLight);
     edges[ry] = ex;
     let x0 = 0;
     if (p.cornerR > 0) { // rounded left end cap
@@ -490,7 +492,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Step 5: fizz dots (inside liquid only)
   if (p.fizz) for (const f of fizz[idx]) {
     const fx = Math.round(f.x * (xe - 6)), fy = Math.round(f.y);
-    if (fx < 2 || fx >= edgeX(fy, xe, s.angle, p, s.edgeLight) - 2) continue;
+    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight) - 2) continue;
     const c = pal.bubbleRim;
     for (let dy = 0; dy < p.fizzSize; dy++) for (let dx = 0; dx < p.fizzSize; dx++) {
       const inner = p.fizzSize >= 3 && dx > 0 && dy > 0 && dx < p.fizzSize - 1 && dy < p.fizzSize - 1;
