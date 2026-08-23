@@ -74,8 +74,20 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
 - Inputs: sliders / drag on the panel, phone DeviceOrientation, **Web Serial to the board's `i` stream** (Chrome).
 - Time: real / demo (×N) / set HH:MM. Leather-cuff overlay with slot inset, acrylic-vial lens remap and gloss
   (presentation only, not ported). Layout-grid toggle shows the bridge zone.
-- All tunables in `sim/src/params.ts` (`DEFAULT_PARAMS`), live panel, presets Mint (spec) / Neon (ref photo
-  `images/reference-liquid.jpg`), export/import JSON. Current defaults: `sim/params.json`.
+- All tunables in `sim/src/params.ts` (`DEFAULT_PARAMS`), live panel, export/import JSON.
+  Current defaults: `sim/params.json`.
+- **Presets** (`PRESETS` in `sim/src/params.ts`, picker in the panel bar, `?preset=<id>`): each is a whole
+  look — liquid optics, glass, scale, labels and the physics of that liquid's density and viscosity — and is
+  applied over `DEFAULT_PARAMS` (`presetParams`), so a preset is reproducible whatever the session held.
+  Signature: `blood` (opaque venous red, viscous, syringe print on the glass) · `sparkling` (near-clear,
+  per-minute lab graduations, constant fizz) · `xenon` (violet discharge, glow past the column end, no slosh)
+  · `mercury` (non-wetting convex bead, gravity-driven specular `lightPhys` 0.8, numerals etched into the
+  metal by `markContrast` 55) · `malt` (amber, clings to the wall, brass numerals) · `molten` (emissive
+  orange, heavy, forged numerals) · `cryo` (pale blue, boiling, frosted wall, watery physics) · `ink`
+  (matte black, ivory enamel numerals, panel mostly off) · `champagne` (pale gold, dense bead).
+  Legacy: `user1` / `mint` / `neon` / `concept`. Panel shots: `images/presets/<id>.png`.
+  `npm run dump:presets` writes each as a full params JSON into `presets/<id>.json` — the input format of
+  `firmware/tools/gen_params.py`.
 - Brightness is layered: `brightness` = panel dimmer (0x51), plus per-layer trims `liquidBright` /
   `tickBright` / `digitBright` in the Colour group. Dimming the digits sits them in the shadow at the bottom
   wall of the tube; the trim also scales that layer's `markContrast` floor, so the shadow survives over the

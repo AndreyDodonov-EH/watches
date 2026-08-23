@@ -1,5 +1,5 @@
 // Minimal control panel generated from PARAM_META. No framework.
-import { DEFAULT_PARAMS, PARAM_META, migrateParams, PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, PRESET_USER_V1, type Params } from './params';
+import { DEFAULT_PARAMS, PARAM_META, PRESETS, migrateParams, presetParams, type Params } from './params';
 
 /** `key` is set for a single-field edit; absent for preset/import/reset (whole struct changed). */
 export interface UiHooks { onChange: (key?: keyof Params) => void; }
@@ -61,10 +61,15 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   const bar = document.createElement('div'); bar.className = 'bar';
   const btn = (t: string, f: () => void) => { const b = document.createElement('button'); b.textContent = t; b.onclick = f; bar.appendChild(b); };
   const apply = (src: Partial<Params>) => { Object.assign(p, src); refresh(); hooks.onChange(); };
-  btn('User v1', () => apply(PRESET_USER_V1));
-  btn('Mint (spec)', () => apply(PRESET_MINT));
-  btn('Neon (ref photo)', () => apply(PRESET_NEON));
-  btn('Concept art', () => apply(PRESET_CONCEPT));
+  const sel = document.createElement('select'); sel.className = 'presets';
+  sel.add(new Option('preset…', ''));
+  for (const [label, legacy] of [['Signature', false], ['Legacy', true]] as const) {
+    const g = document.createElement('optgroup'); g.label = label;
+    for (const e of PRESETS) if (!!e.legacy === legacy) { const o = new Option(e.name, e.id); o.title = e.note; g.appendChild(o); }
+    sel.appendChild(g);
+  }
+  sel.oninput = () => { const e = PRESETS.find((x) => x.id === sel.value); if (e) apply(presetParams(e)); };
+  bar.appendChild(sel);
   btn('Reset all', () => apply(structuredClone(DEFAULT_PARAMS)));
   btn('Export JSON', () => {
     const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });
