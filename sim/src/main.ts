@@ -1,6 +1,6 @@
 import './style.css';
 import { PANEL_W, PANEL_H } from '@spec/layout';
-import { PRESET_CONCEPT, PRESET_MINT, PRESET_NEON, type Params } from './params';
+import { PRESETS, presetParams, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
 import { renderFrame, blit, stepFizz, fb, fizz, loadSprites, tubeLayout } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
@@ -242,13 +242,13 @@ const panelUi = buildPanel($('panel'), params, { onChange: (key) => {
 } });
 
 // URL params, applied on top of the restored session — for reproducible states / screenshots:
-//   ?fresh=1 (ignore the saved session) &preset=neon|mint|concept &t=10:09 &demo=120 &settle=1
+//   ?fresh=1 (ignore the saved session) &preset=<id from PRESETS> &t=10:09 &demo=120 &settle=1
 //   &along=0.3 &across=0 &scale=3 &cuff=0 &lens=0.6 &lenscurve=1 &lenssmooth=1 &leather=black &grid=1
 //   &p.<paramKey>=<value>   e.g. &p.liquid=%2339ff14&p.bubble=0
 {
   const u = url;
-  const preset = { neon: PRESET_NEON, mint: PRESET_MINT, concept: PRESET_CONCEPT }[u.get('preset') ?? ''];
-  if (preset) Object.assign(params, preset);
+  const preset = PRESETS.find((e) => e.id === u.get('preset'));
+  if (preset) Object.assign(params, presetParams(preset));
   for (const [k, v] of u) if (k.startsWith('p.')) {
     const key = k.slice(2) as keyof Params; const cur = (params as any)[key];
     (params as any)[key] = typeof cur === 'boolean' ? v === '1' || v === 'true' : typeof cur === 'number' ? parseFloat(v) : v;

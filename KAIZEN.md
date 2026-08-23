@@ -3,6 +3,12 @@
 ## Visual / layout
 - Even if hour has passed, edge might be before it, example is 06:01
 - Empty space at the top and bottom of the real screen? Move tubes further away from one another?
+- Fill edge with `edgeSoft` > 0 leaves a 1 px tube-back gap before the glow: the AA loop writes
+  `t = 0` at its last pixel and `edgeGlow` starts at `ceil(ex + round(edgeSoft))`, one px further.
+  Invisible at low `glowStrength`, a black outline on emissive looks (xenon, molten — both set
+  `edgeSoft` 0/1 to dodge it). Fix in `render.ts` step 3b + `render.cpp` together, they must stay 1:1.
+- Sprite fonts have no emboss shadow (`digitShadow` is bitmap-only), so light sprite numerals over a
+  light liquid rely on `markContrast` alone.
 
 ## Rendering: incrementality / optimisation — primarily for POWER (memory wins too)
 _Added 2026-08-20 after Phase 3 (liquid face live, 38–40 fps)._
