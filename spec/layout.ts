@@ -7,7 +7,7 @@ export const PANEL_H = 240;
 export const TUBE_LENGTH_PX = 536; // full width; leather may mask the outer ~10px
 // Defaults; runtime values come from params tubeHeight / hoursY / minutesY.
 export const TUBE_HEIGHT_PX = 72;  // ≈ 6 mm at ~0.083 mm/px
-export const TUBE_HEIGHT_MAX = 120; // strip buffer size
+export const TUBE_HEIGHT_MAX = 80; // strip buffer size (2 strips in internal DMA RAM, shared with BLE)
 export const HOURS_TUBE_Y = 0;     // tube spans y 0..72
 export const MINUTES_TUBE_Y = 168; // tube spans y 168..240
 export const BRIDGE_Y0 = 72;       // bridge zone y 72..168 must stay pure black

@@ -61,6 +61,10 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Reply matching relies on the echoed command line being intact; an IMU CSV line could in theory split
   the echo (firmware echoes per char between `imu_poll` calls). Fix firmware-side: drop echo when a
   stream is on, or prefix replies (`> ok`).
+- `s` reports ~23 fps with BLE built in (STATUS says ~40). Not measured without BLE on the same build; check whether the
+  BT controller task or the smaller strips cost it.
+- BLE: `x` hex dump and echo-per-char are wasteful over NUS; BLE-side flow control absent (notify drops if the
+  central is slow). BLE always on — measure its idle draw before the power-management work.
 - `t HH:MM:SS` loses the date; `T <epoch> <tz>` + `settimeofday` per companion-handoff.md.
 - FW power management: light sleep when still (QMI8658 wake-on-motion on INT1/INT2 = GPIO45/46; not RTC pins → light sleep only, not deep), AMOLED SLPIN while asleep, partial window updates for the two bar strips only, tick rate 1–2 Hz once liquid settled. Target avg <15 mA → 500 mAh cell lasts days.
   Two-stage wake: (1) QMI8658 WoM threshold/debounce tuned so walking/typing don't trip it, accel-only low-power mode; (2) on wake, gyro burst 100 Hz, classify wrist-raise (forearm-axis rotation 60–90° in 300–600 ms ending glass-up + 200 ms still) before panel on; no match → back to sleep. Tilt-away blanks early. Tune thresholds from `i` CSV recordings.

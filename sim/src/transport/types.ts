@@ -1,5 +1,5 @@
 // Transport abstraction: the UI drives the watch through this interface only.
-// Implementations: serial.ts (Web Serial, line protocol). BLE / HTTP later.
+// Implementations: serial.ts (Web Serial), ble.ts (Web Bluetooth NUS); both via line.ts.
 import type { ParamKey, Params } from '../params';
 
 export type TransportStatus = 'disconnected' | 'connecting' | 'connected' | 'error';

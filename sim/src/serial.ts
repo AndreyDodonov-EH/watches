@@ -1,15 +1,17 @@
-// IMU feed over the serial transport: the board's `i` stream (t_ms,ax,ay,az,gx,gy,gz at 50 Hz),
+// IMU feed over a line transport (serial or BLE): the board's `i` stream (t_ms,ax,ay,az,gx,gy,gz at 50 Hz),
 // mapped to the tube frame using spec/layout IMU_* constants.
 import { IMU_AXIS_ALONG_TUBE, IMU_ALONG_TUBE_SIGN, IMU_AXIS_ACROSS_TUBE, IMU_ACROSS_TUBE_SIGN } from '@spec/layout';
 import { GravityNorm, type TiltInput } from './physics';
-import type { SerialTransport } from './transport/serial';
+import type { LineTransport } from './transport/line';
 
 export class SerialImu {
   last: TiltInput = { along: 0, across: 0, gyroAlong: 0, gyroAcross: 0 };
   raw = '';
   private norm = new GravityNorm();
 
-  constructor(private t: SerialTransport) { t.onLine = (l) => this.parse(l); }
+  constructor(private t: LineTransport) { this.attach(t); }
+
+  attach(t: LineTransport): void { this.t = t; t.onLine = (l) => this.parse(l); }
 
   /** `i` toggles on the board; the reply states the resulting state, so re-send if it mismatches. */
   async setStream(on: boolean): Promise<void> {

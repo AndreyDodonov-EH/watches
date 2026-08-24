@@ -8,7 +8,7 @@
 #define TUBE_LENGTH_PX     536   // full width; leather may mask the outer ~10px
 // Defaults; runtime values come from params tubeHeight / hoursY / minutesY.
 #define TUBE_HEIGHT_PX     72    // ≈ 6 mm at ~0.083 mm/px
-#define TUBE_HEIGHT_MAX    120   // strip buffer size
+#define TUBE_HEIGHT_MAX    80    // strip buffer size (2 strips in internal DMA RAM, shared with BLE)
 #define HOURS_TUBE_Y       0     // tube spans y 0..72
 #define MINUTES_TUBE_Y     168   // tube spans y 168..240
 #define BRIDGE_Y0          72    // bridge zone y 72..168 must stay pure black

@@ -9,6 +9,9 @@ import { buildPanel } from './ui';
 loadSprites(`${import.meta.env.BASE_URL}assets/`);
 import { SerialImu } from './serial';
 import { SerialTransport } from './transport/serial';
+import { BleTransport } from './transport/ble';
+import type { LineTransport } from './transport/line';
+import type { TransportStatus } from './transport/types';
 
 // ---------- state ----------
 // Params *and* view state are restored from localStorage and saved again on every edit (persist.ts).
@@ -63,7 +66,7 @@ app.innerHTML = `
       <fieldset><legend>Tilt input</legend>
         <label><input type="radio" name="src" value="manual" checked> sliders / drag on panel</label>
         <label><input type="radio" name="src" value="device"> device orientation (phone)</label>
-        <label><input type="radio" name="src" value="serial"> board IMU via Web Serial</label>
+        <label><input type="radio" name="src" value="serial"> board IMU via link</label>
         <div id="imuraw" class="mono"></div>
         <canvas id="scope" width="316" height="70"></canvas>
         <label>along <input type="range" id="along" min="-1" max="1" step="0.01" value="0"> <output id="alongv">0</output> g</label>
@@ -71,7 +74,7 @@ app.innerHTML = `
         <button id="center">centre</button> <button id="flick">flick →</button> <button id="flickl">← flick</button> <button id="shake">shake</button>
       </fieldset>
       <fieldset><legend>Device</legend>
-        <label><button id="serialbtn">connect</button> <span id="serialst">disconnected</span></label>
+        <label><select id="link"><option value="serial">Web Serial</option><option value="ble">Bluetooth</option></select> <button id="serialbtn">connect</button> <span id="serialst">disconnected</span></label>
         <label><input type="checkbox" id="livepush" checked> push params live</label>
         <label><button id="pull">pull params</button> <button id="settime">set time</button> <button id="pushall">push all</button></label>
       </fieldset>
@@ -195,18 +198,22 @@ function askOrientation() {
   window.addEventListener('devicemotion', (e) => { dev.gyroAcross = e.rotationRate?.beta ?? 0; });
 }
 
-// device: one serial port serves the IMU stream and the param/time commands
-const transport = new SerialTransport();
+// device: one link (Web Serial or BLE) serves the IMU stream and the param/time commands
+const links: Record<string, LineTransport> = { serial: new SerialTransport(), ble: new BleTransport() };
+let transport: LineTransport = links.serial;
 const serial = new SerialImu(transport);
 const srcRadio = (v: string) => document.querySelector(`input[name=src][value=${v}]`) as HTMLInputElement;
-transport.onStatus = (st, detail) => {
+const onStatus = (st: TransportStatus, detail?: string) => {
   $('serialst').textContent = detail ? `${st}: ${detail}` : st;
   $('serialbtn').textContent = st === 'connected' ? 'disconnect' : 'connect';
+  $<HTMLSelectElement>('link').disabled = st === 'connected';
   if (st !== 'connected' && inputSource === 'serial') { inputSource = 'manual'; srcRadio('manual').checked = true; }
 };
+for (const t of Object.values(links)) t.onStatus = onStatus;
 $('serialbtn').onclick = async () => {
-  if (!transport.supported) { $('serialst').textContent = 'Web Serial not supported (use Chrome)'; return; }
   if (transport.connected) { await serial.setStream(false); await transport.disconnect(); return; }
+  transport = links[$<HTMLSelectElement>('link').value]; serial.attach(transport);
+  if (!transport.supported) { $('serialst').textContent = `${transport instanceof BleTransport ? 'Web Bluetooth' : 'Web Serial'} not supported (use Chrome)`; return; }
   try { await transport.connect(); } catch { return; }
   const d = new Date(); await transport.setTime(d.getTime(), -d.getTimezoneOffset());  // port open may have reset the board
   await serial.setStream(true);
