@@ -1,5 +1,5 @@
 // Liquid Watch firmware — liquid face (port of the sim) + Phase 1 bring-up faces.
-// Serial commands (115200, USB CDC):
+// Serial commands (115200, USB CDC; same protocol over BLE Nordic UART Service, name "liquid-watch"):
 //   l  liquid face (default)          c  calibration face        h  hello / orientation test
 //   f  fps benchmark                  i  toggle IMU stream (50 Hz CSV)
 //   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze)
@@ -15,6 +15,7 @@
 #include "layout.h"
 #include "display.h"
 #include "imu.h"
+#include "ble.h"
 #include "physics.h"
 #include "render.h"
 #include "gen/params_gen.h"
@@ -67,7 +68,7 @@ static uint32_t paramsDirtyAt = 0;
 static void paramsLoad() {
   prefs.begin("lw", false);
   if (prefs.getUInt("crc") == PARAMS_SCHEMA_CRC && prefs.getBytesLength("cur") == sizeof(Params)) {
-    prefs.getBytes("cur", &params, sizeof(Params)); Serial.println("params: restored from nvs");
+    prefs.getBytes("cur", &params, sizeof(Params)); out.println("params: restored from nvs");
   }
 }
 static void paramsTouch() { paramsDirtyAt = millis() | 1; }
@@ -145,7 +146,7 @@ static void face_calibration() {
 }
 
 static void bench_fps() {
-  Serial.println("fps: full-frame 536x240 RGB565, 60 frames...");
+  out.println("fps: full-frame 536x240 RGB565, 60 frames...");
   uint32_t t0 = millis();
   const int N = 60;
   for (int i = 0; i < N; i++) {
@@ -156,20 +157,20 @@ static void bench_fps() {
     display_push_frame(fb.buf);
   }
   uint32_t dt = millis() - t0;
-  Serial.printf("fps: %d frames in %lu ms = %.1f fps (render+push)\n", N, dt, N * 1000.0f / dt);
+  out.printf("fps: %d frames in %lu ms = %.1f fps (render+push)\n", N, dt, N * 1000.0f / dt);
   t0 = millis();
   for (int i = 0; i < N; i++) display_push_frame(fb.buf);
   dt = millis() - t0;
-  Serial.printf("fps: push-only %.1f fps\n", N * 1000.0f / dt);
+  out.printf("fps: push-only %.1f fps\n", N * 1000.0f / dt);
   t0 = millis();
   for (int i = 0; i < N; i++) { renderTube(0, tubeH, params, strip[0]); renderTube(1, tubeM, params, strip[1]); }
   dt = millis() - t0;
-  Serial.printf("fps: liquid render-only %.1f fps\n", N * 1000.0f / dt);
+  out.printf("fps: liquid render-only %.1f fps\n", N * 1000.0f / dt);
   t0 = millis();
   for (int i = 0; i < N; i++) renderBoth();
   display_wait_all();
   dt = millis() - t0;
-  Serial.printf("fps: liquid render+async push %.1f fps\n", N * 1000.0f / dt);
+  out.printf("fps: liquid render+async push %.1f fps\n", N * 1000.0f / dt);
 }
 
 // ---- liquid face ----
@@ -214,7 +215,7 @@ static void imu_poll() {
   static uint32_t next = 0;
   if (imu_stream && millis() >= next) {
     next = millis() + 20;
-    Serial.printf("%lu,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f\n", millis(), s.ax, s.ay, s.az, s.gx, s.gy, s.gz);
+    out.printf("%lu,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f\n", millis(), s.ax, s.ay, s.az, s.gx, s.gy, s.gz);
   }
 }
 
@@ -235,18 +236,18 @@ static bool setParam(const char *name, const char *val) {
   return true;
 }
 static void dumpParams() {
-  Serial.print("{");
+  out.print("{");
   for (int i = 0; i < PARAMS_NUM_FIELDS; i++) {
     const ParamField &f = PARAM_FIELDS[i]; const uint8_t *p = (const uint8_t *)&params + f.off;
-    Serial.printf("%s\"%s\":", i ? "," : "", f.name);
+    out.printf("%s\"%s\":", i ? "," : "", f.name);
     switch (f.type) {
-      case 'f': Serial.printf("%g", *(const float *)p); break;
-      case 'i': Serial.printf("%d", *(const int *)p); break;
-      case 'b': Serial.print(*(const bool *)p ? "true" : "false"); break;
-      case 'c': Serial.printf("\"#%06lx\"", (unsigned long)*(const uint32_t *)p); break;
+      case 'f': out.printf("%g", *(const float *)p); break;
+      case 'i': out.printf("%d", *(const int *)p); break;
+      case 'b': out.print(*(const bool *)p ? "true" : "false"); break;
+      case 'c': out.printf("\"#%06lx\"", (unsigned long)*(const uint32_t *)p); break;
     }
   }
-  Serial.println("}");
+  out.println("}");
 }
 
 static void show(char m) {
@@ -265,41 +266,41 @@ static void handleLine(char *line) {
   char c = line[0]; char *arg = line + 1; while (*arg == ' ') arg++;
   switch (c) {
     case 'h': case 'c': case 'f': case 'l': show(c); break;
-    case 'i': imu_stream = !imu_stream; Serial.printf("imu stream %s\n", imu_stream ? "on (t_ms,ax,ay,az,gx,gy,gz)" : "off"); break;
-    case 'b': { int v = atoi(arg); display_set_brightness(constrain(v, 0, 255)); Serial.printf("brightness %d\n", v); break; }
-    case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { setClockLocal(CLOCK_EPOCH_MIN + hh * 3600 + mm * 60 + ss); Serial.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else Serial.println("usage: t HH:MM[:SS]"); break; }
+    case 'i': imu_stream = !imu_stream; out.printf("imu stream %s\n", imu_stream ? "on (t_ms,ax,ay,az,gx,gy,gz)" : "off"); break;
+    case 'b': { int v = atoi(arg); display_set_brightness(constrain(v, 0, 255)); out.printf("brightness %d\n", v); break; }
+    case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { setClockLocal(CLOCK_EPOCH_MIN + hh * 3600 + mm * 60 + ss); out.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else out.println("usage: t HH:MM[:SS]"); break; }
     case 'T': {  // T <epoch_s> <tz_offset_min>: local time = epoch + tz
       long long ep = 0; int tz = 0;
-      if (sscanf(arg, "%lld %d", &ep, &tz) >= 1) { setClockLocal((time_t)(ep + tz * 60L)); clockSec = clockNow(); Serial.printf("time %02d:%02d:%02d\n", (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60); }
-      else Serial.println("usage: T <epoch_s> <tz_min>");
+      if (sscanf(arg, "%lld %d", &ep, &tz) >= 1) { setClockLocal((time_t)(ep + tz * 60L)); clockSec = clockNow(); out.printf("time %02d:%02d:%02d\n", (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60); }
+      else out.println("usage: T <epoch_s> <tz_min>");
       break; }
-    case 'd': demoSpeed = atof(arg); Serial.printf("demo speed x%g\n", demoSpeed); break;
+    case 'd': demoSpeed = atof(arg); out.printf("demo speed x%g\n", demoSpeed); break;
     case 'p': {
       if (arg[0] == '?') dumpParams();
-      else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsErase(); Serial.println("params reset"); }
-      else { char *eq = strchr(arg, '='); if (!eq) { Serial.println("usage: p<name>=<value> | p? | p!"); break; }
+      else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsErase(); out.println("params reset"); }
+      else { char *eq = strchr(arg, '='); if (!eq) { out.println("usage: p<name>=<value> | p? | p!"); break; }
         *eq = 0; bool ok = setParam(arg, eq + 1); if (ok) paramsTouch();
-        Serial.printf(ok ? "ok %s\n" : "unknown param %s\n", arg); }
+        out.printf(ok ? "ok %s\n" : "unknown param %s\n", arg); }
       break; }
     case 'x': {  // dump state + both strips (hex) for offline comparison with the sim
       display_wait_all();
       renderTube(0, tubeH, params, strip[0]); renderTube(1, tubeM, params, strip[1]);
-      Serial.printf("STATE %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
+      out.printf("STATE %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
                     tubeH.fillTarget, tubeH.fillPos, tubeH.angle, tubeH.light, tubeH.edgeLight, tubeH.agitation,
                     tubeM.fillTarget, tubeM.fillPos, tubeM.angle, tubeM.light, tubeM.edgeLight, tubeM.agitation);
       static char hex[PANEL_W * 4 + 2];
       for (int t = 0; t < 2; t++) for (int y = 0; y < tubeLayout(params).H; y++) {
         const uint16_t *row = strip[t] + y * PANEL_W; char *o = hex;
         for (int x = 0; x < PANEL_W; x++) { uint16_t c = __builtin_bswap16(row[x]); o += sprintf(o, "%04x", c); }
-        *o++ = '\n'; *o = 0; Serial.write(hex);
+        *o++ = '\n'; *o = 0; out.write(hex);
       }
-      Serial.println("END");
+      out.println("END");
       break; }
-    case 's': Serial.printf("mode %c fps %.1f clock %02d:%02d:%02d along %.3f across %.3f gyro %.1f fillH %.3f fillM %.3f heap %u\n",
+    case 's': out.printf("mode %c fps %.1f clock %02d:%02d:%02d along %.3f across %.3f gyro %.1f fillH %.3f fillM %.3f heap %u\n",
                  mode, fps, (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60,
                  rawTilt.along, rawTilt.across, rawTilt.gyroAcross, tubeH.fillTarget, tubeM.fillTarget, ESP.getFreeHeap()); break;
     case 'r': ESP.restart(); break;
-    case '?': Serial.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> p<name>=<v> p? p! r"); break;
+    case '?': out.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> p<name>=<v> p? p! r"); break;
     default: break;
   }
 }
@@ -308,29 +309,32 @@ void setup() {
   Serial.begin(115200);
   uint32_t t = millis();
   while (!Serial && millis() - t < 2500) delay(10);
-  Serial.printf("\nliquid-watch | cpu %lu MHz | psram %u KB | heap %u KB\n",
+  out.printf("\nliquid-watch | cpu %lu MHz | psram %u KB | heap %u KB\n",
                 getCpuFrequencyMhz(), ESP.getPsramSize() / 1024, ESP.getFreeHeap() / 1024);
-  if (!fb.buf) { Serial.println("FATAL: framebuffer alloc failed"); }
-  if (!display_init()) Serial.println("display init FAILED");
+  if (!fb.buf) { out.println("FATAL: framebuffer alloc failed"); }
+  if (!display_init()) out.println("display init FAILED");
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   have_imu = imu_init();
   paramsLoad();
-  Serial.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
+  out.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);
   if (time(nullptr) < CLOCK_EPOCH_MIN) setClockLocal(CLOCK_EPOCH_MIN + 10 * 3600 + 9 * 60 + 30);
   clockSec = clockNow();
-  Serial.println("ready. ? for commands");
+  ble_init("liquid-watch");
+  out.println("ready. ? for commands");
+}
+
+// Echo only for a human terminal: while the IMU stream is on (the sim's mode) it would interleave with CSV lines.
+static void feedByte(char c) {
+  static char line[96]; static int n = 0;
+  if (c == '\n' || c == '\r') { if (!imu_stream) Serial.println(); if (n) { line[n] = 0; handleLine(line); n = 0; } }
+  else if (c == 8 || c == 127) { if (n) { n--; if (!imu_stream) Serial.print("\b \b"); } }   // backspace
+  else if (c >= 32 && n < (int)sizeof(line) - 1) { line[n++] = c; if (!imu_stream) Serial.write(c); }
 }
 
 void loop() {
-  static char line[96]; static int n = 0;
-  while (Serial.available()) {
-    char c = Serial.read();
-    // Echo only for a human terminal: while the IMU stream is on (the sim's mode) it would interleave with CSV lines.
-    if (c == '\n' || c == '\r') { if (!imu_stream) Serial.println(); if (n) { line[n] = 0; handleLine(line); n = 0; } }
-    else if (c == 8 || c == 127) { if (n) { n--; if (!imu_stream) Serial.print("\b \b"); } }   // backspace
-    else if (c >= 32 && n < (int)sizeof(line) - 1) { line[n++] = c; if (!imu_stream) Serial.write(c); }
-  }
+  while (Serial.available()) feedByte(Serial.read());
+  for (int c; (c = ble_read()) >= 0;) feedByte((char)c);
   imu_poll();
   paramsFlush();
   if (mode == 'l') liquid_tick(); else delay(1);

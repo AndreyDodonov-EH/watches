@@ -43,7 +43,10 @@ with `presets/1.json` baked in, driven by the live IMU at 50 Hz; **~40 fps**. Se
 `i` IMU CSV stream, `t HH:MM[:SS]` set clock (no RTC battery — defaults to 10:09:30 at boot),
 `d<N>` demo speed (×N, `d0` freeze, `d1` real), `p<name>=<value>` set ANY param live by its sim name
 (`pliquid=#39ff14`, `pfizz=0`, `pmeniscusDepth=-10`), `p?` dump params as JSON (sim-importable), `p!` reset
-to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
+to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help. Same protocol over **BLE** (Nordic UART Service,
+advertised as `liquid-watch`; NimBLE-Arduino, RX queued into `loop()`, replies notified in MTU-3 chunks).
+`TUBE_HEIGHT_MAX` = 80: the two internal-DMA strips (2 × 536 × 80 × 2 B) must leave room for the BT controller,
+else `display_init` fails at boot before `ble_init`.
 
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.
@@ -71,7 +74,7 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help.
 - Renders into a real RGB565 `Uint16Array` framebuffer (exact 565 quantisation) using only row spans /
   pixels / a per-row colour LUT, so the routine ports 1:1 (`sim/src/render.ts` is the spec; `firmware/src/render.cpp` mirrors it).
 - Fixed-step 50 Hz physics (`sim/src/physics.ts`), decoupled from rAF rendering. IMU axes mapped via `spec/layout.ts`.
-- Inputs: sliders / drag on the panel, phone DeviceOrientation, **Web Serial to the board's `i` stream** (Chrome).
+- Inputs: sliders / drag on the panel, phone DeviceOrientation, **Web Serial or Web Bluetooth to the board's `i` stream** (Chrome; link picker in the Device box).
 - Time: real / demo (×N) / set HH:MM. Leather-cuff overlay with slot inset, acrylic-vial lens remap and gloss
   (presentation only, not ported). Layout-grid toggle shows the bridge zone.
 - All tunables in `sim/src/params.ts` (`DEFAULT_PARAMS`), live panel, export/import JSON.
