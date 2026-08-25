@@ -23,6 +23,7 @@ probably another "digit" in the same font
 - negative lense/curve to compensate for actual glass,
 then e.g. digits can be "unwarped"
 - different warping of glass and of liquid from glass for digits/ticks lying at the bottom
+- work on bubble(s) realism, useless now; fizz is mostly okay (only antializing when fizz is big?)
 
 ## General
 - Connection over Wi-Fi? How? Strich/QR displayed?
