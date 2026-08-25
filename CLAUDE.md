@@ -1,4 +1,5 @@
-Be laconic, in all: talking to me, reasoning, code and comments.
+Be laconic, in code and comments.
+In talking to me - moderately laconic.
 Avoid emotional phrases. State facts.
 Example of a bad phrase:
 - This makes DB close at hand
