@@ -22,6 +22,7 @@ probably another "digit" in the same font
 - if we are ever able to measure pulse - end of liquid pumping as pulse
 - negative lense/curve to compensate for actual glass,
 then e.g. digits can be "unwarped"
+- different warping of glass and of liquid from glass for digits/ticks lying at the bottom
 
 ## General
 - Connection over Wi-Fi? How? Strich/QR displayed?
