@@ -469,7 +469,7 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
   const H = tubeLayout(p).H, yc = (H - 1) / 2;
   const d = (ry - yc) / yc;                  // -1..1
   const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt));
+  const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(p.meniscusDepth);
   const depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
   return xe + skew + depth * Math.pow(Math.abs(d), p.meniscusPow); // liquid climbs the wall
 }
