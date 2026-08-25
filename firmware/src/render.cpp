@@ -428,7 +428,7 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
   const float yc = (H - 1) / 2.0f;
   float d = (ry - yc) / yc;
   float skew = tanf(angleDeg * (float)M_PI / 180) * (ry - yc);
-  float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f);
+  float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f) * (p.meniscusDepth < 0 ? -1 : 1);
   float depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
   return xe + skew + depth * powf(fabsf(d), p.meniscusPow);
 }
