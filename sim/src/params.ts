@@ -101,6 +101,7 @@ export interface Params {
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
   bottomLens: number;    // 0..1 depth warp for digits printed behind the liquid
   topLens: number;       // -1..1 pre-distortion for digits printed on top; negative compensates physical glass magnification
+  topParallax: number;   // px across-shift of top digits per g of across-tilt; counters the apparent shift under the physical lens
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
   markContrast: number;  // min luma difference a tick/digit must keep from the liquid behind it (0 = off)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
@@ -212,6 +213,7 @@ export const DEFAULT_PARAMS: Params = {
   digitsOnTop: false,
   bottomLens: 0.35,
   topLens: 0,
+  topParallax: 0,
   liquidTransparency: 0.17,
   markContrast: 0,
   digitsLeadingZero: false,
@@ -629,6 +631,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   digitShadowColor: { help: 'Emboss shadow colour.', group: 'Digits', label: 'shadow colour' },
   digitsOnTop: { help: 'Printed on the glass, opaque and excluded from the whole-tube lens. Off: behind the liquid, seen through it and depth-warped.', group: 'Digits', label: 'print on top of liquid' },
   bottomLens: { help: 'Depth warp for digits behind the liquid.', group: 'Digits', label: 'rear lens', min: 0, max: 1, step: 0.05 },
+  topParallax: { help: 'Across-shift of top digits per g of across-tilt, countering the apparent shift under the physical lens. Sign flips direction.', group: 'Digits', label: 'front parallax px/g', min: -10, max: 10, step: 0.25 },
   // digits — hours tube
   digitHourStep: { help: 'Label every N hours.', group: 'Digits · hours', label: 'label every N h', min: 1, max: 6, step: 1 },
   digitScaleX: { help: 'Hours tube horizontal scale (nearest-neighbour).', group: 'Digits · hours', label: 'scale X', min: 0.5, max: 6, step: 0.25 },

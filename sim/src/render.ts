@@ -283,12 +283,12 @@ function markSourceRows(H: number, lens: number, curve = 1): Int16Array {
 }
 
 /** Measure (but do not draw) the labels of one tube. Returns null when digits are off. */
-function layoutLabels(y0: number, p: Params, ticksN: number): Labels | null {
+function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number): Labels | null {
   if (!p.digits) return null;
   const minutes = ticksN === 60;
   const every = Math.max(1, Math.round(minutes ? p.digitMinuteStep : p.digitHourStep));
   const kx = minutes ? p.digitScaleXMin : p.digitScaleX, ky = minutes ? p.digitScaleYMin : p.digitScaleY;
-  const bottom = minutes ? p.digitBottomMin : p.digitBottom;
+  const bottom = (minutes ? p.digitBottomMin : p.digitBottom) + (p.digitsOnTop ? Math.round(acrossTilt * p.topParallax) : 0);
   const idx = Math.round(p.digitFont), useSprite = idx >= SPRITE_FONT;
   const font = FONTS[Math.max(0, Math.min(FONTS.length - 1, idx))];
   // sprite glyphs use the same nominal 5x7 em as the bitmap fonts so the scale sliders mean the same thing
@@ -577,7 +577,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   }
 
   // Rear marks are composited through the liquid, before bubbles.
-  const labels = layoutLabels(y0, p, ticksN);
+  const labels = layoutLabels(y0, p, ticksN, state.acrossTilt);
   const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
       const rows = markSourceRows(H, p.tickLens);

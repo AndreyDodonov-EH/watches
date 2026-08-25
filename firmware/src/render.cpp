@@ -257,12 +257,12 @@ static void digitRowColors(const Params &p, int bh, uint16_t *out) {
   }
 }
 
-static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, Labels &lb) {
+static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, float acrossTilt, Labels &lb) {
   if (!p.digits) return false;
   bool minutes = ticksN == 60;
   int every = (int)fmaxf(1, jround(minutes ? p.digitMinuteStep : p.digitHourStep));
   float kx = minutes ? p.digitScaleXMin : p.digitScaleX, ky = minutes ? p.digitScaleYMin : p.digitScaleY;
-  float bottom = minutes ? p.digitBottomMin : p.digitBottom;
+  float bottom = (minutes ? p.digitBottomMin : p.digitBottom) + (p.digitsOnTop ? jround(acrossTilt * p.topParallax) : 0);
   int idx = (int)jround(p.digitFont); bool useSprite = idx >= SPRITE_FONT;
   const Font *font = &FONTS[idx < 0 ? 0 : idx >= NUM_FONTS ? NUM_FONTS - 1 : idx];
   int bw = (int)fmaxf(1, jround((useSprite ? 5 : font->w) * kx));
@@ -551,7 +551,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
 
   // Rear marks are composited through the liquid, before bubbles.
   static Labels labels;
-  bool haveLabels = layoutLabels(idx, y0, p, ticksN, labels);
+  bool haveLabels = layoutLabels(idx, y0, p, ticksN, st.acrossTilt, labels);
   auto drawTickLayer = [&](bool onTop) {
     if (p.ticksOnTop == onTop) {
       int16_t rows[TUBE_HEIGHT_MAX];

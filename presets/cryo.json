@@ -89,6 +89,7 @@
   "digitsOnTop": false,
   "bottomLens": 0.35,
   "topLens": 0,
+  "topParallax": 0,
   "liquidTransparency": 0.6,
   "markContrast": 40,
   "digitsLeadingZero": false,
