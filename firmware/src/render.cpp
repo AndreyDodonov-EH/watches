@@ -216,13 +216,16 @@ static uint16_t throughLiquid(uint16_t bg, uint16_t mark, const Params &p, float
   return rgb565(cr, cg, cb);
 }
 
+// rel = +1 / -1: emboss highlight / shadow of body colour c, derived after the liquid pass.
 struct Mark {
   int y0; const float *edges; const Params *p; bool onTop; float contrast;
-  void operator()(int x, int y, uint16_t c, float cov = 1) const {
+  void operator()(int x, int y, uint16_t c, float cov = 1, int rel = 0) const {
     int ry = y - y0;
     bool inside = p->remaining ? x >= edges[ry] : x < edges[ry];
     if (!onTop && inStrip(x, y) && inside)
       c = throughLiquid(rd(x, y), c, *p, contrast);
+    if (rel > 0) c = q(mix(to888(c), {255, 255, 255}, 0.7f));
+    else if (rel < 0) c = q(scale(to888(c), 0.25f));
     pxa(x, y, c, cov);
   }
 };
@@ -356,8 +359,6 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
     int inner = top ? rangeB : rangeA; if (inner < 0) inner = 0; if (inner >= H) inner = H - 1;
     int dir = inner >= outer ? 1 : -1;
     float radius = fmaxf(1, (H - 1) / 2.0f), centre = (H - 1) / 2.0f;
-    uint16_t hi = q(mix(to888(c), {255, 255, 255}, 0.7f));
-    uint16_t lo = q(scale(to888(c), 0.25f));
     auto point = [&](int baseY, int &x, int &y) {
       float qy = (baseY - centre) / radius;
       float depth = sqrtf(fmaxf(0, 1 - qy * qy));
@@ -365,7 +366,7 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
     };
     auto plot = [&](int x, int ry) {
       if (ry < 0 || ry >= H) return;
-      if (emboss > 0) { mark(x - 1, y0 + ry, hi, emboss); mark(x + w, y0 + ry, lo, emboss); }
+      if (emboss > 0) { mark(x - 1, y0 + ry, c, emboss, 1); mark(x + w, y0 + ry, c, emboss, -1); }
       for (int k = 0; k < w; k++) mark(x + k, y0 + ry, c);
     };
     int px0, py0; point(outer, px0, py0); plot(px0, py0);

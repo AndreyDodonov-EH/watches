@@ -215,8 +215,11 @@ function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number,
   scaledCache.set(key, out);
   return out;
 }
-/** Composites one mark (tick / label) pixel; `cov` is glyph anti-alias coverage 0..1. */
-type MarkFn = (x: number, y: number, c: number, cov?: number) => void;
+/** Composites one mark (tick / label) pixel; `cov` is glyph anti-alias coverage 0..1.
+ *  `rel` = +1 / -1 draws the emboss highlight / shadow of body colour `c`. */
+type MarkFn = (x: number, y: number, c: number, cov?: number, rel?: number) => void;
+const embossOf = (c: number, rel: number): number =>
+  rel > 0 ? q(mix(rgb565to888(c), [255, 255, 255], 0.7)) : q(scale(rgb565to888(c), 0.25));
 
 const luma = (c: [number, number, number]): number => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
 /** Colour of a mark seen through the liquid: alpha-blended by `liquidTransparency`, then pushed
@@ -238,14 +241,16 @@ function throughLiquid(bg: number, mark: number, p: Params, contrast: number): n
     : mix(c, [255, 255, 255], Math.min(1, (target - lc) / Math.max(1, 255 - lc)));
   return q(c);
 }
-/** Mark compositor for one tube. `onTop` marks ignore the liquid and are drawn opaque. */
+/** Mark compositor for one tube. `onTop` marks ignore the liquid and are drawn opaque.
+ *  Emboss pixels derive from the body's through-liquid colour so the relief survives the contrast floor. */
 function markFn(y0: number, edges: Float32Array, p: Params, onTop: boolean, contrast: number): MarkFn {
   const H = edges.length;
-  return (x, y, c, cov = 1) => {
+  return (x, y, c, cov = 1, rel = 0) => {
     const ry = y - y0;
     const inside = p.remaining ? x >= edges[ry] : x < edges[ry];
     if (!onTop && ry >= 0 && ry < H && x >= 0 && x < PANEL_W && y >= 0 && y < PANEL_H && inside)
       c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast);
+    if (rel !== 0) c = embossOf(c, rel);
     pxa(x, y, c, cov);
   };
 }
@@ -391,8 +396,6 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
     const inner = Math.max(0, Math.min(H - 1, top ? range[1] : range[0]));
     const dir = inner >= outer ? 1 : -1;
     const radius = Math.max(1, (H - 1) / 2), centre = (H - 1) / 2;
-    const hi = q(mix(rgb565to888(c), [255, 255, 255], 0.7));
-    const lo = q(scale(rgb565to888(c), 0.25));
     const point = (baseY: number): [number, number] => {
       const qy = (baseY - centre) / radius;
       const depth = Math.sqrt(Math.max(0, 1 - qy * qy));
@@ -400,7 +403,7 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
     };
     const plot = (x: number, ry: number): void => {
       if (ry < 0 || ry >= H) return;
-      if (emboss > 0) { mark(x - 1, y0 + ry, hi, emboss); mark(x + w, y0 + ry, lo, emboss); }
+      if (emboss > 0) { mark(x - 1, y0 + ry, c, emboss, 1); mark(x + w, y0 + ry, c, emboss, -1); }
       for (let k = 0; k < w; k++) mark(x + k, y0 + ry, c);
     };
     let [px0, py0] = point(outer); plot(px0, py0);
