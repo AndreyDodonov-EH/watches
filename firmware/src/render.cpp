@@ -236,11 +236,14 @@ struct Labels {
   uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow;
 };
 
-static void markSourceRows(int height, float lens, int16_t *out) {
-  float k = clampf(lens, 0, 1);
+static void markSourceRows(int height, float lens, int16_t *out, float curve = 1) {
+  float strength = fabsf(clampf(lens, -1, 1));
+  float signedCurve = lens < 0 ? -clampf(curve, -3, 3) : clampf(curve, -3, 3);
+  float exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
   for (int yd = 0; yd < height; yd++) {
     float d = (yd + 0.5f - height / 2.0f) / (height / 2.0f), u = fabsf(d);
-    float s = (d < 0 ? -1 : 1) * ((1 - k) * u + k * u * u * u);
+    float warped = signedCurve == 0 ? u : (1 - strength) * u + strength * powf(u, exponent);
+    float s = (d < 0 ? -1 : 1) * warped;
     out[yd] = (int16_t)clampf(floorf(height / 2.0f + s * height / 2.0f), 0, height - 1);
   }
 }
@@ -270,7 +273,8 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, Labels &
   int shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   int yBase = y0 + H - 1 - (int)bottom, yTop = yBase - bh + 1;
   // NB: sim uses yBase = y0+H-1-bottom with fractional `bottom` possible; presets use integers.
-  markSourceRows(H, p.digitsOnTop ? 0 : p.bottomLens, lb.sourceRows);
+  if (p.digitsOnTop) markSourceRows(H, p.topLens, lb.sourceRows, p.lensCurve);
+  else markSourceRows(H, p.bottomLens, lb.sourceRows);
   int sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
   lb.ry0 = H; lb.ry1 = -1;
   for (int ry = 0; ry < H; ry++) if (lb.sourceRows[ry] >= sourceRy0 && lb.sourceRows[ry] <= sourceRy1) {
@@ -340,6 +344,7 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
   int majorEvery = (int)fmaxf(0, jround(minutes ? p.tickMajorEveryM : p.tickMajorEveryH));
   int hMin = (int)fmaxf(0, jround(minutes ? p.tickMinorHeightM : p.tickMinorHeightH));
   int hMaj = (int)fmaxf(0, jround(minutes ? p.tickMajorHeightM : p.tickMajorHeightH));
+  int wMin = (int)fmaxf(1, jround(minutes ? p.tickMinorWidthM : p.tickMinorWidthH));
   int wMaj = (int)fmaxf(1, jround(minutes ? p.tickMajorWidthM : p.tickMajorWidthH));
   float br = p.brightness * p.tickBright;
   uint16_t cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
@@ -383,7 +388,7 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
     int xc = (int)jround((float)i * L / ticksN);
     bool major = majorEvery > 0 && i % majorEvery == 0;
     int h = major ? hMaj : hMin; if (h <= 0) continue;
-    int w = major ? wMaj : 1, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
+    int w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
     int topA, topB, botA, botB;
     warpedRange(0, h - 1, topA, topB); warpedRange(H - h, H - 1, botA, botB);
     if (pos != 1) drawSegment(x0, w, c, topA, topB, true);
@@ -434,20 +439,25 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
 }
 
 static void applyLens(const Params &p) {
-  float lens = clampf(p.lens, 0, 1), curve = clampf(p.lensCurve, 0.3f, 3);
-  if (lens <= 0) return;
+  float lens = clampf(p.lens, -1, 1), curve = clampf(p.lensCurve, -3, 3);
+  float signedCurve = lens < 0 ? -curve : curve, strength = fabsf(lens);
+  if (strength == 0 || signedCurve == 0) return;
+  float exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
   auto sourceRow = [&](int yd) {
     float d = (yd + 0.5f - H / 2.0f) / (H / 2.0f), u = fabsf(d);
-    float s = (d < 0 ? -1 : 1) * ((1 - lens) * u + lens * powf(u, 1 + curve * 2));
+    float s = (d < 0 ? -1 : 1) * ((1 - strength) * u + strength * powf(u, exponent));
     return (int)clampf(floorf(H / 2.0f + s * H / 2.0f), 0, H - 1);
   };
-  for (int yd = 0; yd < H / 2; yd++) {
+  auto copyRow = [&](int yd) {
     int sy = sourceRow(yd);
     if (sy != yd) memcpy(FB + (size_t)yd * PANEL_W, FB + (size_t)sy * PANEL_W, PANEL_W * 2);
-  }
-  for (int yd = H - 1; yd >= H / 2; yd--) {
-    int sy = sourceRow(yd);
-    if (sy != yd) memcpy(FB + (size_t)yd * PANEL_W, FB + (size_t)sy * PANEL_W, PANEL_W * 2);
+  };
+  if (signedCurve > 0) {
+    for (int yd = 0; yd < H / 2; yd++) copyRow(yd);
+    for (int yd = H - 1; yd >= H / 2; yd--) copyRow(yd);
+  } else {
+    for (int yd = H / 2 - 1; yd >= 0; yd--) copyRow(yd);
+    for (int yd = H / 2; yd < H; yd++) copyRow(yd);
   }
 }
 

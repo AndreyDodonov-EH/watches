@@ -38,8 +38,9 @@ app.innerHTML = `
     <label>scale <select id="scale"><option value="0.33">0.33 (≈ real size @96 dpi)</option><option value="0.5" selected>0.5</option><option value="0.75">0.75</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
     <label><input type="checkbox" id="ovl" checked> leather cuff</label>
     <label>leather <select id="leather"><option>brown</option><option>black</option><option>none</option></select></label>
-    <label>lens <input type="range" id="lens" min="0" max="1" step="0.05" value="0.6"></label>
-    <label>lens curve <input type="range" id="lenscurve" min="0.3" max="3" step="0.05" value="1"></label>
+    <label>lens <input type="range" id="lens" min="-1" max="1" step="0.05" value="0.6"></label>
+    <label>lens curve <input type="range" id="lenscurve" min="-3" max="3" step="0.05" value="1"></label>
+    <label title="Front-digit pre-distortion; negative compensates physical glass magnification">front digits lens <input type="range" id="toplens" min="-1" max="1" step="0.05" value="0"></label>
     <label><input type="checkbox" id="lenssmooth"> lens smooth</label>
     <label>gloss <input type="range" id="gloss" min="0" max="1" step="0.05" value="0.55"></label>
     <label>slot inset <input type="range" id="inset" min="0" max="40" step="1" value="10"></label>
@@ -123,6 +124,7 @@ $('ovl').oninput = (e) => { overlay.enabled = (e.target as HTMLInputElement).che
 $('leather').oninput = (e) => { overlay.leather = (e.target as HTMLSelectElement).value as any; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
 $('lens').oninput = (e) => { params.lens = +(e.target as HTMLInputElement).value; pushParam('lens'); };
 $('lenscurve').oninput = (e) => { params.lensCurve = +(e.target as HTMLInputElement).value; pushParam('lensCurve'); };
+$('toplens').oninput = (e) => { params.topLens = +(e.target as HTMLInputElement).value; pushParam('topLens'); };
 $('lenssmooth').oninput = (e) => { overlay.lensSmooth = (e.target as HTMLInputElement).checked; };
 $('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
 $('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
@@ -151,6 +153,7 @@ function syncView(): void {
   $<HTMLSelectElement>('leather').value = overlay.leather;
   $<HTMLInputElement>('lens').value = String(params.lens);
   $<HTMLInputElement>('lenscurve').value = String(params.lensCurve);
+  $<HTMLInputElement>('toplens').value = String(params.topLens);
   $<HTMLInputElement>('lenssmooth').checked = overlay.lensSmooth;
   $<HTMLInputElement>('gloss').value = String(overlay.gloss);
   $<HTMLInputElement>('inset').value = String(overlay.slotInset);

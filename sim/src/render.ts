@@ -9,6 +9,7 @@ import type { Params } from './params';
 import type { TubeState } from './physics';
 
 export const fb = new Uint16Array(PANEL_W * PANEL_H);
+const lensScratch = new Uint16Array(PANEL_W * TUBE_HEIGHT_MAX);
 
 function hexToRgb(h: string): [number, number, number] {
   const v = parseInt(h.replace('#', ''), 16);
@@ -267,12 +268,15 @@ interface Labels {
   sprite: ScaledGlyph[] | null; font: Font; gap: number; rows: Uint16Array; shadow: number;
 }
 
-/** Destination tube row to source row for marks on the rear tube surface. */
-function markSourceRows(H: number, lens: number): Int16Array {
-  const out = new Int16Array(H), k = Math.max(0, Math.min(1, lens));
+/** Destination tube row to source row for independently warped marks. */
+function markSourceRows(H: number, lens: number, curve = 1): Int16Array {
+  const out = new Int16Array(H), strength = Math.abs(Math.max(-1, Math.min(1, lens)));
+  const signedCurve = lens < 0 ? -Math.max(-3, Math.min(3, curve)) : Math.max(-3, Math.min(3, curve));
+  const exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
   for (let yd = 0; yd < H; yd++) {
     const d = (yd + 0.5 - H / 2) / (H / 2), u = Math.abs(d);
-    const s = Math.sign(d) * ((1 - k) * u + k * u * u * u);
+    const warped = signedCurve === 0 ? u : (1 - strength) * u + strength * Math.pow(u, exponent);
+    const s = Math.sign(d) * warped;
     out[yd] = Math.max(0, Math.min(H - 1, Math.floor(H / 2 + s * H / 2)));
   }
   return out;
@@ -296,7 +300,8 @@ function layoutLabels(y0: number, p: Params, ticksN: number): Labels | null {
   const gap = sprite ? Math.max(1, Math.round(bw / 5)) : Math.max(1, Math.round(kx));
   const shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   const yBase = y0 + tubeLayout(p).H - 1 - bottom, yTop = yBase - bh + 1;
-  const H = tubeLayout(p).H, sourceRows = markSourceRows(H, p.digitsOnTop ? 0 : p.bottomLens);
+  const H = tubeLayout(p).H;
+  const sourceRows = p.digitsOnTop ? markSourceRows(H, p.topLens, p.lensCurve) : markSourceRows(H, p.bottomLens);
   const sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
   let ry0 = H, ry1 = -1;
   for (let ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceRy0 && sourceRows[ry] <= sourceRy1) {
@@ -377,6 +382,7 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
   const majorEvery = Math.max(0, Math.round(minutes ? p.tickMajorEveryM : p.tickMajorEveryH));
   const hMin = Math.max(0, Math.round(minutes ? p.tickMinorHeightM : p.tickMinorHeightH));
   const hMaj = Math.max(0, Math.round(minutes ? p.tickMajorHeightM : p.tickMajorHeightH));
+  const wMin = Math.max(1, Math.round(minutes ? p.tickMinorWidthM : p.tickMinorWidthH));
   const wMaj = Math.max(1, Math.round(minutes ? p.tickMajorWidthM : p.tickMajorWidthH));
   const br = p.brightness * p.tickBright;
   const cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
@@ -420,7 +426,7 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
     const xc = Math.round((i * L) / ticksN);
     const major = majorEvery > 0 && i % majorEvery === 0;
     const h = major ? hMaj : hMin; if (h <= 0) continue;
-    const w = major ? wMaj : 1, x0 = xc - ((w - 1) >> 1), c = major ? cMaj : cMin;
+    const w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1), c = major ? cMaj : cMin;
     const topRange = warpedRange(0, h - 1), botRange = warpedRange(H - h, H - 1);
     if (pos !== 1) drawSegment(x0, w, c, topRange, true);
     if (pos !== 0) drawSegment(x0, w, c, botRange, false);
@@ -629,12 +635,16 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
 }
 
 function applyLens(y0: number, H: number, p: Params, smooth: boolean): void {
-  const lens = Math.max(0, Math.min(1, p.lens));
-  const curve = Math.max(0.3, Math.min(3, p.lensCurve));
-  if (lens <= 0) return;
+  const lens = Math.max(-1, Math.min(1, p.lens));
+  const curve = Math.max(-3, Math.min(3, p.lensCurve));
+  const signedCurve = lens < 0 ? -curve : curve;
+  const strength = Math.abs(lens);
+  if (strength === 0 || signedCurve === 0) return;
+  const exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  if (smooth) lensScratch.set(fb.subarray(y0 * PANEL_W, (y0 + H) * PANEL_W));
   const sourceRow = (yd: number): number => {
     const d = (yd + 0.5 - H / 2) / (H / 2), u = Math.abs(d);
-    const s = Math.sign(d) * ((1 - lens) * u + lens * Math.pow(u, 1 + curve * 2));
+    const s = Math.sign(d) * ((1 - strength) * u + strength * Math.pow(u, exponent));
     return Math.max(0, Math.min(H - 1, H / 2 + s * H / 2 - (smooth ? 0.5 : 0)));
   };
   const copyRow = (yd: number): void => {
@@ -646,11 +656,17 @@ function applyLens(y0: number, H: number, p: Params, smooth: boolean): void {
       return;
     }
     const a = Math.floor(sy), b = Math.min(H - 1, a + 1), t = sy - a;
-    const rowA = (y0 + a) * PANEL_W, rowB = (y0 + b) * PANEL_W;
-    for (let x = 0; x < PANEL_W; x++) fb[dst + x] = blend565(fb[rowA + x], fb[rowB + x], t);
+    const rowA = a * PANEL_W, rowB = b * PANEL_W;
+    for (let x = 0; x < PANEL_W; x++) fb[dst + x] = blend565(lensScratch[rowA + x], lensScratch[rowB + x], t);
   };
-  for (let yd = 0; yd < Math.floor(H / 2); yd++) copyRow(yd);
-  for (let yd = H - 1; yd >= Math.floor(H / 2); yd--) copyRow(yd);
+  const mid = Math.floor(H / 2);
+  if (signedCurve > 0) {
+    for (let yd = 0; yd < mid; yd++) copyRow(yd);
+    for (let yd = H - 1; yd >= mid; yd--) copyRow(yd);
+  } else {
+    for (let yd = mid - 1; yd >= 0; yd--) copyRow(yd);
+    for (let yd = mid; yd < H; yd++) copyRow(yd);
+  }
 }
 
 /** Full frame. Bridge zone and margins stay black (we never draw there). */
