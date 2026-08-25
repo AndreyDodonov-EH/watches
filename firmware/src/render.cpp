@@ -432,6 +432,24 @@ static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt
   return xe + skew + depth * powf(fabsf(d), p.meniscusPow);
 }
 
+static void applyLens(const Params &p) {
+  float lens = clampf(p.lens, 0, 1), curve = clampf(p.lensCurve, 0.3f, 3);
+  if (lens <= 0) return;
+  auto sourceRow = [&](int yd) {
+    float d = (yd + 0.5f - H / 2.0f) / (H / 2.0f), u = fabsf(d);
+    float s = (d < 0 ? -1 : 1) * ((1 - lens) * u + lens * powf(u, 1 + curve * 2));
+    return (int)clampf(floorf(H / 2.0f + s * H / 2.0f), 0, H - 1);
+  };
+  for (int yd = 0; yd < H / 2; yd++) {
+    int sy = sourceRow(yd);
+    if (sy != yd) memcpy(FB + (size_t)yd * PANEL_W, FB + (size_t)sy * PANEL_W, PANEL_W * 2);
+  }
+  for (int yd = H - 1; yd >= H / 2; yd--) {
+    int sy = sourceRow(yd);
+    if (sy != yd) memcpy(FB + (size_t)yd * PANEL_W, FB + (size_t)sy * PANEL_W, PANEL_W * 2);
+  }
+}
+
 // `remaining`: liquid at the right end, draining. Its base is rendered in a mirrored frame, then
 // flipped before panel-coordinate marks and bubbles are composited.
 static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, int ticksN) {
@@ -520,24 +538,27 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     }
   }
 
-  // Rear marks are composited through the liquid, before bubbles. Front marks are drawn last.
+  // Rear marks are composited through the liquid, before bubbles.
   static Labels labels;
   bool haveLabels = layoutLabels(idx, y0, p, ticksN, labels);
-  auto drawScaleLayer = [&](bool onTop) {
+  auto drawTickLayer = [&](bool onTop) {
     if (p.ticksOnTop == onTop) {
       int16_t rows[TUBE_HEIGHT_MAX];
-      markSourceRows(H, onTop ? 0 : p.tickLens, rows);
+      markSourceRows(H, p.tickLens, rows);
       Mark tickMark { y0, edges, &p, onTop, p.markContrast * p.tickBright };
       float dx = onTop ? 0 : -st.edgeLight * p.tickParallax;
       float dy = onTop ? 0 : st.acrossTilt * p.tickParallax;
       drawTicks(y0, p, ticksN, rows, tickMark, dx, dy);
     }
+  };
+  auto drawDigitLayer = [&](bool onTop) {
     if (haveLabels && p.digitsOnTop == onTop) {
       Mark digitMark { y0, edges, &p, onTop, p.markContrast * p.digitBright };
       drawLabels(y0, labels, digitMark);
     }
   };
-  drawScaleLayer(false);
+  drawTickLayer(false);
+  drawDigitLayer(false);
   auto mapX = [&](int x) { return p.remaining ? L - 1 - x : x; };
   auto span = [&](int y, int xa, int xb, uint16_t c) {
     if (p.remaining) hspan(y, L - 1 - xb, L - xa, c);
@@ -576,8 +597,11 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
       span(y0 + yb, (int)jround(bx - rx * 0.45f), (int)jround(bx + rx * 0.45f), pal.bubbleRim);
     }
   }
-  drawScaleLayer(true);
+  drawTickLayer(true);
+  applyLens(p);
+  drawDigitLayer(true);
 }
+
 
 void renderTube(int idx, const TubeState &s, const Params &p, uint16_t *strip) {
   static Palette pal;

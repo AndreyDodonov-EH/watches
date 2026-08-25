@@ -98,7 +98,7 @@ else `display_init` fails at boot before `ble_init`.
 - Digits include five bitmap fonts and seven generated image fonts: steel, brass steampunk, copper gauge,
   forged iron, ivory enamel, carved slate, and amber resin. Image fonts remain behind the liquid/glass layers
   and support brightness, tint, and black-to-white tone controls in the simulator and firmware.
-- **Autosave** (`sim/src/persist.ts`): every edit — params *and* view state (zoom, cuff/lens/gloss, layout grid,
+- **Autosave** (`sim/src/persist.ts`): every edit — params, including lens calibration, and view state (zoom, cuff/gloss, layout grid,
   pause, time mode, tilt) — is written to `localStorage['liquid-watch-session-v1']`, debounced 250 ms, flushed on
   pagehide. One delegated `input` listener on `#app` covers every control. Nothing is lost on reload, so
   **Export JSON is only for checkpointing a finished look into `sim/params.json`**, and it still exports params
@@ -108,11 +108,11 @@ else `display_init` fails at boot before `ble_init`.
   persisted — those need a user gesture.
 - Scale majors are longer, wider (`tickMajorWidth*`) and placed every N **units**
   (`tickMajorEvery*` counts hours/minutes, migrated from the old "every N-th minor" via `params.v`).
-  `ticksOnTop` selects one surface: distorted rear/bottom or flat front/top. Rear ticks use `tickLens`; tilt-driven
+  `ticksOnTop` selects the rear/bottom or front/top surface. Both use the cylinder `tickLens` and follow the whole-tube lens. Tilt-driven
   `tickParallax` projects them through the circular rear-half depth, producing a bow while keeping the outer endpoint attached to the tube silhouette. `tickEmboss` adds glass-cut highlight/shadow edges.
   `tickPosH/M` independently select the top, bottom, or both edges.
   Marks inside the liquid keep a minimum luma distance from it (`markContrast`). Contract: `throughLiquid` in `sim/src/render.ts`.
-- Layer order is rear ticks → rear digits → bubbles/fizz → front ticks → front digits. Ticks are never dropped for label bounds; later marks overwrite only intersecting pixels. The acrylic lens remains a simulation-only view overlay.
+- Layer order is rear ticks → rear digits → bubbles/fizz → front ticks → tube lens remap → front digits. Ticks are never dropped for label bounds; later marks overwrite only intersecting pixels. `lens` and `lensCurve` use the same nearest-row remap in the simulator and firmware; `lensSmooth` is a simulator view option. Top ticks follow the curved tube; top digits are flat on the glass.
 - URL params, applied on top of the restored session: `?fresh=1&preset=neon&t=10:09&along=0.3&across=0&settle=1&cuff=0&lens=0.6&lenscurve=1&lenssmooth=1&leather=black&grid=1&scale=3&demo=120&p.<key>=<v>`.
 - Parts sourcing research: `docs/parts-sourcing.md` (board is 57.5 × 24.5 mm; 8×4 mm acrylic half-round rod recommended).
 - **Pinned-liquid model + IMU hardening (2026-08-20, session 3)** — real accelerometer input no longer sends
@@ -157,7 +157,7 @@ else `display_init` fails at boot before `ble_init`.
   (dumps TubeState + both strips), renders the same state headless through the real `render.ts`
   (`sim/tools/render-ref.ts`, fizz off), writes `firmware/.compare/{device,ref,diff}.png` + mismatch count.
   Last run: 293 / 77184 px differ, all ≤ 1 LSB (0 above 12/255).
-- Not ported: nothing rendering-wise. Fizz uses `esp_random()`. Clock is software-only (set with `t`).
+- Not ported: cuff/gloss and lens smoothing. Fizz uses `esp_random()`. Clock is software-only (set with `t`).
 - Next: Wi-Fi SoftAP / BLE GATT param control + preset select using `PARAM_FIELDS`; NVS-persist params
   and clock; real RTC/NTP. Plan: `docs/companion-handoff.md`. Long-term backlog (power/incremental
   rendering): `KAIZEN.md`.

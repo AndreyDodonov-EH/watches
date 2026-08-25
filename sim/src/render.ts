@@ -475,7 +475,8 @@ export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt 
  *  `remaining` mode: the liquid sits at the right end and drains as time passes. The liquid layer is
  *  rendered in a mirrored frame (edge from the right, along-axis signs flipped), then flipped before
  *  panel-coordinate marks and bubbles are composited. */
-export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number): void {
+export function drawTube(idx: number, y0: number, state: TubeState, p: Params, pal: Palette, ticksN: number,
+                         lensEffect = true, lensSmooth = false): void {
   const H = pal.rows.length, L = TUBE_LENGTH_PX;
   // Mirroring flips along-axis quantities only; across-axis ones (angle, light, acrossTilt) are invariant.
   const s = p.remaining ? { ...state, fillPos: -state.fillPos, edgeLight: -state.edgeLight } : state;
@@ -566,19 +567,22 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     }
   }
 
-  // Rear marks are composited through the liquid, before bubbles. Front marks are drawn last.
+  // Rear marks are composited through the liquid, before bubbles.
   const labels = layoutLabels(y0, p, ticksN);
-  const drawScaleLayer = (onTop: boolean): void => {
+  const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
-      const rows = markSourceRows(H, onTop ? 0 : p.tickLens);
+      const rows = markSourceRows(H, p.tickLens);
       const dx = onTop ? 0 : -state.edgeLight * p.tickParallax;
       const dy = onTop ? 0 : state.acrossTilt * p.tickParallax;
       drawTicks(y0, p, ticksN, rows, markFn(y0, edges, p, onTop, p.markContrast * p.tickBright), dx, dy);
     }
+  };
+  const drawDigitLayer = (onTop: boolean): void => {
     if (labels && p.digitsOnTop === onTop)
       drawLabels(labels, markFn(y0, edges, p, onTop, p.markContrast * p.digitBright));
   };
-  drawScaleLayer(false);
+  drawTickLayer(false);
+  drawDigitLayer(false);
   const mapX = (x: number): number => p.remaining ? L - 1 - x : x;
   const span = (y: number, xa: number, xb: number, c: number): void => {
     if (p.remaining) hspan(y, L - 1 - xb, L - xa, c);
@@ -616,17 +620,44 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       span(y0 + yb, Math.round(bx - rx * 0.45), Math.round(bx + rx * 0.45), pal.bubbleRim);
     }
   }
-  drawScaleLayer(true);
+  drawTickLayer(true);
+  if (lensEffect) applyLens(y0, H, p, lensSmooth);
+  drawDigitLayer(true);
+}
+
+function applyLens(y0: number, H: number, p: Params, smooth: boolean): void {
+  const lens = Math.max(0, Math.min(1, p.lens));
+  const curve = Math.max(0.3, Math.min(3, p.lensCurve));
+  if (lens <= 0) return;
+  const sourceRow = (yd: number): number => {
+    const d = (yd + 0.5 - H / 2) / (H / 2), u = Math.abs(d);
+    const s = Math.sign(d) * ((1 - lens) * u + lens * Math.pow(u, 1 + curve * 2));
+    return Math.max(0, Math.min(H - 1, H / 2 + s * H / 2 - (smooth ? 0.5 : 0)));
+  };
+  const copyRow = (yd: number): void => {
+    const sy = sourceRow(yd);
+    const dst = (y0 + yd) * PANEL_W;
+    if (!smooth) {
+      const src = (y0 + Math.floor(sy)) * PANEL_W;
+      if (src !== dst) fb.copyWithin(dst, src, src + PANEL_W);
+      return;
+    }
+    const a = Math.floor(sy), b = Math.min(H - 1, a + 1), t = sy - a;
+    const rowA = (y0 + a) * PANEL_W, rowB = (y0 + b) * PANEL_W;
+    for (let x = 0; x < PANEL_W; x++) fb[dst + x] = blend565(fb[rowA + x], fb[rowB + x], t);
+  };
+  for (let yd = 0; yd < Math.floor(H / 2); yd++) copyRow(yd);
+  for (let yd = H - 1; yd >= Math.floor(H / 2); yd--) copyRow(yd);
 }
 
 /** Full frame. Bridge zone and margins stay black (we never draw there). */
-export function renderFrame(hours: TubeState, minutes: TubeState, p: Params): void {
+export function renderFrame(hours: TubeState, minutes: TubeState, p: Params, lensEffect = true, lensSmooth = false): void {
   fb.fill(0);
   const palH = buildPalette(p, hours.light);
   const palM = hours.light === minutes.light ? palH : buildPalette(p, minutes.light);
   const lay = tubeLayout(p);
-  drawTube(0, lay.yH, hours, p, palH, 12);
-  drawTube(1, lay.yM, minutes, p, palM, 60);
+  drawTube(0, lay.yH, hours, p, palH, 12, lensEffect, lensSmooth);
+  drawTube(1, lay.yM, minutes, p, palM, 60, lensEffect, lensSmooth);
 }
 
 /** Blit RGB565 framebuffer to a canvas ImageData (exact 565 expansion). */

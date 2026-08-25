@@ -1,4 +1,4 @@
-// Session persistence. Everything you touch in the sim — params AND view state (zoom, cuff/lens,
+// Session persistence. Everything you touch in the sim — params AND view state (zoom, cuff/gloss,
 // time mode, tilt) — is written to localStorage on every edit, debounced. Exporting JSON is therefore
 // only for checkpointing a finished look into the repo (`sim/params.json`), never to avoid losing work.
 //
@@ -38,12 +38,17 @@ export function loadSession(fresh = false): Session {
   const view: ViewState = { ...DEFAULT_VIEW, overlay: { ...DEFAULT_OVERLAY }, setClock: { ...DEFAULT_VIEW.setClock }, manual: { ...DEFAULT_VIEW.manual } };
   if (fresh) return { params, view };
   const stored = read(KEY);
+  const v = stored?.view as Partial<ViewState> | undefined;
   const storedParams = (stored?.params as Record<string, unknown> | undefined) ?? read(LEGACY_PARAMS);
   if (storedParams) Object.assign(params, migrateParams(storedParams));
-  const v = stored?.view as Partial<ViewState> | undefined;
+  const legacyOverlay = v?.overlay as (Partial<OverlayOpts> & { lens?: number; lensCurve?: number }) | undefined;
+  if ((!storedParams || !('lens' in storedParams)) && typeof legacyOverlay?.lens === 'number') params.lens = legacyOverlay.lens;
+  if ((!storedParams || !('lensCurve' in storedParams)) && typeof legacyOverlay?.lensCurve === 'number') params.lensCurve = legacyOverlay.lensCurve;
   if (v) {
     Object.assign(view, v);
     view.overlay = { ...DEFAULT_OVERLAY, ...v.overlay };
+    delete (view.overlay as any).lens;
+    delete (view.overlay as any).lensCurve;
     view.setClock = { ...DEFAULT_VIEW.setClock, ...v.setClock };
     view.manual = { ...DEFAULT_VIEW.manual, ...v.manual };
   }

@@ -1,44 +1,16 @@
-// Leather cuff + acrylic vial overlay. Purely presentational (NOT ported to firmware).
-// The vial "lens" is a per-row remap of the tube strip (barrel stretch toward the centre),
-// drawn onto a second canvas; gloss/shadow are CSS gradients on top.
-import { PANEL_W, PANEL_H } from '@spec/layout';
+// Leather cuff + acrylic vial overlay. Cuff/gloss and lens smoothing are view-only.
+import { PANEL_W } from '@spec/layout';
 import type { TubeLayout } from './render';
 
 export interface OverlayOpts {
   enabled: boolean;
-  lens: number;      // 0 = none, 1 = strong centre magnification
-  lensCurve: number; // 0.3..3: how sharply magnification falls off toward the edges (low = gentle/uniform, high = only the centre is magnified)
   slotInset: number; // px of tube hidden under leather at each end
   slotPad: number;   // px the slot is taller than the tube (negative = leather covers tube edge)
   lensSmooth: boolean; // false = crisp nearest-row remap (pixels stay sharp), true = bilinear
   gloss: number;     // 0..1 opacity of the acrylic highlight
   leather: 'brown' | 'black' | 'none';
 }
-export const DEFAULT_OVERLAY: OverlayOpts = { enabled: true, lens: 0.6, lensCurve: 1, lensSmooth: false, slotInset: 10, slotPad: -2, gloss: 0.55, leather: 'brown' };
-
-/** Lens-distort the two tube strips from `src` canvas into `dst` canvas (same size). */
-export function drawLens(src: HTMLCanvasElement, dst: HTMLCanvasElement, o: OverlayOpts, lay: TubeLayout): void {
-  const ctx = dst.getContext('2d')!;
-  ctx.imageSmoothingEnabled = o.lensSmooth || dst.width < PANEL_W;   // downsampled canvas: always filter
-  ctx.clearRect(0, 0, PANEL_W, PANEL_H);
-  ctx.drawImage(src, 0, 0);
-  if (o.lens <= 0) return;
-  const H = lay.H;
-  for (const y0 of [lay.yH, lay.yM]) {
-    ctx.clearRect(0, y0, PANEL_W, H);
-    // Destination row yd → source row. Blend of identity and a power curve: the centre is magnified by
-    // 1/(1-lens) (slope at 0 = 1-lens), the power `1+lensCurve*2` sets how abruptly the edges compress.
-    for (let yd = 0; yd < H; yd++) {
-      const d = (yd + 0.5 - H / 2) / (H / 2);               // -1..1
-      const u = Math.abs(d);
-      const s = Math.sign(d) * ((1 - o.lens) * u + o.lens * Math.pow(u, 1 + o.lensCurve * 2));
-      const ys = H / 2 + s * (H / 2);
-      // crisp: copy exactly one source row (integer); smooth: fractional source y → bilinear blend of two rows
-      const sy = o.lensSmooth ? Math.max(0, Math.min(H - 1, ys - 0.5)) : Math.max(0, Math.min(H - 1, Math.floor(ys)));
-      ctx.drawImage(src, 0, y0 + sy, PANEL_W, 1, 0, y0 + yd, PANEL_W, 1);
-    }
-  }
-}
+export const DEFAULT_OVERLAY: OverlayOpts = { enabled: true, lensSmooth: false, slotInset: 10, slotPad: -2, gloss: 0.55, leather: 'brown' };
 
 export const LEATHER_PAD_X = 40, LEATHER_PAD_Y = 60; // must match .leather inset in style.css
 

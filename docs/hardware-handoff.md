@@ -37,7 +37,7 @@ vertical magnification, glowing light-pipe ends). Cut to 46–48 mm, polish ends
 Plastock UK (£6.61/2 m, also 6 mm), acrylhaus.com (cut-to-size), AliExpress (`acrylic half round rod clear 8mm`).
 Fallbacks: Ø8 full round rod (stronger bulge), 8/6 mm thin-wall tube split lengthwise (highlight only, no lens), glass
 test tube in a trench. Real spirit-level vials are opaque-filled — reference only, never over the screen.
-The sim's top-bar `lens` / `lens curve` sliders approximate this optic; `lens≈0.5` ≈ 8 × 4 mm rod.
+The sim's top-bar `lens` / `lens curve` sliders drive the same firmware remap; `lens≈0.5` approximates an 8 × 4 mm rod.
 
 **Leather:** veg-tan, 2.8–3.5 mm. Either a belt blank strip (Krumenauer/ELW 50 mm on Amazon, €12–20, enough for 5+ cuffs;
 EU shops lederhaus.de / rickert-werkzeug.de: `Blankleder Streifen`) or a pre-made blank snap cuff (AliExpress/Etsy
@@ -83,4 +83,4 @@ slots is fragile. Cost €3–10 (JLC3DP / local FabLab).
 3. Optional: model the bezel (OpenSCAD/FreeCAD) — parameters: board 57.5 × 24.5 × 4.0, AA offset 2.35, slot dims above,
    rod groove r = 4 mm.
 4. When parts arrive: flash is already on the board (calibration face at boot) — align, mark, punch, fit rods, then
-   compare the real vial optic against the sim's `lens` setting and adjust the sim, not the hardware.
+   compare the real vial optic against the sim and push `lens` / `lensCurve` to the firmware.
