@@ -106,13 +106,13 @@ else `display_init` fails at boot before `ble_init`.
   Caveat: a stored value always beats a changed `DEFAULT_PARAMS`, so after editing defaults in code open
   **`?fresh=1`** to see them (it ignores the store without clearing it). Input source (device / serial) is not
   persisted — those need a user gesture.
-- Scale majors are longer, wider (`tickMajorWidth*`) and placed every N **units**
+- Scale minor and major widths are independently configurable (`tickMinorWidth*`, `tickMajorWidth*`); majors are placed every N **units**
   (`tickMajorEvery*` counts hours/minutes, migrated from the old "every N-th minor" via `params.v`).
   `ticksOnTop` selects the rear/bottom or front/top surface. Both use the cylinder `tickLens` and follow the whole-tube lens. Tilt-driven
   `tickParallax` projects them through the circular rear-half depth, producing a bow while keeping the outer endpoint attached to the tube silhouette. `tickEmboss` adds glass-cut highlight/shadow edges.
   `tickPosH/M` independently select the top, bottom, or both edges.
   Marks inside the liquid keep a minimum luma distance from it (`markContrast`). Contract: `throughLiquid` in `sim/src/render.ts`.
-- Layer order is rear ticks → rear digits → bubbles/fizz → front ticks → tube lens remap → front digits. Ticks are never dropped for label bounds; later marks overwrite only intersecting pixels. `lens` and `lensCurve` use the same nearest-row remap in the simulator and firmware; `lensSmooth` is a simulator view option. Top ticks follow the curved tube; top digits are flat on the glass.
+- Layer order is rear ticks → rear digits → bubbles/fizz → front ticks → tube lens remap → front digits. Ticks are never dropped for label bounds; later marks overwrite only intersecting pixels. `lens` and `lensCurve` use the same nearest-row remap in the simulator and firmware; `lensSmooth` is a simulator view option. Top ticks follow the curved tube. Top digits stay outside the tube lens; signed `topLens` independently pre-distorts them to compensate physical glass.
 - URL params, applied on top of the restored session: `?fresh=1&preset=neon&t=10:09&along=0.3&across=0&settle=1&cuff=0&lens=0.6&lenscurve=1&lenssmooth=1&leather=black&grid=1&scale=3&demo=120&p.<key>=<v>`.
 - Parts sourcing research: `docs/parts-sourcing.md` (board is 57.5 × 24.5 mm; 8×4 mm acrylic half-round rod recommended).
 - **Pinned-liquid model + IMU hardening (2026-08-20, session 3)** — real accelerometer input no longer sends

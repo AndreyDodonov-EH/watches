@@ -57,6 +57,7 @@ struct Params {
   float tickMajorEveryH;
   float tickMinorHeightH;
   float tickMajorHeightH;
+  float tickMinorWidthH;
   float tickMajorWidthH;
   uint32_t tickColorH;
   uint32_t tickMajorColorH;
@@ -66,6 +67,7 @@ struct Params {
   float tickMajorEveryM;
   float tickMinorHeightM;
   float tickMajorHeightM;
+  float tickMinorWidthM;
   float tickMajorWidthM;
   uint32_t tickColorM;
   uint32_t tickMajorColorM;
@@ -91,6 +93,7 @@ struct Params {
   float digitBottom;
   bool digitsOnTop;
   float bottomLens;
+  float topLens;
   float liquidTransparency;
   float markContrast;
   bool digitsLeadingZero;
@@ -122,8 +125,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 116
-#define PARAMS_SCHEMA_CRC 0x9466feebu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 119
+#define PARAMS_SCHEMA_CRC 0x248704c5u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -181,6 +184,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"tickMajorEveryH", 'f', (uint16_t)offsetof(Params, tickMajorEveryH)},
   {"tickMinorHeightH", 'f', (uint16_t)offsetof(Params, tickMinorHeightH)},
   {"tickMajorHeightH", 'f', (uint16_t)offsetof(Params, tickMajorHeightH)},
+  {"tickMinorWidthH", 'f', (uint16_t)offsetof(Params, tickMinorWidthH)},
   {"tickMajorWidthH", 'f', (uint16_t)offsetof(Params, tickMajorWidthH)},
   {"tickColorH", 'c', (uint16_t)offsetof(Params, tickColorH)},
   {"tickMajorColorH", 'c', (uint16_t)offsetof(Params, tickMajorColorH)},
@@ -190,6 +194,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"tickMajorEveryM", 'f', (uint16_t)offsetof(Params, tickMajorEveryM)},
   {"tickMinorHeightM", 'f', (uint16_t)offsetof(Params, tickMinorHeightM)},
   {"tickMajorHeightM", 'f', (uint16_t)offsetof(Params, tickMajorHeightM)},
+  {"tickMinorWidthM", 'f', (uint16_t)offsetof(Params, tickMinorWidthM)},
   {"tickMajorWidthM", 'f', (uint16_t)offsetof(Params, tickMajorWidthM)},
   {"tickColorM", 'c', (uint16_t)offsetof(Params, tickColorM)},
   {"tickMajorColorM", 'c', (uint16_t)offsetof(Params, tickMajorColorM)},
@@ -215,6 +220,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"digitBottom", 'f', (uint16_t)offsetof(Params, digitBottom)},
   {"digitsOnTop", 'b', (uint16_t)offsetof(Params, digitsOnTop)},
   {"bottomLens", 'f', (uint16_t)offsetof(Params, bottomLens)},
+  {"topLens", 'f', (uint16_t)offsetof(Params, topLens)},
   {"liquidTransparency", 'f', (uint16_t)offsetof(Params, liquidTransparency)},
   {"markContrast", 'f', (uint16_t)offsetof(Params, markContrast)},
   {"digitsLeadingZero", 'b', (uint16_t)offsetof(Params, digitsLeadingZero)},
@@ -248,7 +254,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  11, // v
+  12, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -301,6 +307,7 @@ static const Params PRESET_1 = {
   3.0f, // tickMajorEveryH
   27.0f, // tickMinorHeightH
   16.0f, // tickMajorHeightH
+  1.0f, // tickMinorWidthH
   2.0f, // tickMajorWidthH
   0x303030, // tickColorH
   0x303030, // tickMajorColorH
@@ -310,6 +317,7 @@ static const Params PRESET_1 = {
   3.0f, // tickMajorEveryM
   27.0f, // tickMinorHeightM
   16.0f, // tickMajorHeightM
+  1.0f, // tickMinorWidthM
   2.0f, // tickMajorWidthM
   0x303030, // tickColorM
   0x303030, // tickMajorColorM
@@ -335,6 +343,7 @@ static const Params PRESET_1 = {
   16.0f, // digitBottom
   false, // digitsOnTop
   0.35f, // bottomLens
+  0.0f, // topLens
   0.17f, // liquidTransparency
   0.0f, // markContrast
   false, // digitsLeadingZero
