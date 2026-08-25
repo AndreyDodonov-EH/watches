@@ -130,7 +130,7 @@ params UI, JSON import/export, autosave, and a Web Serial client (`sim/src/seria
 `sim/src/transport/{types,serial,ble,http}.ts` and a "Device" fieldset (connect/disconnect, status pill,
 "push params live" toggle, "pull from device", "set time from this phone", preset list). The existing
 panel then drives both the canvas and the watch — the "live mirror" UX falls out for free. Lit can come
-later when extracting a lean `companion/` build (the sim's cuff/lens overlays and IMU scope are dev-only
+later when extracting a lean `companion/` build (the sim's cuff/gloss overlays, lens smoothing, and IMU scope are dev-only
 and shouldn't ship to the watch's flash); with Vite that's a second entry point, not a second repo.
 
 Throttle: coalesce slider `input` events to ≤ 20 Hz per field, send `patch` (BLE) / `POST` (HTTP);

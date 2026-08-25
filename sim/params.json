@@ -1,5 +1,7 @@
 {
-  "v": 10,
+  "v": 11,
+  "lens": 0.6,
+  "lensCurve": 1,
   "liquid": "#346a2a",
   "liquidHi": "#b6ffa0",
   "liquidLo": "#1e7515",

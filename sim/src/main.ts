@@ -3,7 +3,7 @@ import { PANEL_W, PANEL_H } from '@spec/layout';
 import { PRESETS, presetParams, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
 import { renderFrame, blit, stepFizz, fb, fizz, loadSprites, tubeLayout } from './render';
-import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom, drawLens } from './overlay';
+import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom } from './overlay';
 import { DEFAULT_VIEW, loadSession, saveSession } from './persist';
 import { buildPanel } from './ui';
 loadSprites(`${import.meta.env.BASE_URL}assets/`);
@@ -53,7 +53,6 @@ app.innerHTML = `
   <section class="stage">
     <div id="viewport" class="viewport"><div id="panelwrap" class="panelwrap">
       <canvas id="fbc" width="${PANEL_W}" height="${PANEL_H}"></canvas>
-      <canvas id="lensc" width="${PANEL_W}" height="${PANEL_H}"></canvas>
       <canvas id="gridc" width="${PANEL_W}" height="${PANEL_H}"></canvas>
     </div></div>
     <div class="controls">
@@ -86,7 +85,6 @@ app.innerHTML = `
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const wrap = document.getElementById('panelwrap')!;
 const fbc = document.getElementById('fbc') as HTMLCanvasElement;
-const lensc = document.getElementById('lensc') as HTMLCanvasElement;
 const gridc = document.getElementById('gridc') as HTMLCanvasElement;
 const fbctx = fbc.getContext('2d')!;
 // Full-resolution frame; at scale < 1 the visible canvases are downsampled from it with area filtering
@@ -112,7 +110,7 @@ const setScale = () => {
   wrap.classList.toggle('smooth', scale < 2); // pixelated upscale only at ≥2; bilinear when shrinking
   // Below 1: canvas backing store at on-screen size, CSS size stays 536x240 so the wrap transform maps 1:1.
   const ss = Math.min(1, scale);
-  for (const c of [fbc, lensc, gridc]) {
+  for (const c of [fbc, gridc]) {
     c.width = Math.ceil(PANEL_W * ss); c.height = Math.ceil(PANEL_H * ss);
     c.style.width = `${PANEL_W}px`; c.style.height = `${PANEL_H}px`;
     const g = c.getContext('2d')!; g.setTransform(ss, 0, 0, ss, 0, 0); g.imageSmoothingQuality = 'high';
@@ -123,8 +121,8 @@ setScale();
 $('scale').oninput = (e) => { scale = +(e.target as HTMLSelectElement).value; setScale(); };
 $('ovl').oninput = (e) => { overlay.enabled = (e.target as HTMLInputElement).checked; applyOverlay(ovlDom, overlay, tubeLayout(params)); setScale(); };
 $('leather').oninput = (e) => { overlay.leather = (e.target as HTMLSelectElement).value as any; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
-$('lens').oninput = (e) => { overlay.lens = +(e.target as HTMLInputElement).value; };
-$('lenscurve').oninput = (e) => { overlay.lensCurve = +(e.target as HTMLInputElement).value; };
+$('lens').oninput = (e) => { params.lens = +(e.target as HTMLInputElement).value; pushParam('lens'); };
+$('lenscurve').oninput = (e) => { params.lensCurve = +(e.target as HTMLInputElement).value; pushParam('lensCurve'); };
 $('lenssmooth').oninput = (e) => { overlay.lensSmooth = (e.target as HTMLInputElement).checked; };
 $('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
 $('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
@@ -151,8 +149,8 @@ function syncView(): void {
   $<HTMLSelectElement>('scale').value = String(scale);
   $<HTMLInputElement>('ovl').checked = overlay.enabled;
   $<HTMLSelectElement>('leather').value = overlay.leather;
-  $<HTMLInputElement>('lens').value = String(overlay.lens);
-  $<HTMLInputElement>('lenscurve').value = String(overlay.lensCurve);
+  $<HTMLInputElement>('lens').value = String(params.lens);
+  $<HTMLInputElement>('lenscurve').value = String(params.lensCurve);
   $<HTMLInputElement>('lenssmooth').checked = overlay.lensSmooth;
   $<HTMLInputElement>('gloss').value = String(overlay.gloss);
   $<HTMLInputElement>('inset').value = String(overlay.slotInset);
@@ -235,7 +233,7 @@ const pushParam = (key?: keyof Params) => {
   if (!flushTimer) flushTimer = window.setTimeout(flush, 50);
 };
 $('pull').onclick = async () => {
-  try { Object.assign(params, await transport.getParams()); panelUi.refresh(); save(); $('serialst').textContent = 'pulled'; }
+  try { Object.assign(params, await transport.getParams()); panelUi.refresh(); syncView(); save(); $('serialst').textContent = 'pulled'; }
   catch (e) { $('serialst').textContent = String(e); }
 };
 $('pushall').onclick = async () => { if (!transport.connected) return; await transport.setParams(params); $('serialst').textContent = 'pushed'; };
@@ -245,6 +243,7 @@ $('settime').onclick = async () => { const d = new Date(); await transport.setTi
 const LAYOUT_KEYS: (keyof Params)[] = ['tubeHeight', 'hoursY', 'minutesY'];
 const panelUi = buildPanel($('panel'), params, { onChange: (key) => {
   save(); pushParam(key);
+  if (!key) syncView();
   if (!key || LAYOUT_KEYS.includes(key)) { applyOverlay(ovlDom, overlay, tubeLayout(params)); drawGrid(); }
 } });
 
@@ -266,8 +265,8 @@ const panelUi = buildPanel($('panel'), params, { onChange: (key) => {
   if (u.has('demo')) { demoSpeed = +u.get('demo')!; timeMode = 'demo'; }
   if (u.has('scale')) scale = +u.get('scale')!;
   if (u.has('cuff')) overlay.enabled = u.get('cuff') === '1';
-  if (u.has('lens')) overlay.lens = +u.get('lens')!;
-  if (u.has('lenscurve')) overlay.lensCurve = +u.get('lenscurve')!;
+  if (u.has('lens')) params.lens = +u.get('lens')!;
+  if (u.has('lenscurve')) params.lensCurve = +u.get('lenscurve')!;
   if (u.has('lenssmooth')) overlay.lensSmooth = u.get('lenssmooth') === '1';
   if (u.has('leather')) overlay.leather = u.get('leather') as typeof overlay.leather;
   if (u.has('grid')) showGrid = u.get('grid') === '1';
@@ -356,10 +355,9 @@ function frame(now: number) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.25, (now - last) / 1000); last = now;
   if (!paused) { acc += dt; while (acc >= PHYS_DT) { physics(PHYS_DT); acc -= PHYS_DT; } }
-  renderFrame(hours, minutes, params);
+  renderFrame(hours, minutes, params, true, overlay.lensSmooth);
   blit(img); fullctx.putImageData(img, 0, 0);
   fbctx.imageSmoothingEnabled = scale < 1; fbctx.drawImage(fullc, 0, 0);
-  if (overlay.enabled && overlay.lens > 0) { lensc.style.display = 'block'; drawLens(fullc, lensc, overlay, tubeLayout(params)); } else lensc.style.display = 'none';
   drawScope();
   frames++;
   if (now - fpsT > 1000) {

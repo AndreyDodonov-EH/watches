@@ -15,6 +15,8 @@ export interface Params {
   glassReflect: number;  // 0..1 faint second reflection on the lower wall
   glassRim: number;      // 0..1 brightening of the outermost rows (wall edges catch light)
   glassOverLiquid: number; // 0..1 how much of the glass specular is laid over the liquid too
+  lens: number;          // 0..1 vertical magnification applied to the completed tube strip
+  lensCurve: number;     // 0.3..3 concentration of magnification around the tube centre
   bubbleRim: string;
   // --- layout (px) ---
   tubeHeight: number;    // across-tube size, ≤ TUBE_HEIGHT_MAX
@@ -74,8 +76,8 @@ export interface Params {
   tickColorM: string;
   tickMajorColorM: string;
   tickPosM: number;
-  ticksOnTop: boolean;   // false rear/bottom surface, true front/top surface
-  tickLens: number;      // 0..1 rear-surface depth warp
+  ticksOnTop: boolean;   // false rear/bottom surface, true curved front/top surface
+  tickLens: number;      // 0..1 cylinder depth warp before the whole-tube lens
   tickParallax: number;  // px rear-surface shift per g of tilt
   tickEmboss: number;    // 0..1 glass-cut edge strength
   // --- digits along the bottom of the tube (3x5 pixel font) ---
@@ -132,7 +134,7 @@ export interface Params {
   digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
-export const PARAMS_VERSION = 10;
+export const PARAMS_VERSION = 11;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -150,6 +152,8 @@ export const DEFAULT_PARAMS: Params = {
   glassReflect: 0.22,
   glassRim: 0.4,
   glassOverLiquid: 0.4,
+  lens: 0.6,
+  lensCurve: 1,
   bubbleRim: '#b0c7a9',
   highlightH: 11,
   highlightBright: 1,
@@ -576,8 +580,8 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzDriftGain: { help: 'Fraction of rise speed steered toward the high end per g of along-tilt.', group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
   fizzAcrossGain: { help: 'Across-tilt → on-screen rise direction. 1 = rises toward the physically high edge.', group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },
   fizzFlatRise: { help: 'On-screen rise speed when the face points up (bubbles rise toward the viewer).', group: 'Bubble', label: 'fizz rise when face up', min: 0, max: 1, step: 0.05 },
-  ticksOnTop: { help: 'Off: distorted rear/bottom surface. On: flat, opaque front/top surface.', group: 'Ticks', label: 'ticks on top' },
-  tickLens: { help: 'Cylinder depth warp for rear ticks. Front ticks stay flat.', group: 'Ticks', label: 'rear lens', min: 0, max: 1, step: 0.05 },
+  ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
+  tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
   tickParallax: { help: 'Rear tick displacement at the tube centre per g of tilt. Circular depth bows the mark while its edge stays attached to the silhouette.', group: 'Ticks', label: 'rear parallax px/g', min: 0, max: 10, step: 0.25 },
   tickEmboss: { help: 'Highlight and shadow around ticks, like grooves cut into glass. 0 = flat.', group: 'Ticks', label: 'glass-cut emboss', min: 0, max: 1, step: 0.05 },
   ticksH: { help: 'Show the hours tick ladder.', group: 'Ticks · hours', label: 'show ticks' },
