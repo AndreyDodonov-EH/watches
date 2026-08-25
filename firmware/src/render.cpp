@@ -400,29 +400,54 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
 // fizz
 // ---------------------------------------------------------------------------------------------
 #define MAX_FIZZ 64
-struct Fizz { float x, y, v; };
+struct Fizz { float x, y, v; };   // px in the liquid frame
 static Fizz fizz[2][MAX_FIZZ];
 static int fizzN[2] = {0, 0};
+static float fizzLen[2] = {0, 0};   // liquid length px, set by drawTube
 static inline float frand() { return (esp_random() >> 8) / 16777216.0f; }
-static void ensureFizz(int i, const Params &p, float fill, float agitation) {
-  int want = (int)floorf(p.fizzCount * fill * (1 + (agitation < 0.05f ? 0 : agitation))); if (want > MAX_FIZZ) want = MAX_FIZZ; if (want < 0) want = 0;
-  while (fizzN[i] < want) { fizz[i][fizzN[i]++] = { frand(), frand() * H, 0.5f + frand() }; }
+static void ensureFizz(int i, const Params &p, float len, float agitation) {
+  fizzLen[i] = len;
+  int want = (int)floorf(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want > MAX_FIZZ) want = MAX_FIZZ; if (want < 0) want = 0;
+  while (fizzN[i] < want) { fizz[i][fizzN[i]++] = { frand() * len, frand() * H, 0.5f + frand() }; }
   fizzN[i] = want;
 }
+// Rises against in-plane gravity at fizzSpeed px/s on both axes; face up = slow screen-up rise. See sim stepFizz.
 void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
   if (p.remaining) along = -along;   // fizz lives in the mirrored liquid frame (see drawTube)
   const float speed = p.fizzSpeed * (1 + 3 * agitation);
   const float up = sqrtf(fmaxf(0.0f, 1 - along * along - across * across));
   const float a = clampf(across * p.fizzAcrossGain, -1, 1);
-  const float rise = (1 - fabsf(a)) * up * p.fizzFlatRise + a;   // screen-up; across + = top edge up
-  const float vx = (-along * p.fizzDriftGain * speed) / L;
-  for (int i = 0; i < 2; i++) for (int k = 0; k < fizzN[i]; k++) {
-    Fizz &f = fizz[i][k];
-    f.y -= speed * f.v * rise * dt;
-    f.x += vx * f.v * dt;
-    if (f.y < 3 || f.y >= H) { f.y = rise >= 0 ? H - 3 : 3; f.x = frand(); f.v = 0.5f + frand(); }
-    else if (f.x < 0 || f.x > 1) { f.x = vx < 0 ? 1 : 0; f.y = 3 + frand() * (H - 6); f.v = 0.5f + frand(); }
+  const float vy = -speed * ((1 - fabsf(a)) * up * p.fizzFlatRise + a);
+  const float vx = -speed * clampf(along * p.fizzDriftGain, -1, 1);
+  for (int i = 0; i < 2; i++) {
+    const float len = fizzLen[i];
+    for (int k = 0; k < fizzN[i]; k++) {
+      Fizz &f = fizz[i][k];
+      f.y += vy * f.v * dt;
+      f.x += vx * f.v * dt;
+      if (f.y < 3 || f.y >= H) { f.y = vy <= 0 ? H - 3 : 3; f.x = frand() * len; f.v = 0.5f + frand(); }
+      else if (f.x < 0 || f.x > len) { f.x = vx < 0 ? len : 0; f.y = 3 + frand() * (H - 6); f.v = 0.5f + frand(); }
+    }
   }
+}
+
+// Dest rows per source row under applyLens (1 = no stretch). See sim lensMagRows.
+static void lensMagRows(const Params &p, float *rows) {
+  for (int y = 0; y < H; y++) rows[y] = 1;
+  float lens = clampf(p.lens, -1, 1), curve = clampf(p.lensCurve, -3, 3);
+  float signedCurve = lens < 0 ? -curve : curve, strength = fabsf(lens);
+  if (strength == 0 || signedCurve == 0) return;
+  float e = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  for (int y = 0; y < H; y++) rows[y] = 0;
+  for (int yd = 0; yd < H; yd++) {
+    float d = (yd + 0.5f - H / 2.0f) / (H / 2.0f), u = fmaxf(1e-3f, fabsf(d));
+    float s = (d < 0 ? -1 : 1) * ((1 - strength) * u + strength * powf(u, e));
+    int src = (int)clampf(floorf(H / 2.0f + s * H / 2.0f), 0, H - 1);
+    rows[src] = clampf(1 / ((1 - strength) + strength * e * powf(u, e - 1)), 0.2f, 5);
+  }
+  float last = 0;
+  for (int y = 0; y < H; y++) if (rows[y] > 0) { last = rows[y]; break; }
+  for (int y = 0; y < H; y++) { if (rows[y] > 0) last = rows[y]; else rows[y] = last; }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -469,7 +494,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   float angle = s.angle;
   float xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;
   float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
-  ensureFizz(idx, p, clampf(xe / L, 0, 1), s.agitation);
+  ensureFizz(idx, p, clampf(xe - 6, 0, L), s.agitation);
 
   // 1 + 3: tube back and liquid column
   static float edges[TUBE_HEIGHT_MAX];
@@ -576,16 +601,24 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     else hspan(y, xa, xb + 1, c);
   };
 
-  // 5: fizz
-  if (p.fizz) for (int k = 0; k < fizzN[idx]; k++) {
-    const Fizz &f = fizz[idx][k];
-    int fx = (int)jround(f.x * (xe - 6)), fy = (int)jround(f.y);
-    if (fy < 0 || fy >= H) continue;
-    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
-    int sz = (int)p.fizzSize;
-    for (int dy = 0; dy < sz; dy++) for (int dx = 0; dx < sz; dx++) {
-      bool inner = sz >= 3 && dx > 0 && dy > 0 && dx < sz - 1 && dy < sz - 1;
-      px(mapX(fx + dx), y0 + fy + dy, inner ? pal.bubbleIn[fy] : pal.bubbleRim);
+  // 5: fizz — AA discs, pre-squashed by the local lens magnification (see sim step 5)
+  if (p.fizz) {
+    float mag[TUBE_HEIGHT_MAX]; lensMagRows(p, mag);
+    const float r = p.fizzSize / 2;
+    for (int k = 0; k < fizzN[idx]; k++) {
+      const Fizz &f = fizz[idx][k];
+      int fy = (int)clampf(jround(f.y), 0, H - 1);
+      if (f.x < 2 || f.x >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
+      const float m = mag[fy], ry = r / m;
+      for (int iy = (int)floorf(f.y - ry - 1); iy <= (int)ceilf(f.y + ry); iy++) {
+        if (iy < 0 || iy >= H) continue;
+        for (int ix = (int)floorf(f.x - r - 1); ix <= (int)ceilf(f.x + r); ix++) {
+          float dx = ix + 0.5f - f.x, dy = (iy + 0.5f - f.y) * m;
+          float d = sqrtf(dx * dx + dy * dy), cov = fminf(1, r + 0.5f - d);
+          if (cov <= 0) continue;
+          pxa(mapX(ix), y0 + iy, r >= 1.5f && d < r - 1 ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
+        }
+      }
     }
   }
 

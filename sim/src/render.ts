@@ -433,35 +433,40 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
   }
 }
 
-export interface Fizz { x: number; y: number; v: number; }
+export interface Fizz { x: number; y: number; v: number; }   // px in the liquid frame; v = size/speed factor
 export const fizz: Fizz[][] = [[], []];
+const fizzLen = [0, 0];   // liquid length px per tube, set by drawTube
 
-/** `fizzCount` is the count for a full tube; density stays constant as the column shortens (`fill` = liquid
- *  length / L). Shake nucleates bubbles: up to 2x with agitation, shrinking back as it decays. */
-function ensureFizz(i: number, p: Params, fill: number, agitation = 0): void {
+/** `fizzCount` is the count for a full tube; density stays constant as the column shortens.
+ *  Shake nucleates bubbles: up to 2x with agitation, shrinking back as it decays. */
+function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
   const arr = fizz[i];
-  const want = Math.min(64, Math.floor(p.fizzCount * fill * (1 + (agitation < 0.05 ? 0 : agitation))));
+  fizzLen[i] = len;
+  const want = Math.min(64, Math.floor(p.fizzCount * (len / TUBE_LENGTH_PX) * (1 + (agitation < 0.05 ? 0 : agitation))));
   const H = tubeLayout(p).H;
-  while (arr.length < want) arr.push({ x: Math.random(), y: Math.random() * H, v: 0.5 + Math.random() });
+  while (arr.length < want) arr.push({ x: Math.random() * len, y: Math.random() * H, v: 0.5 + Math.random() });
   if (arr.length > want) arr.length = want;
 }
-/** Fizz rises against gravity: along-tilt steers it toward the high end (`fizzDriftGain` = steering gain),
- *  across-tilt (`fizzAcrossGain`) turns the on-screen rise toward the high edge, shake (`agitation`) speeds it up.
- *  A bubble leaving the tube on either axis respawns at the low side of that axis (vertical tube: recycles in x). */
+/** Fizz rises against the in-plane gravity (`along`, `across`) at `fizzSpeed` px/s on both axes:
+ *  along-tilt drives it toward the high end (`fizzDriftGain`), across-tilt toward the high edge (`fizzAcrossGain`).
+ *  Out-of-plane gravity (face up) reads as a slow screen-up rise (`fizzFlatRise`); shake speeds everything up.
+ *  A bubble leaving the liquid on either axis respawns at the low side of that axis. */
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
   if (p.remaining) along = -along; // fizz lives in the mirrored liquid frame (see drawTube)
   const speed = p.fizzSpeed * (1 + 3 * agitation);
   const up = Math.sqrt(Math.max(0, 1 - along * along - across * across));
-  // On-screen rise: out-of-plane gravity reads as screen-up; across-tilt (+ = top edge up) turns it toward the physically high edge.
   const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain));
-  const rise = (1 - Math.abs(a)) * up * p.fizzFlatRise + a;
-  const vx = (-along * p.fizzDriftGain * speed) / TUBE_LENGTH_PX;
+  const vy = -speed * ((1 - Math.abs(a)) * up * p.fizzFlatRise + a);   // screen up = -y
+  const vx = -speed * Math.max(-1, Math.min(1, along * p.fizzDriftGain));
   const H = tubeLayout(p).H;
-  for (let i = 0; i < 2; i++) for (const f of fizz[i]) {
-    f.y -= speed * f.v * rise * dt;
-    f.x += vx * f.v * dt;
-    if (f.y < 3 || f.y >= H) { f.y = rise >= 0 ? H - 3 : 3; f.x = Math.random(); f.v = 0.5 + Math.random(); }
-    else if (f.x < 0 || f.x > 1) { f.x = vx < 0 ? 1 : 0; f.y = 3 + Math.random() * (H - 6); f.v = 0.5 + Math.random(); }
+  for (let i = 0; i < 2; i++) {
+    const len = fizzLen[i];
+    for (const f of fizz[i]) {
+      f.y += vy * f.v * dt;
+      f.x += vx * f.v * dt;
+      if (f.y < 3 || f.y >= H) { f.y = vy <= 0 ? H - 3 : 3; f.x = Math.random() * len; f.v = 0.5 + Math.random(); }
+      else if (f.x < 0 || f.x > len) { f.x = vx < 0 ? len : 0; f.y = 3 + Math.random() * (H - 6); f.v = 0.5 + Math.random(); }
+    }
   }
 }
 
@@ -494,7 +499,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
   // liquid into the right end brightens the cap glow, draining away from it dims it.
   const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
-  ensureFizz(idx, p, Math.max(0, Math.min(1, xe / L)), s.agitation);
+  ensureFizz(idx, p, Math.max(0, Math.min(L, xe - 6)), s.agitation);
 
   // Step 1: tube back — whole strip
   for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.tubeBackRows[ry]);
@@ -598,14 +603,23 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     else hspan(y, xa, xb + 1, c);
   };
 
-  // Step 5: fizz dots (inside liquid only)
-  if (p.fizz) for (const f of fizz[idx]) {
-    const fx = Math.round(f.x * (xe - 6)), fy = Math.round(f.y);
-    if (fx < 2 || fx >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
-    const c = pal.bubbleRim;
-    for (let dy = 0; dy < p.fizzSize; dy++) for (let dx = 0; dx < p.fizzSize; dx++) {
-      const inner = p.fizzSize >= 3 && dx > 0 && dy > 0 && dx < p.fizzSize - 1 && dy < p.fizzSize - 1;
-      px(mapX(fx + dx), y0 + fy + dy, inner ? pal.bubbleIn[fy] : c);
+  // Step 5: fizz — anti-aliased discs at float positions, squashed vertically by the local lens
+  // magnification so they come out round after applyLens (size >= 3: darker interior, bright rim).
+  if (p.fizz) {
+    const mag = lensMagRows(H, p), r = p.fizzSize / 2;
+    for (const f of fizz[idx]) {
+      const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
+      if (f.x < 2 || f.x >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
+      const m = mag[fy], ry = r / m;
+      for (let iy = Math.floor(f.y - ry - 1); iy <= Math.ceil(f.y + ry); iy++) {
+        if (iy < 0 || iy >= H) continue;
+        for (let ix = Math.floor(f.x - r - 1); ix <= Math.ceil(f.x + r); ix++) {
+          const dx = ix + 0.5 - f.x, dy = (iy + 0.5 - f.y) * m;
+          const d = Math.sqrt(dx * dx + dy * dy), cov = Math.min(1, r + 0.5 - d);
+          if (cov <= 0) continue;
+          pxa(mapX(ix), y0 + iy, r >= 1.5 && d < r - 1 ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
+        }
+      }
     }
   }
 
@@ -632,6 +646,31 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   drawTickLayer(true);
   if (lensEffect) applyLens(y0, H, p, lensSmooth);
   drawDigitLayer(true);
+}
+
+/** Dest rows per source row under `applyLens` (1 = no stretch), so pre-lens sprites can be pre-squashed. */
+let lensMagCache: { key: string; rows: Float32Array } | null = null;
+function lensMagRows(H: number, p: Params): Float32Array {
+  const key = `${H}:${p.lens}:${p.lensCurve}`;
+  if (lensMagCache && lensMagCache.key === key) return lensMagCache.rows;
+  const rows = new Float32Array(H).fill(1);
+  const lens = Math.max(-1, Math.min(1, p.lens)), curve = Math.max(-3, Math.min(3, p.lensCurve));
+  const signedCurve = lens < 0 ? -curve : curve, strength = Math.abs(lens);
+  if (strength !== 0 && signedCurve !== 0) {
+    const e = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+    rows.fill(0);
+    for (let yd = 0; yd < H; yd++) {
+      const d = (yd + 0.5 - H / 2) / (H / 2), u = Math.max(1e-3, Math.abs(d));
+      const s = Math.sign(d) * ((1 - strength) * u + strength * Math.pow(u, e));
+      const src = Math.max(0, Math.min(H - 1, Math.floor(H / 2 + s * H / 2)));
+      rows[src] = Math.max(0.2, Math.min(5, 1 / ((1 - strength) + strength * e * Math.pow(u, e - 1))));
+    }
+    let last = 0;
+    for (let y = 0; y < H; y++) if (rows[y] > 0) { last = rows[y]; break; }
+    for (let y = 0; y < H; y++) rows[y] > 0 ? (last = rows[y]) : (rows[y] = last);
+  }
+  lensMagCache = { key, rows };
+  return rows;
 }
 
 function applyLens(y0: number, H: number, p: Params, smooth: boolean): void {

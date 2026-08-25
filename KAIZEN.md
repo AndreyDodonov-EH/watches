@@ -44,6 +44,7 @@ is the dominant controllable power cost after the AMOLED itself. It also dictate
 incrementality makes every render bug harder to see, so it comes after the visuals are stable.
 
 ## Other
+- Fizz is pre-squashed only for the rendered `lens`; the physical acrylic rod magnifies it further. If it reads as ovals on the device, fold `topLens` (signed glass compensation) into `lensMagRows`.
 - Light model (`lightPhys`): physical mode ignores the light's along-axis component (it only dims, does not move the highlight) and the face-down case (`n` clamped ≥ 0).
 - `edgeLight -> lightK` is a proxy: pressure into the end fills the cap (modelled via `meniscusTiltGain`);
   the brightness change stands in for the stronger caustic of a fuller cap.
