@@ -35,7 +35,7 @@ FIELDS = [
  ('digits','bool'),('digitColor','rgb'),('digitColor2','rgb'),('digitShadow','bool'),('digitShadowColor','rgb'),
  ('digitTint','rgb'),('digitTintAmount','float'),('digitTone','float'),('digitFont','float'),
  ('digitScaleX','float'),('digitScaleY','float'),('digitScaleXMin','float'),('digitScaleYMin','float'),
- ('digitBottomMin','float'),('digitBottom','float'),('digitsOnTop','bool'),('bottomLens','float'),('topLens','float'),
+ ('digitBottomMin','float'),('digitBottom','float'),('digitsOnTop','bool'),('bottomLens','float'),('topLens','float'),('topParallax','float'),
  ('liquidTransparency','float'),('markContrast','float'),('digitsLeadingZero','bool'),
  ('digitMinuteStep','float'),('digitHourStep','float'),
  ('fillK','float'),('fillDamp','float'),('fillSloshGain','float'),('angleK','float'),('angleDamp','float'),
