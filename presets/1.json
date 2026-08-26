@@ -71,6 +71,7 @@
   "ticksOnTop": false,
   "tickLens": 0.35,
   "tickParallax": 3,
+  "tickDryLens": 0.3,
   "tickEmboss": 0.25,
   "digits": true,
   "digitColor": "#e3e3e3",

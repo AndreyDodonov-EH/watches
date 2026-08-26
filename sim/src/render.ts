@@ -377,8 +377,10 @@ function drawLabels(lb: Labels, mark: MarkFn): void {
 /** Tick ladder. Majors are both longer AND wider than minors, and are placed every
  *  `tickMajorEvery` UNITS (hours / minutes), not every N-th minor, so they stay put
  *  when the minor step changes. */
-function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array, mark: MarkFn,
-  dx = 0, dy = 0): void {
+/** `wetRows`/`dryRows`: source-row tables for ticks behind liquid vs behind air (a liquid-filled
+ *  cylinder lenses far more than an empty one). `edges` null = every tick uses `wetRows` and full parallax. */
+function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, dryRows: Int16Array,
+  edges: Float32Array | null, mark: MarkFn, dxFull = 0, dyFull = 0): void {
   const minutes = ticksN === 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   const H = tubeLayout(p).H, L = TUBE_LENGTH_PX;
@@ -392,7 +394,9 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
   const cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   const cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   const pos = Math.round(minutes ? p.tickPosM : p.tickPosH);
-  const warpedRange = (sourceA: number, sourceB: number): [number, number] => {
+  const dry = Math.max(0, Math.min(1, p.tickDryLens));
+  const edgeMid = edges ? edges[H >> 1] : 0;
+  const warpedRange = (sourceRows: Int16Array, sourceA: number, sourceB: number): [number, number] => {
     let a = H, b = -1;
     for (let ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceA && sourceRows[ry] <= sourceB) {
       a = Math.min(a, ry); b = Math.max(b, ry);
@@ -400,8 +404,9 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
     return [a, b];
   };
   const emboss = Math.max(0, Math.min(1, p.tickEmboss));
-  const drawSegment = (x0: number, w: number, c: number, range: [number, number], top: boolean): void => {
+  const drawSegment = (x0: number, w: number, c: number, range: [number, number], top: boolean, k: number): void => {
     if (range[1] < 0) return;
+    const dx = dxFull * k, dy = dyFull * k;
     const outer = top ? 0 : H - 1;
     const inner = Math.max(0, Math.min(H - 1, top ? range[1] : range[0]));
     const dir = inner >= outer ? 1 : -1;
@@ -431,9 +436,11 @@ function drawTicks(y0: number, p: Params, ticksN: number, sourceRows: Int16Array
     const major = majorEvery > 0 && i % majorEvery === 0;
     const h = major ? hMaj : hMin; if (h <= 0) continue;
     const w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1), c = major ? cMaj : cMin;
-    const topRange = warpedRange(0, h - 1), botRange = warpedRange(H - h, H - 1);
-    if (pos !== 1) drawSegment(x0, w, c, topRange, true);
-    if (pos !== 0) drawSegment(x0, w, c, botRange, false);
+    const wet = !edges || (p.remaining ? xc >= edgeMid : xc < edgeMid);
+    const rows = wet ? wetRows : dryRows, k = wet ? 1 : dry;
+    const topRange = warpedRange(rows, 0, h - 1), botRange = warpedRange(rows, H - h, H - 1);
+    if (pos !== 1) drawSegment(x0, w, c, topRange, true, k);
+    if (pos !== 0) drawSegment(x0, w, c, botRange, false, k);
   }
 }
 
@@ -589,10 +596,12 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const labels = layoutLabels(y0, p, ticksN, state.acrossTilt, state.fillTarget);
   const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
-      const rows = markSourceRows(H, p.tickLens);
+      const wetRows = markSourceRows(H, p.tickLens);
+      const dryRows = onTop ? wetRows : markSourceRows(H, p.tickLens * Math.max(0, Math.min(1, p.tickDryLens)));
       const dx = onTop ? 0 : -state.edgeLight * p.tickParallax;
       const dy = onTop ? 0 : state.acrossTilt * p.tickParallax;
-      drawTicks(y0, p, ticksN, rows, markFn(y0, edges, p, onTop, p.markContrast * p.tickBright), dx, dy);
+      drawTicks(y0, p, ticksN, wetRows, dryRows, onTop ? null : edges,
+        markFn(y0, edges, p, onTop, p.markContrast * p.tickBright), dx, dy);
     }
   };
   const drawDigitLayer = (onTop: boolean): void => {

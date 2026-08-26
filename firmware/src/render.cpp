@@ -345,8 +345,9 @@ static void drawLabels(int y0, const Labels &lb, const Mark &mark) {
   }
 }
 
-static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *sourceRows, const Mark &mark,
-                      float dx = 0, float dy = 0) {
+// wetRows/dryRows: source-row tables behind liquid vs behind air; edges null = all wet, full parallax.
+static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
+                      const float *edges, const Mark &mark, float dxFull = 0, float dyFull = 0) {
   bool minutes = ticksN == 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   int step = (int)fmaxf(1, jround(minutes ? p.tickStepM : p.tickStepH));
@@ -359,7 +360,9 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
   uint16_t cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   uint16_t cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   int pos = (int)jround(minutes ? p.tickPosM : p.tickPosH);
-  auto warpedRange = [&](int sourceA, int sourceB, int &a, int &b) {
+  float dryK = clampf(p.tickDryLens, 0, 1);
+  float edgeMid = edges ? edges[H >> 1] : 0;
+  auto warpedRange = [&](const int16_t *sourceRows, int sourceA, int sourceB, int &a, int &b) {
     a = H; b = -1;
     for (int ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceA && sourceRows[ry] <= sourceB) {
       if (ry < a) a = ry;
@@ -367,8 +370,9 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
     }
   };
   float emboss = clampf(p.tickEmboss, 0, 1);
-  auto drawSegment = [&](int x0, int w, uint16_t c, int rangeA, int rangeB, bool top) {
+  auto drawSegment = [&](int x0, int w, uint16_t c, int rangeA, int rangeB, bool top, float k) {
     if (rangeB < 0) return;
+    float dx = dxFull * k, dy = dyFull * k;
     int outer = top ? 0 : H - 1;
     int inner = top ? rangeB : rangeA; if (inner < 0) inner = 0; if (inner >= H) inner = H - 1;
     int dir = inner >= outer ? 1 : -1;
@@ -399,9 +403,11 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *source
     int h = major ? hMaj : hMin; if (h <= 0) continue;
     int w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
     int topA, topB, botA, botB;
-    warpedRange(0, h - 1, topA, topB); warpedRange(H - h, H - 1, botA, botB);
-    if (pos != 1) drawSegment(x0, w, c, topA, topB, true);
-    if (pos != 0) drawSegment(x0, w, c, botA, botB, false);
+    bool wet = !edges || (p.remaining ? xc >= edgeMid : xc < edgeMid);
+    const int16_t *rows = wet ? wetRows : dryRows; float k = wet ? 1 : dryK;
+    warpedRange(rows, 0, h - 1, topA, topB); warpedRange(rows, H - h, H - 1, botA, botB);
+    if (pos != 1) drawSegment(x0, w, c, topA, topB, true, k);
+    if (pos != 0) drawSegment(x0, w, c, botA, botB, false, k);
   }
 }
 
@@ -592,12 +598,13 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   bool haveLabels = layoutLabels(idx, y0, p, ticksN, st.acrossTilt, st.fillTarget, labels);
   auto drawTickLayer = [&](bool onTop) {
     if (p.ticksOnTop == onTop) {
-      int16_t rows[TUBE_HEIGHT_MAX];
-      markSourceRows(H, p.tickLens, rows);
+      int16_t wetRows[TUBE_HEIGHT_MAX], dryRows[TUBE_HEIGHT_MAX];
+      markSourceRows(H, p.tickLens, wetRows);
+      if (!onTop) markSourceRows(H, p.tickLens * clampf(p.tickDryLens, 0, 1), dryRows);
       Mark tickMark { y0, edges, &p, onTop, p.markContrast * p.tickBright };
       float dx = onTop ? 0 : -st.edgeLight * p.tickParallax;
       float dy = onTop ? 0 : st.acrossTilt * p.tickParallax;
-      drawTicks(y0, p, ticksN, rows, tickMark, dx, dy);
+      drawTicks(y0, p, ticksN, wetRows, onTop ? wetRows : dryRows, onTop ? nullptr : edges, tickMark, dx, dy);
     }
   };
   auto drawDigitLayer = [&](bool onTop) {

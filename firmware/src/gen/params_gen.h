@@ -76,6 +76,7 @@ struct Params {
   bool ticksOnTop;
   float tickLens;
   float tickParallax;
+  float tickDryLens;
   float tickEmboss;
   bool digits;
   uint32_t digitColor;
@@ -131,8 +132,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 125
-#define PARAMS_SCHEMA_CRC 0x8c7839a4u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 126
+#define PARAMS_SCHEMA_CRC 0xed9568d2u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -209,6 +210,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"ticksOnTop", 'b', (uint16_t)offsetof(Params, ticksOnTop)},
   {"tickLens", 'f', (uint16_t)offsetof(Params, tickLens)},
   {"tickParallax", 'f', (uint16_t)offsetof(Params, tickParallax)},
+  {"tickDryLens", 'f', (uint16_t)offsetof(Params, tickDryLens)},
   {"tickEmboss", 'f', (uint16_t)offsetof(Params, tickEmboss)},
   {"digits", 'b', (uint16_t)offsetof(Params, digits)},
   {"digitColor", 'c', (uint16_t)offsetof(Params, digitColor)},
@@ -338,6 +340,7 @@ static const Params PRESET_1 = {
   false, // ticksOnTop
   0.35f, // tickLens
   3.0f, // tickParallax
+  0.3f, // tickDryLens
   0.25f, // tickEmboss
   true, // digits
   0xE3E3E3, // digitColor
