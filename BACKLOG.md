@@ -22,7 +22,6 @@ probably another "digit" in the same font
 - if we are ever able to measure pulse - end of liquid pumping as pulse
 - different warping of glass and of liquid from glass for digits/ticks lying at the bottom
 - work on bubble(s) realism, useless now
-- free liquid mode unless rotating wrist to view time
 
 ## General
 - Connection over Wi-Fi? How? Strich/QR displayed?

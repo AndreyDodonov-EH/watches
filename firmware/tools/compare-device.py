@@ -57,8 +57,8 @@ def main():
             r = rows[t * TH + y]
             dev[(Y0[t] + y) * W:(Y0[t] + y + 1) * W] = [int(r[i:i + 4], 16) for i in range(0, W * 4, 4)]
     f = list(map(float, st))
-    key = ['fillTarget', 'fillPos', 'angle', 'light', 'edgeLight', 'agitation']
-    hours = dict(zip(key, f[:6]), fillVel=0, angleVel=0, acrossVel=0); minutes = dict(zip(key, f[6:]), fillVel=0, angleVel=0, acrossVel=0)
+    key = ['fillTarget', 'fillPos', 'angle', 'light', 'edgeLight', 'agitation', 'acrossTilt', 'cap', 'filmFree', 'filmHome', 'slugPos', 'reading']
+    n = len(key); hours = dict(zip(key, f[:n])); minutes = dict(zip(key, f[n:2 * n]))  # render-ref fills the rest from newTube()
     job = {'params': params, 'hours': hours, 'minutes': minutes}
     font = int(round(params['digitFont']))
     if font >= 5:

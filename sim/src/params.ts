@@ -31,8 +31,14 @@ export interface Params {
   shadeDepth: number;    // 0..1, how dark the bottom rows get (cylinder shading)
   meniscusDepth: number; // px, how far the liquid climbs the wall at top/bottom vs centre (>0 concave)
   meniscusPow: number;   // curve exponent (2 = parabola)
-  meniscusTiltGain: number; // 0..1: tilt into the end bulges the drop (deeper meniscus), away flattens it
+  meniscusTiltGain: number; // tilt into the end pushes the surface centre out (convex bulge), away hollows it; × |meniscusDepth|
   meniscusAsym: number;  // 0..1: across-tilt sags the bulge onto the low wall (its contact line extends, the high one retracts)
+  meniscusLens: number;  // -1..1 pre-warp of the cap profile against the physical glass (like topLens); negative compensates magnification
+  meniscusK: number;     // 1/s^2 spring of the free surface between the pinned contact lines
+  meniscusDamp: number;  // 1/s damping of that spring (low = visible wobble after a flick)
+  meniscusInertia: number; // 0..10 how much edge forcing (flick kick, slug acceleration) bulges the surface centre ahead of the contact lines
+  contactLag: number;    // 0..3 contact-angle hysteresis: px the contact lines trail the centre per 10 px/s of edge speed
+  wetFilm: number;       // px trailing wet film a receding edge leaves on the glass
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
   frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
   edgeGlow: number;      // px, dim glow fading out past the fill edge (0 = off)
@@ -116,6 +122,16 @@ export interface Params {
   digitMinuteStart: number; // first labelled minute (0 = step)
   digitsLastOnlyH: boolean; // hours: one label only, the last passed hour (none before 1)
   digitsLastOnlyM: boolean; // minutes: one label only, last passed multiple of digitMinuteStep
+  // --- free liquid: the column slides as a slug; a wrist turn into the reading pose parks it home ---
+  freeLiquid: boolean;   // false = pinned column (time always shown)
+  freeGain: number;      // px/s^2 per g of along-tilt
+  freeDamp: number;      // 1/s viscous drag
+  freeBounce: number;    // 0..1 restitution at the tube ends
+  freeHomeK: number;     // 1/s^2 pull toward the home end while reading (critically damped)
+  readFaceUp: number;    // 0..1 min face-up gravity component of the reading pose
+  readAlongMax: number;  // g, max |along| of the reading pose
+  readTurn: number;      // dps of gyro energy that counts as a wrist turn (0 = pose alone reads)
+  readHold: number;      // s the time stays shown after the turn, while the pose holds
   // --- physics (fixed-step 50 Hz) ---
   fillK: number;         // spring stiffness of fill-edge position (1/s^2)
   fillDamp: number;      // damping ratio-ish (1/s)
@@ -177,6 +193,12 @@ export const DEFAULT_PARAMS: Params = {
   meniscusPow: 3.2,
   meniscusTiltGain: 0.55,
   meniscusAsym: 0.5,
+  meniscusLens: 0,
+  meniscusK: 180,
+  meniscusDamp: 9,
+  meniscusInertia: 6,
+  contactLag: 0.5,
+  wetFilm: 6,
   edgeSoft: 2.6,
   frontBright: 21,
   edgeGlow: 15,
@@ -237,6 +259,15 @@ export const DEFAULT_PARAMS: Params = {
   digitMinuteStart: 0,
   digitsLastOnlyH: false,
   digitsLastOnlyM: false,
+  freeLiquid: false,
+  freeGain: 500,
+  freeDamp: 1.5,
+  freeBounce: 0.25,
+  freeHomeK: 30,
+  readFaceUp: 0.7,
+  readAlongMax: 0.3,
+  readTurn: 80,
+  readHold: 5,
   fillK: 246,
   fillDamp: 14.8,
   fillSloshGain: 5.5,
@@ -497,6 +528,29 @@ export const PRESET_CHAMPAGNE: Partial<Params> = {
   brightness: 0.95, liquidBright: 1.05, tickBright: 1, digitBright: 0.95,
 };
 
+/** Free liquid: the column slides as a slug and only parks to show the time on a wrist turn into the reading pose
+ *  (readFaceUp 1 = never, i.e. always free — lower it to ~0.75 to enable reads). Dark bottle green, low-climb wetting
+ *  liquid with a watery surface (K 460, ζ≈0.12), copper gauge numerals behind the liquid. Saved 2026-08-26. */
+const PRESET_FREE: Partial<Params> = {
+  tubeHeight: 56, hoursY: 9, minutesY: 180, liquid: '#1f602f', liquidHi: '#1a6528', liquidLo: '#214002',
+  tubeBack: '#10140f', glassBody: 0.03, glassHiBright: 0.15, glassReflect: 0.11, glassRim: 0.13,
+  glassOverLiquid: 0.25, lens: -0.4, lensCurve: 0.6, bubbleRim: '#255917', highlightH: 26, highlightBright: 0.15,
+  highlightSharp: 3, highlightInset: 31, shadeDepth: 0.74, meniscusDepth: 3.5, meniscusPow: 3.6,
+  meniscusTiltGain: 0.9, meniscusAsym: 1.05, meniscusK: 460, meniscusDamp: 5, meniscusInertia: 2, contactLag: 0.9,
+  wetFilm: 15, edgeSoft: 0.7, frontBright: 23, edgeGlow: 40, glowStrength: 0.21, edgeLightGain: 0.55, bubbleW: 28,
+  bubbleH: 20, bubbleGap: 18, bubbleY: 0.28, bubbleTiltGain: 14, bubbleDark: 0.55, fizzCount: 19, fizzSize: 4.5,
+  fizzSizeVar: 0.7, fizzShadeOff: 0.55, fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2,
+  fizzSpeed: 13, tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22, tickMinorWidthH: 2,
+  tickMajorWidthH: 3, tickColorH: '#243120', tickMajorColorH: '#243120', tickPosH: 1, tickMajorEveryM: 0,
+  tickMinorHeightM: 5, tickMajorHeightM: 28, tickMinorWidthM: 2, tickColorM: '#243120', tickMajorColorM: '#243120',
+  tickPosM: 1, tickLens: 0.3, tickParallax: 4.75, tickDryLens: 1, tickEmboss: 0.55, digitFont: 7,
+  digitTint: '#827c40', digitTintAmount: 0.9, digitTone: -0.1, digitScaleX: 3.5, digitScaleY: 3.25,
+  digitScaleXMin: 2.5, digitScaleYMin: 3, digitBottomMin: 17, digitBottom: 17, bottomLens: 0.45, digitDryLens: 0.35,
+  topLens: 0.35, topParallax: -10, liquidTransparency: 0.47, markContrast: 34, digitMinuteStep: 5, digitHourStep: 1,
+  freeLiquid: true, freeGain: 990, freeDamp: 0.8, freeHomeK: 150, readFaceUp: 1, readTurn: 125, readHold: 11,
+  fillK: 756, fillDamp: 40, lightPhys: 1, brightness: 1, liquidBright: 2, digitBright: 1.53,
+};
+
 export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; legacy?: boolean }
 
 /** Everything the preset picker and `?preset=<id>` offer. */
@@ -510,6 +564,7 @@ export const PRESETS: PresetEntry[] = [
   { id: 'cryo', name: 'Cryo oxygen', note: 'pale blue, boiling, frosted wall', p: PRESET_CRYO },
   { id: 'ink', name: 'India ink', note: 'matte black, enamel numerals, panel mostly off', p: PRESET_INK },
   { id: 'champagne', name: 'Champagne', note: 'pale gold, dense bead, amber resin numerals', p: PRESET_CHAMPAGNE },
+  { id: 'free', name: 'Free liquid', note: 'bottle green slug that slides with the wrist; parks to show time on a raise', p: PRESET_FREE },
   { id: 'user1', name: 'User v1', note: 'legacy: deep green, wide highlight', p: PRESET_USER_V1, legacy: true },
   { id: 'mint', name: 'Mint (spec)', note: 'legacy: spec colour', p: PRESET_MINT, legacy: true },
   { id: 'neon', name: 'Neon (ref photo)', note: 'legacy: reference photo green', p: PRESET_NEON, legacy: true },
@@ -584,8 +639,14 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   shadeDepth: { help: 'How dark the bottom rows get (cylinder shading).', group: 'Shape', min: 0, max: 1, step: 0.01 },
   meniscusDepth: { help: 'How far the liquid climbs the wall at top/bottom vs centre, px. >0 concave, <0 convex.', group: 'Shape', min: -30, max: 40, step: 0.5 },
   meniscusPow: { help: 'Meniscus curve exponent. 2 = parabola.', group: 'Shape', min: 0.5, max: 6, step: 0.1 },
-  meniscusTiltGain: { help: 'Tilt into the end bulges the drop (deeper meniscus); away flattens it.', group: 'Shape', label: 'meniscus bulge vs tilt', min: -1, max: 3, step: 0.05 },
+  meniscusTiltGain: { help: 'Gravity pressing the liquid into this end pushes the surface centre outward (convex bulge), draining hollows it — for concave and convex liquids alike. In px of |meniscusDepth| per g. With free liquid the two ends get opposite signs: the lower end bulges, the upper end hollows.', group: 'Shape', label: 'meniscus bulge vs tilt', min: -1, max: 3, step: 0.05 },
   meniscusAsym: { help: 'Across-tilt sags the bulge onto the low wall: its contact line extends, the high one retracts.', group: 'Shape', label: 'meniscus sag per g across', min: 0, max: 2, step: 0.05 },
+  meniscusLens: { help: 'Pre-warp of the cap profile against the physical glass, same convention as the front-digits lens: negative undoes the vertical magnification so the drawn cap keeps its shape through the rod. Set it equal to topLens.', group: 'Shape', label: 'meniscus vs glass lens', min: -1, max: 1, step: 0.05 },
+  meniscusK: { help: 'Spring of the free surface between the pinned contact lines, 1/s². Lower = slower, larger wobble.', group: 'Meniscus dynamics', label: 'surface spring K', min: 10, max: 800, step: 5 },
+  meniscusDamp: { help: 'Damping of the surface wobble, 1/s. Below ~2·√K it rings after a flick.', group: 'Meniscus dynamics', label: 'surface damping', min: 0, max: 60, step: 0.5 },
+  meniscusInertia: { help: 'How much the forcing on the edge (flick kick, free-slug acceleration) bulges the surface centre ahead of the contact lines: a flick makes the cap bulge, then ring at the surface spring. Hard-capped at 12 px.', group: 'Meniscus dynamics', label: 'bulge per edge forcing', min: 0, max: 10, step: 0.1 },
+  contactLag: { help: 'Contact-angle hysteresis: an advancing edge drags its contact lines behind the centre, a receding one leaves them clinging. px per 10 px/s of edge speed.', group: 'Meniscus dynamics', label: 'contact-line lag', min: 0, max: 3, step: 0.05 },
+  wetFilm: { help: 'Trailing wet film a receding edge leaves on the glass, px at full speed (25 px/s); brightest at the walls, drains in ~0.5 s.', group: 'Meniscus dynamics', label: 'wet film px', min: 0, max: 30, step: 1 },
   edgeSoft: { help: 'Anti-aliased edge width, px. 0 = hard pixel edge.', group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { help: 'Band just behind the fill edge blended toward liquidHi (bright convex cap), px.', group: 'Shape', min: 0, max: 40, step: 1 },
   edgeGlow: { help: 'Dim glow fading out past the fill edge, px. 0 = off.', group: 'Shape', min: 0, max: 40, step: 1 },
@@ -673,6 +734,15 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   digitScaleXMin: { help: 'Minutes tube horizontal scale.', group: 'Digits · minutes', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
   digitScaleYMin: { help: 'Minutes tube vertical scale.', group: 'Digits · minutes', label: 'scale Y', min: 0.5, max: 6, step: 0.25 },
   digitBottomMin: { help: 'Minutes tube: px from the tube bottom edge to the digit baseline.', group: 'Digits · minutes', label: 'baseline from bottom', min: 0, max: 40, step: 1 },
+  freeLiquid: { help: 'The column is a free slug that slides along the tube under gravity. A wrist turn into the reading pose (face up, tube level) parks it at its home end for readHold seconds so the time edge is true; otherwise it goes where gravity takes it.', group: 'Free liquid', label: 'free liquid' },
+  freeGain: { help: 'Slug acceleration per g of along-tilt, px/s².', group: 'Free liquid', label: 'gravity px/s²/g', min: 0, max: 2000, step: 10 },
+  freeDamp: { help: 'Viscous drag on the slug, 1/s. Higher = syrup.', group: 'Free liquid', label: 'drag', min: 0, max: 20, step: 0.1 },
+  freeBounce: { help: 'Restitution when the slug hits a tube end. 0 = splat, 1 = elastic.', group: 'Free liquid', label: 'end bounce', min: 0, max: 1, step: 0.05 },
+  freeHomeK: { help: 'Pull toward the home end while reading, 1/s² (critically damped).', group: 'Free liquid', label: 'home pull K', min: 1, max: 300, step: 1 },
+  readFaceUp: { help: 'Reading pose: minimum face-up component of gravity (1 = perfectly flat).', group: 'Free liquid', label: 'pose: face-up min', min: 0, max: 1, step: 0.05 },
+  readAlongMax: { help: 'Reading pose: maximum along-tube tilt, g.', group: 'Free liquid', label: 'pose: |along| max g', min: 0, max: 1, step: 0.05 },
+  readTurn: { help: 'Gyro energy (dps, both axes) that counts as the wrist turn which arms a read. 0 = the pose alone reads (sliders have no gyro: use the raise-wrist button or 0).', group: 'Free liquid', label: 'turn dps to arm', min: 0, max: 400, step: 5 },
+  readHold: { help: 'Seconds the time stays shown after the turn while the pose holds.', group: 'Free liquid', label: 'read hold s', min: 0.5, max: 30, step: 0.5 },
   fillK: { help: 'Spring stiffness of fill-edge position, 1/s².', group: 'Physics', min: 1, max: 800, step: 1 },
   fillDamp: { help: 'Damping of the fill-edge spring, 1/s.', group: 'Physics', min: 0, max: 40, step: 0.1 },
   fillSloshGain: { help: 'Fill-edge shift per g of along-tube acceleration, px.', group: 'Physics', label: 'slosh px/g (capped 30)', min: 0, max: 30, step: 0.5 },

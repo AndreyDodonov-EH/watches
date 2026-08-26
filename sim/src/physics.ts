@@ -1,6 +1,7 @@
 // Fixed-timestep (50 Hz) liquid dynamics — two spring-dampers per tube.
 // Mirrors what the firmware will run. No rendering here.
 import type { Params } from './params';
+import { TUBE_LENGTH_PX } from '../../spec/layout';
 
 export const PHYS_HZ = 50;
 export const PHYS_DT = 1 / PHYS_HZ;
@@ -20,6 +21,8 @@ export interface TiltInput {
 export const FILL_SLOSH_MAX_PX = 30;  // |fillPos| cap
 export const ANGLE_HARD_MAX_DEG = 20; // |angle| cap (params.angleMax tightens it, never widens)
 export const LIGHT_MAX_DEG = 85;      // |light| cap
+export const CAP_DYN_MAX_PX = 12;     // |cap| cap: dynamic meniscus bulge / hollow
+export const FILM_FULL_PX_S = 25;     // edge speed (px/s) at which the trailing wet film is fully drawn
 
 export interface TubeState {
   fillTarget: number;  // 0..1 from time
@@ -32,10 +35,33 @@ export interface TubeState {
   agitation: number;   // 0..1, gyro energy with fast attack / slow decay: fizz speed, edge glow
   edgeLight: number;   // -1..1, slow along-tilt follower — brightens/dims the fill edge (render only)
   acrossTilt: number;  // -1..1, slow across-tilt follower — meniscus sag toward the low wall (render only)
+  // Meniscus dynamics: the wall contact lines are pinned by capillarity, the free surface between
+  // them is not. `cap` = px the surface centre leads the contact lines in +x (panel frame): an
+  // impulse bulges it ahead (inertia), a moving edge drags its contact lines behind (hysteresis).
+  cap: number;
+  capVel: number;
+  // Trailing wet film 0..1 left on the glass by a receding edge (drains away in ~0.5 s).
+  filmFree: number;    // the time edge receding toward its home end
+  filmHome: number;    // the home edge (free-liquid only) receding toward the time edge
+  // Free liquid: the column is a slug that slides along the tube; `slugPos` = px of its home-end
+  // edge from the tube's left end (panel frame), 0 when pinned. `reading` 1 = the pose pull holds
+  // it home so the time edge is true; 0 = free.
+  slugPos: number;
+  slugVel: number;
+  reading: number;
+  motion: number;      // 0..1 gyro-energy follower with slow decay: "a turn was just made"
+  armed: boolean;      // a turn was made and not yet consumed by a read
+  readTimer: number;   // s left of the current read
 }
 
 export function newTube(): TubeState {
-  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, light: 0, lightVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0 };
+  return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, light: 0, lightVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0,
+    cap: 0, capVel: 0, filmFree: 0, filmHome: 0, slugPos: 0, slugVel: 0, reading: 1, motion: 0, armed: false, readTimer: 0 };
+}
+
+/** Length of the liquid column, px. */
+export function columnLen(fillTarget: number, p: Params): number {
+  return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX;
 }
 
 /** Highlight angle the light settles at. Physical: the light is world-up; its direction in the
@@ -58,12 +84,66 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
 
   // Fill-edge slosh: static offset proportional to along-tilt; spring returns to rest.
   const fillRest = Math.max(-FILL_SLOSH_MAX_PX, Math.min(FILL_SLOSH_MAX_PX, along * p.fillSloshGain));
-  const fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel
-    + inp.gyroAcross * p.angleGyroGain * 4; // quick flicks kick the edge
+  const fillKick = inp.gyroAcross * p.angleGyroGain * 4; // quick flicks kick the edge
+  const fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
   s.fillVel += fillAcc * dt;
   s.fillPos += s.fillVel * dt;
   if (s.fillPos > FILL_SLOSH_MAX_PX) { s.fillPos = FILL_SLOSH_MAX_PX; s.fillVel = Math.min(0, s.fillVel); }
   if (s.fillPos < -FILL_SLOSH_MAX_PX) { s.fillPos = -FILL_SLOSH_MAX_PX; s.fillVel = Math.max(0, s.fillVel); }
+
+  // Reading gesture: a turn (gyro energy above readTurn) followed by the reading pose — face up,
+  // tube level — starts a read of readHold seconds; leaving the pose ends it. readTurn <= 0: the
+  // pose alone reads. Pinned liquid is always "reading".
+  const turn = Math.abs(inp.gyroAlong) + Math.abs(inp.gyroAcross);
+  const motionT = p.readTurn <= 0 ? 1 : Math.min(1, turn / p.readTurn);
+  s.motion += (motionT - s.motion) * Math.min(1, (motionT > s.motion ? 20 : 1.5) * dt);
+  const faceUp = Math.sqrt(Math.max(0, 1 - along * along - across * across));
+  const inPose = faceUp >= p.readFaceUp && Math.abs(along) <= p.readAlongMax;
+  if (s.motion > 0.5) s.armed = true;
+  if (!inPose) s.readTimer = 0;
+  else if (s.armed && s.motion < 0.25) { s.armed = false; s.readTimer = p.readHold; }
+  s.readTimer = Math.max(0, s.readTimer - dt);
+  s.reading += ((!p.freeLiquid || s.readTimer > 0 ? 1 : 0) - s.reading) * Math.min(1, 4 * dt);
+
+  // Free liquid: the slug slides under the along component of gravity with viscous drag and
+  // bounces off the tube ends; while reading, a critically damped pull parks it at its home end.
+  const travel = Math.max(0, TUBE_LENGTH_PX - columnLen(s.fillTarget, p));
+  const home = p.remaining ? travel : 0;
+  let slugAcc = 0;
+  if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
+  else {
+    slugAcc = along * p.freeGain - p.freeDamp * s.slugVel
+      + s.reading * (-p.freeHomeK * (s.slugPos - home) - 2 * Math.sqrt(p.freeHomeK) * s.slugVel);
+    const v0 = s.slugVel;
+    s.slugVel += slugAcc * dt;
+    s.slugPos += s.slugVel * dt;
+    // At an end the wall carries the load (no forcing on the surface); the hit itself is an impulse.
+    if (s.slugPos <= 0 || s.slugPos >= travel) {
+      const hit = s.slugPos <= 0 ? s.slugVel < 0 : s.slugVel > 0;
+      s.slugPos = s.slugPos <= 0 ? 0 : travel;
+      if (hit) s.slugVel = -s.slugVel * p.freeBounce;
+      slugAcc = hit ? (s.slugVel - v0) / dt * 0.25 : 0;
+    }
+  }
+
+  // Meniscus dynamics (panel frame, +x): the surface centre is pushed ahead of the pinned contact
+  // lines by the forcing on the edge — the flick kick and the slug's acceleration, not the fill
+  // spring's own restoring force, which is what keeps the column pinned — and by the edge's velocity
+  // (contact-angle hysteresis: an advancing line lags, a receding one clings); springs back with a wobble.
+  const edgeVel = s.fillVel + s.slugVel, edgeAcc = fillKick + slugAcc;
+  const capRest = p.contactLag * edgeVel * 0.1;
+  const capAcc = -p.meniscusK * (s.cap - capRest) - p.meniscusDamp * s.capVel + p.meniscusInertia * edgeAcc;
+  s.capVel += capAcc * dt;
+  s.cap += s.capVel * dt;
+  if (s.cap > CAP_DYN_MAX_PX) { s.cap = CAP_DYN_MAX_PX; s.capVel = Math.min(0, s.capVel); }
+  if (s.cap < -CAP_DYN_MAX_PX) { s.cap = -CAP_DYN_MAX_PX; s.capVel = Math.max(0, s.capVel); }
+
+  // Wet film: fast attack while an edge recedes (moves toward the liquid), slow drain.
+  const recede = p.remaining ? 1 : -1;   // panel-frame direction the time edge moves when receding
+  const filmT = (v: number): number => Math.max(0, Math.min(1, v / FILM_FULL_PX_S));
+  const follow = (cur: number, target: number): number => cur + (target - cur) * Math.min(1, (target > cur ? 15 : 2) * dt);
+  s.filmFree = follow(s.filmFree, filmT(recede * edgeVel));
+  s.filmHome = follow(s.filmHome, p.freeLiquid ? filmT(-recede * s.slugVel) : 0);
 
   // Front skew: the screen is the tube's cross-section plane, so only the across component of
   // gravity (the one fizz rises against) tilts the front on screen. Along-tilt is out of plane.

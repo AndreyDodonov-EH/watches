@@ -26,6 +26,12 @@
   "meniscusPow": 3.2,
   "meniscusTiltGain": 0.55,
   "meniscusAsym": 0.5,
+  "meniscusLens": 0,
+  "meniscusK": 180,
+  "meniscusDamp": 9,
+  "meniscusInertia": 6,
+  "contactLag": 0.5,
+  "wetFilm": 6,
   "edgeSoft": 2.6,
   "frontBright": 21,
   "edgeGlow": 15,
@@ -125,5 +131,14 @@
   "digitHourStart": 0,
   "digitMinuteStart": 0,
   "digitsLastOnlyH": false,
-  "digitsLastOnlyM": false
+  "digitsLastOnlyM": false,
+  "freeLiquid": false,
+  "freeGain": 500,
+  "freeDamp": 1.5,
+  "freeBounce": 0.25,
+  "freeHomeK": 30,
+  "readFaceUp": 0.7,
+  "readAlongMax": 0.3,
+  "readTurn": 80,
+  "readHold": 5
 }

@@ -7,13 +7,22 @@
 #define FILL_SLOSH_MAX_PX 30.0f   // structural caps — params only tighten, never widen
 #define ANGLE_HARD_MAX_DEG 20.0f
 #define LIGHT_MAX_DEG 85.0f
+#define CAP_DYN_MAX_PX 12.0f      // |cap| cap: dynamic meniscus bulge / hollow
+#define FILM_FULL_PX_S 25.0f      // edge speed at which the trailing wet film is fully drawn
 #define GYRO_LP_HZ 12.0f          // smooths both gyro outputs (sensor noise twitches fizz/agitation)
 
 struct TiltInput { float along, across, gyroAlong, gyroAcross; };
 
 struct TubeState {
   float fillTarget = 0, fillPos = 0, fillVel = 0, angle = 0, angleVel = 0, light = 0, lightVel = 0, agitation = 0, edgeLight = 0, acrossTilt = 0;
+  // meniscus dynamics: surface centre leading the pinned contact lines (px, panel +x); trailing wet films 0..1
+  float cap = 0, capVel = 0, filmFree = 0, filmHome = 0;
+  // free liquid: slug home-edge position (px from the left end), reading 1 = parked home showing the time
+  float slugPos = 0, slugVel = 0, reading = 1, motion = 0, readTimer = 0;
+  bool armed = false;
 };
+
+float columnLen(float fillTarget, const Params &p);   // liquid column length, px
 
 float lightRest(float along, float across, const Params &p);
 void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt = PHYS_DT);
