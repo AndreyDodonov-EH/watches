@@ -84,7 +84,7 @@ export interface Params {
   ticksOnTop: boolean;   // false rear/bottom surface, true curved front/top surface
   tickLens: number;      // 0..1 cylinder depth warp before the whole-tube lens
   tickParallax: number;  // px rear-surface shift per g of tilt
-  tickDryLens: number;   // 0..1 share of cylinder warp + parallax rear ticks keep outside the liquid (behind air)
+  tickDryLens: number;   // -1..1 cylinder warp for rear ticks behind air (no liquid); negative stretches the edges
   tickEmboss: number;    // 0..1 glass-cut edge strength
   // --- digits along the bottom of the tube (3x5 pixel font) ---
   digits: boolean;
@@ -104,6 +104,7 @@ export interface Params {
   digitBottom: number;   // hours tube: px from the tube's bottom edge to the digit baseline
   digitsOnTop: boolean;  // true = printed on the glass (fully opaque over the liquid); false = behind the liquid, seen through it by liquidTransparency
   bottomLens: number;    // 0..1 depth warp for digits printed behind the liquid
+  digitDryLens: number;  // -1..1 depth warp for rear digits behind air; negative stretches the edges
   topLens: number;       // -1..1 pre-distortion for digits printed on top; negative compensates physical glass magnification
   topParallax: number;   // px across-shift of top digits per g of across-tilt; counters the apparent shift under the physical lens
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
@@ -205,7 +206,7 @@ export const DEFAULT_PARAMS: Params = {
   ticksOnTop: false,
   tickLens: 0.35,
   tickParallax: 3,
-  tickDryLens: 0.3,
+  tickDryLens: -0.4,
   tickEmboss: 0.25,
   digits: true,
   digitColor: '#e3e3e3',
@@ -224,6 +225,7 @@ export const DEFAULT_PARAMS: Params = {
   digitBottom: 16,
   digitsOnTop: false,
   bottomLens: 0.35,
+  digitDryLens: -0.4,
   topLens: 0,
   topParallax: 0,
   liquidTransparency: 0.17,
@@ -534,7 +536,9 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   if ('digitFontBig' in r) { r.digitFont = r.digitFontBig ? 2 : 0; delete r.digitFontBig; }
   if ('tickLayer' in r) { r.ticksOnTop = r.tickLayer === 1; delete r.tickLayer; }
   if (!('tickLens' in r) && typeof r.bottomLens === 'number') r.tickLens = r.bottomLens;
-  if (!('tickDryLens' in r)) r.tickDryLens = 1;   // older presets: warp everywhere, as before
+  // older presets: same warp behind air as behind liquid, as before
+  if (!('tickDryLens' in r) && typeof r.tickLens === 'number') r.tickDryLens = r.tickLens;
+  if (!('digitDryLens' in r) && typeof r.bottomLens === 'number') r.digitDryLens = r.bottomLens;
   if (from < 2) {
     // v1 counted "major every N-th minor tick"; v2 counts units (hours / minutes).
     for (const [every, step] of [['tickMajorEveryH', 'tickStepH'], ['tickMajorEveryM', 'tickStepM']] as const) {
@@ -608,7 +612,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzSquash: { help: 'Extra vertical pre-squash on fizz discs at mid-height (fades to none at top/bottom), on top of lens + topLens compensation. >1 flattens the center on screen so the stronger glass magnification there rounds them.', group: 'Bubble', label: 'fizz squash', min: 0.5, max: 2, step: 0.05 },
   ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
   tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
-  tickDryLens: { help: 'How much of the cylinder warp and parallax rear ticks keep where the tube is empty. Liquid lenses strongly, air barely, so the scale visibly jumps at the fill edge. 1 = same everywhere.', group: 'Ticks', label: 'dry-side lens share', min: 0, max: 1, step: 0.05 },
+  tickDryLens: { help: 'Cylinder warp for rear ticks where the tube is empty. Liquid magnifies the middle; air barely lenses, and negative stretches the edges instead, so the scale visibly jumps at the fill edge. Rear parallax is liquid-only.', group: 'Ticks', label: 'dry-side lens', min: -1, max: 1, step: 0.05 },
   tickParallax: { help: 'Rear tick displacement at the tube centre per g of tilt. Circular depth bows the mark while its edge stays attached to the silhouette.', group: 'Ticks', label: 'rear parallax px/g', min: 0, max: 10, step: 0.25 },
   tickEmboss: { help: 'Highlight and shadow around ticks, like grooves cut into glass. 0 = flat.', group: 'Ticks', label: 'glass-cut emboss', min: 0, max: 1, step: 0.05 },
   ticksH: { help: 'Show the hours tick ladder.', group: 'Ticks · hours', label: 'show ticks' },
@@ -652,6 +656,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   digitShadowColor: { help: 'Emboss shadow colour.', group: 'Digits', label: 'shadow colour' },
   digitsOnTop: { help: 'Printed on the glass, opaque and excluded from the whole-tube lens. Off: behind the liquid, seen through it and depth-warped.', group: 'Digits', label: 'print on top of liquid' },
   bottomLens: { help: 'Depth warp for digits behind the liquid.', group: 'Digits', label: 'rear lens', min: 0, max: 1, step: 0.05 },
+  digitDryLens: { help: 'Depth warp for rear digits where the tube is empty, chosen per pixel column. Negative stretches the edges instead of magnifying the middle.', group: 'Digits', label: 'rear lens behind air', min: -1, max: 1, step: 0.05 },
   topParallax: { help: 'Across-shift of top digits per g of across-tilt, countering the apparent shift under the physical lens. Sign flips direction.', group: 'Digits', label: 'front parallax px/g', min: -10, max: 10, step: 0.25 },
   // digits — hours tube
   digitHourStep: { help: 'Label every N hours.', group: 'Digits · hours', label: 'label every N h', min: 1, max: 6, step: 1 },
