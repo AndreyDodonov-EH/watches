@@ -654,8 +654,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   drawDigitLayer(true);
 }
 
-/** Dest rows per source row under the rendered lens plus the physical glass (`topLens`), times `fizzSquash`,
- *  so pre-lens sprites can be pre-squashed. */
+/** Dest rows per source row under the rendered lens plus the physical glass (`topLens`), times a
+ *  center-weighted `fizzSquash`, so pre-lens sprites can be pre-squashed. */
 let lensMagCache: { key: string; rows: Float32Array } | null = null;
 function lensMagRows(H: number, p: Params): Float32Array {
   const key = `${H}:${p.lens}:${p.topLens}:${p.lensCurve}:${p.fizzSquash}`;
@@ -676,7 +676,8 @@ function lensMagRows(H: number, p: Params): Float32Array {
     for (let y = 0; y < H; y++) if (rows[y] > 0) { last = rows[y]; break; }
     for (let y = 0; y < H; y++) rows[y] > 0 ? (last = rows[y]) : (rows[y] = last);
   }
-  for (let y = 0; y < H; y++) rows[y] *= p.fizzSquash;
+  // Extra squash is center-weighted: full fizzSquash at mid-height, ~1 at the top/bottom edges.
+  for (let y = 0; y < H; y++) { const d = (y + 0.5 - H / 2) / (H / 2); rows[y] *= 1 + (p.fizzSquash - 1) * (1 - d * d); }
   lensMagCache = { key, rows };
   return rows;
 }
