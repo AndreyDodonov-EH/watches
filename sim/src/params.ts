@@ -10,7 +10,7 @@ export interface Params {
   tubeBack: string;      // colour behind the liquid and glass layers (very dark; 0 = AMOLED off)
   tubeBack2: string;     // second colour used by the tube-back gradient
   tubeBackGradient: number; // 0 solid, 1 top-to-bottom, 2 centre band, 3 edge bands
-  tubeBackDecal: number; // 0 none, 1 H/M vial ID, 2 12/60 capacity seal
+  tubeBackDecal: number; // 0 none, 1 brushed metal, 2 worn/scratched metal
   tubeBackDecalColor: string;
   tubeBackDecalOpacity: number;
   // --- glass tube shading (empty part; specular also over the liquid) ---
@@ -179,12 +179,12 @@ export const DEFAULT_PARAMS: Params = {
   liquid: '#346a2a',
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
-  tubeBack: '#000000',
-  tubeBack2: '#18212a',
-  tubeBackGradient: 0,
-  tubeBackDecal: 0,
-  tubeBackDecalColor: '#80909a',
-  tubeBackDecalOpacity: 0.65,
+  tubeBack: '#090d10',
+  tubeBack2: '#253039',
+  tubeBackGradient: 2,
+  tubeBackDecal: 1,
+  tubeBackDecalColor: '#9cabb3',
+  tubeBackDecalOpacity: 0.32,
   glassHi: '#a8c0c8',
   glassBody: 0.1,
   glassHiBright: 0.55,
@@ -304,8 +304,15 @@ export const DEFAULT_PARAMS: Params = {
   digitBright: 0.82,
 };
 
+/** Explicitly keep non-material presets plain when DEFAULT_PARAMS uses a textured backing. */
+const PLAIN_TUBE_BACK: Partial<Params> = {
+  tubeBack2: '#18212a', tubeBackGradient: 0, tubeBackDecal: 0,
+  tubeBackDecalColor: '#80909a', tubeBackDecalOpacity: 0.65,
+};
+
 /** Neon preset close to images/reference-liquid.jpg */
 export const PRESET_NEON: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#39ff14', liquidHi: '#b6ffa0', liquidLo: '#158f08', bubbleRim: '#d8ffcc', tubeBack: '#061006',
   fizz: true,
 };
@@ -316,11 +323,13 @@ export const PRESET_CONCEPT: Partial<Params> = {
 };
 /** User-tuned look (2026-08-20): deep green body, wide highlight, convex bright front, fizz. */
 export const PRESET_USER_V1: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#346a2a', liquidHi: '#b6ffa0', liquidLo: '#1e7515', tubeBack: '#000000', bubbleRim: '#b0c7a9',
   highlightH: 30, highlightInset: 0, shadeDepth: 0.7, meniscusDepth: -8.5, meniscusPow: 1.6, edgeSoft: 2.7,
   frontBright: 32, edgeGlow: 25, glowStrength: 0.47, cornerR: 0, bubble: false, fizz: true, fizzCount: 10, fizzSize: 2, fizzSpeed: 14,
 };
 export const PRESET_MINT: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#5dcaa5', liquidHi: '#9fe1cb', liquidLo: '#1f6b52', bubbleRim: '#bff5dc', tubeBack: '#000000',
   fizz: false,
 };
@@ -333,6 +342,7 @@ export const PRESET_MINT: Partial<Params> = {
 
 /** Venous blood in a graduated syringe: opaque, viscous, matte, clinical print on the glass. */
 export const PRESET_BLOOD: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#8c0f1c', liquidHi: '#d94a45', liquidLo: '#2a040b', tubeBack: '#050203', bubbleRim: '#e08a80',
   glassHi: '#93a2ae', glassBody: 0.07, glassHiBright: 0.34, glassReflect: 0.14, glassRim: 0.5, glassOverLiquid: 0.22,
   highlightH: 8, highlightBright: 0.9, highlightSharp: 2.6, highlightInset: 0, shadeDepth: 0.86,
@@ -356,6 +366,7 @@ export const PRESET_BLOOD: Partial<Params> = {
 
 /** Sparkling mineral water in a lab cylinder: near-clear, printed graduations, constant fizz. */
 export const PRESET_SPARKLING: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#79b6c9', liquidHi: '#f2ffff', liquidLo: '#22596c', tubeBack: '#03080a', bubbleRim: '#eaffff',
   glassHi: '#d3e9f2', glassBody: 0.15, glassHiBright: 0.7, glassReflect: 0.3, glassRim: 0.75, glassOverLiquid: 0.55,
   highlightH: 5, highlightBright: 1.25, highlightSharp: 3.2, highlightInset: 0, shadeDepth: 0.55,
@@ -379,6 +390,7 @@ export const PRESET_SPARKLING: Partial<Params> = {
 
 /** Xenon discharge tube: violet plasma, no slosh, glow past the column end, seven-segment scale. */
 export const PRESET_XENON: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#6a3cf5', liquidHi: '#d9c8ff', liquidLo: '#1a0570', tubeBack: '#05020c', bubbleRim: '#d8ccff',
   glassHi: '#a394d8', glassBody: 0.13, glassHiBright: 0.5, glassReflect: 0.2, glassRim: 0.6, glassOverLiquid: 0.6,
   highlightH: 12, highlightBright: 0.85, highlightSharp: 1.5, highlightInset: 0, shadeDepth: 0.42,
@@ -402,7 +414,10 @@ export const PRESET_XENON: Partial<Params> = {
 
 /** Mercury column: non-wetting convex bead, mirror specular that follows real gravity, etched glass scale. */
 export const PRESET_MERCURY: Partial<Params> = {
-  liquid: '#b7c1c8', liquidHi: '#ffffff', liquidLo: '#333c44', tubeBack: '#04060a', bubbleRim: '#e8f0f5',
+  liquid: '#b7c1c8', liquidHi: '#ffffff', liquidLo: '#333c44',
+  tubeBack: '#10171c', tubeBack2: '#46545d', tubeBackGradient: 2,
+  tubeBackDecal: 2, tubeBackDecalColor: '#d2dce0', tubeBackDecalOpacity: 0.52,
+  bubbleRim: '#e8f0f5',
   glassHi: '#e2edf5', glassBody: 0.13, glassHiBright: 0.6, glassReflect: 0.35, glassRim: 0.78, glassOverLiquid: 0.5,
   highlightH: 6, highlightBright: 1.45, highlightSharp: 3.6, highlightInset: 0, shadeDepth: 0.95,
   meniscusDepth: -11, meniscusPow: 2.4, meniscusTiltGain: 0.35, meniscusAsym: 0.15,
@@ -425,6 +440,7 @@ export const PRESET_MERCURY: Partial<Params> = {
 
 /** Single malt in cut crystal: warm amber, alcohol clings to the wall, brass numerals under the liquid. */
 export const PRESET_MALT: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#b3600f', liquidHi: '#ffcf7a', liquidLo: '#431a04', tubeBack: '#0a0603', bubbleRim: '#f0c88a',
   glassHi: '#f2e0b4', glassBody: 0.16, glassHiBright: 0.65, glassReflect: 0.35, glassRim: 0.8, glassOverLiquid: 0.45,
   highlightH: 12, highlightBright: 1, highlightSharp: 1.4, highlightInset: 0, shadeDepth: 0.8,
@@ -448,6 +464,7 @@ export const PRESET_MALT: Partial<Params> = {
 
 /** Molten iron in a sooted vial: emissive, opaque, slow and heavy, forged numerals. */
 export const PRESET_MOLTEN: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#ff5a00', liquidHi: '#ffd98a', liquidLo: '#5e0e00', tubeBack: '#0b0300', bubbleRim: '#ffd08a',
   glassHi: '#c08a60', glassBody: 0.09, glassHiBright: 0.4, glassReflect: 0.18, glassRim: 0.45, glassOverLiquid: 0.3,
   highlightH: 8, highlightBright: 0.85, highlightSharp: 1.2, highlightInset: 0, shadeDepth: 0.78,
@@ -471,6 +488,7 @@ export const PRESET_MOLTEN: Partial<Params> = {
 
 /** Cryogenic oxygen: pale blue, boiling hard, frosted wall, very low viscosity. */
 export const PRESET_CRYO: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#5fb4e8', liquidHi: '#ffffff', liquidLo: '#0e3f66', tubeBack: '#03070c', bubbleRim: '#f0fbff',
   glassHi: '#e2f4ff', glassBody: 0.2, glassHiBright: 0.5, glassReflect: 0.28, glassRim: 0.85, glassOverLiquid: 0.6,
   highlightH: 9, highlightBright: 1.1, highlightSharp: 1.6, highlightInset: 0, shadeDepth: 0.6,
@@ -494,6 +512,7 @@ export const PRESET_CRYO: Partial<Params> = {
 
 /** India ink: matte black body, almost every pixel off, enamel numerals printed on the glass. */
 export const PRESET_INK: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#141d36', liquidHi: '#6178a8', liquidLo: '#03040c', tubeBack: '#000000', bubbleRim: '#4a5a78',
   glassHi: '#8c9bb5', glassBody: 0.06, glassHiBright: 0.3, glassReflect: 0.22, glassRim: 0.45, glassOverLiquid: 0.3,
   highlightH: 5, highlightBright: 1.1, highlightSharp: 2.6, highlightInset: 0, shadeDepth: 0.9,
@@ -517,6 +536,7 @@ export const PRESET_INK: Partial<Params> = {
 
 /** Champagne flute: pale gold, dense fine bead, amber-resin numerals read through the wine. */
 export const PRESET_CHAMPAGNE: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   liquid: '#d8ae55', liquidHi: '#fff8dc', liquidLo: '#6f4a0c', tubeBack: '#080602', bubbleRim: '#fff4cc',
   glassHi: '#f6ecd0', glassBody: 0.15, glassHiBright: 0.68, glassReflect: 0.32, glassRim: 0.8, glassOverLiquid: 0.5,
   highlightH: 7, highlightBright: 0.95, highlightSharp: 2.4, highlightInset: 0, shadeDepth: 0.6,
@@ -542,6 +562,7 @@ export const PRESET_CHAMPAGNE: Partial<Params> = {
  *  (readFaceUp 1 = never, i.e. always free — lower it to ~0.75 to enable reads). Dark bottle green, low-climb wetting
  *  liquid with a watery surface (K 460, ζ≈0.12), copper gauge numerals behind the liquid. Saved 2026-08-26. */
 const PRESET_FREE: Partial<Params> = {
+  ...PLAIN_TUBE_BACK,
   tubeHeight: 56, hoursY: 9, minutesY: 180, liquid: '#1f602f', liquidHi: '#1a6528', liquidLo: '#214002',
   tubeBack: '#10140f', glassBody: 0.03, glassHiBright: 0.15, glassReflect: 0.11, glassRim: 0.13,
   glassOverLiquid: 0.25, lens: -0.4, lensCurve: 0.6, bubbleRim: '#255917', highlightH: 26, highlightBright: 0.15,
@@ -635,12 +656,12 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
     options: ['Solid colour 1', 'Colour 1 → colour 2', 'Colour 2 centre band', 'Colour 2 edge bands'],
   },
   tubeBackDecal: {
-    help: 'Small rear-wall marking drawn in code and viewed through the liquid and glass.',
+    help: 'Procedural rear-wall material texture. It stays fixed to the backing and is filtered by liquid transparency.',
     group: 'Colour', label: 'tube back decal', min: 0, max: 2, step: 1,
-    options: ['None', 'H / M vial ID', '12 / 60 capacity seal'],
+    options: ['None', 'Brushed metal', 'Worn / scratched metal'],
   },
-  tubeBackDecalColor: { help: 'Colour of the rear-wall decal.', group: 'Colour', label: 'decal colour' },
-  tubeBackDecalOpacity: { help: 'Strength of the rear-wall decal; liquid transparency still controls how much is visible.', group: 'Colour', label: 'decal opacity', min: 0, max: 1, step: 0.01 },
+  tubeBackDecalColor: { help: 'Colour of the light scratches; darker strokes are derived from tube back colour 1.', group: 'Colour', label: 'decal colour' },
+  tubeBackDecalOpacity: { help: 'Texture strength. In the wet part it is also multiplied by liquid transparency.', group: 'Colour', label: 'decal opacity', min: 0, max: 1, step: 0.01 },
   bubbleRim: { help: 'Rim colour of the spirit-level bubble and fizz.', group: 'Colour' },
   glassHi: { help: 'Specular colour of the glass wall.', group: 'Glass', label: 'specular colour' },
   glassBody: { help: 'Ambient cylinder shade of the empty wall. 0 = pure black.', group: 'Glass', label: 'ambient body', min: 0, max: 0.5, step: 0.01 },

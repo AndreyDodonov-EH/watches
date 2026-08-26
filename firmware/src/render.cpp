@@ -245,37 +245,57 @@ struct Mark {
   }
 };
 
-// Compact code-drawn rear-wall markings; composited through the liquid like the rear scale.
-static void drawTubeBackDecal(int idx, int y0, const Params &p, const Mark &mark) {
+// Stable integer hash shared with the sim: the material texture must not shimmer between frames.
+static uint32_t decalHash(uint32_t n) {
+  uint32_t h = (n ^ 0x9e3779b9u) * 0x85ebca6bu;
+  h ^= h >> 13;
+  return h * 0xc2b2ae35u;
+}
+
+// Procedural rear-wall material texture. It has no mark-contrast floor: dry texture is fully
+// visible and wet texture is attenuated exactly by liquid transparency, like a real backing.
+static void drawTubeBackDecal(int idx, int y0, const Params &p, const Edges &bounds) {
   int mode = (int)jround(p.tubeBackDecal);
   float opacity = clampf(p.tubeBackDecalOpacity, 0, 1);
-  if (mode < 1 || mode > 2 || opacity <= 0 || H < 15) return;
-  uint16_t c = q(scale(hexToRgb(p.tubeBackDecalColor), p.brightness));
-  auto glyph = [&](const uint8_t *rows, int nRows, int bits, int x0, int yy0, int s) {
-    for (int gy = 0; gy < nRows; gy++) for (int gx = 0; gx < bits; gx++)
-      if (rows[gy] & (1 << (bits - 1 - gx)))
-        for (int dy = 0; dy < s; dy++) for (int dx = 0; dx < s; dx++) mark(x0 + gx * s + dx, yy0 + gy * s + dy, c, opacity);
+  if (mode < 1 || mode > 2 || opacity <= 0 || H < 8) return;
+  uint16_t light = q(scale(hexToRgb(p.tubeBackDecalColor), p.brightness));
+  uint16_t dark = q(scale(hexToRgb(p.tubeBack), p.brightness * 0.28f));
+  auto texturePx = [&](int x, int ry, uint16_t c, float strength) {
+    if (x < 0 || x >= L || ry < 1 || ry >= H - 1) return;
+    float through = x >= bounds.lo[ry] && x < bounds.hi[ry] ? p.liquidTransparency : 1;
+    pxa(x, y0 + ry, c, opacity * strength * through);
   };
-  auto frame = [&](int x0, int yy0, int w, int h) {
-    float a = opacity * 0.65f;
-    for (int x = x0 + 2; x < x0 + w - 2; x++) { mark(x, yy0, c, a); mark(x, yy0 + h - 1, c, a); }
-    for (int y = yy0 + 2; y < yy0 + h - 2; y++) { mark(x0, y, c, a); mark(x0 + w - 1, y, c, a); }
-    mark(x0 + 1, yy0 + 1, c, a); mark(x0 + w - 2, yy0 + 1, c, a);
-    mark(x0 + 1, yy0 + h - 2, c, a); mark(x0 + w - 2, yy0 + h - 2, c, a);
-  };
-  int s = H >= 28 ? 2 : 1;
-  if (mode == 1) {
-    static const uint8_t ID_H[7] = {17, 17, 17, 31, 17, 17, 17};
-    static const uint8_t ID_M[7] = {17, 27, 21, 21, 17, 17, 17};
-    int w = 5 * s + 8, h = 7 * s + 8, x0 = L - w - 7, yy0 = y0 + (H - h) / 2;
-    frame(x0, yy0, w, h); glyph(idx == 0 ? ID_H : ID_M, 7, 5, x0 + 4, yy0 + 4, s);
-  } else {
-    int a = idx == 0 ? 1 : 6, b = idx == 0 ? 2 : 0;
-    int w = 7 * s + 8, h = 5 * s + 8, x0 = L - w - 7, yy0 = y0 + (H - h) / 2;
-    frame(x0, yy0, w, h);
-    glyph(FONTS[0].g[a], 5, 3, x0 + 4, yy0 + 4, s);
-    glyph(FONTS[0].g[b], 5, 3, x0 + 4 + 4 * s, yy0 + 4, s);
-    mark(x0 - 2, yy0 + h / 2, c, opacity * 0.55f); mark(x0 + w + 1, yy0 + h / 2, c, opacity * 0.55f);
+
+  // Fine, mostly axial streaks suggest rolled/brushed metal without bitmap storage or noise.
+  int strokes = mode == 1 ? 24 : 16;
+  for (int i = 0; i < strokes; i++) {
+    uint32_t h = decalHash((uint32_t)(i + idx * 97));
+    int len = 16 + ((h >> 18) % 82), x0 = ((h >> 7) % (L + 70)) - 35;
+    int ry0 = 2 + (h % (uint32_t)(H - 4));
+    float strength = 0.12f + ((h >> 25) / 127.0f) * (mode == 1 ? 0.3f : 0.18f);
+    uint16_t c = (h & 0x40) != 0 ? light : dark;
+    for (int k = 0; k < len; k++) {
+      if (((k + (h >> 11)) % 23) == 0) continue;
+      int ry = ry0 + (k > len * 2 / 3 && (h & 0x200) != 0 ? ((h & 0x400) != 0 ? 1 : -1) : 0);
+      texturePx(x0 + k, ry, c, strength);
+    }
+  }
+
+  if (mode != 2) return;
+  // Worn metal adds a few directional gouges and impact pits over the subtler brushing.
+  for (int i = 0; i < 10; i++) {
+    uint32_t h = decalHash((uint32_t)(0x400 + i + idx * 131));
+    int len = 14 + ((h >> 20) % 42), x0 = (h >> 7) % L;
+    int ry0 = 3 + (h % (uint32_t)(H - 6)), rise = 5 + ((h >> 16) % 6), dir = (h & 0x80) != 0 ? 1 : -1;
+    for (int k = 0; k < len; k++)
+      texturePx(x0 + k, ry0 + dir * (k / rise), light, 0.34f + 0.24f * (1 - (float)k / len));
+  }
+  for (int i = 0; i < 18; i++) {
+    uint32_t h = decalHash((uint32_t)(0x800 + i + idx * 173));
+    int x = (h >> 8) % L, ry = 2 + (h % (uint32_t)(H - 4));
+    uint16_t c = (h & 0x10000) != 0 ? light : dark;
+    texturePx(x, ry, c, 0.5f); texturePx(x + 1, ry, c, 0.25f);
+    if ((h & 0x20000) != 0) texturePx(x, ry + 1, c, 0.22f);
   }
 }
 
@@ -728,9 +748,8 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     }
   }
 
-  // Rear marks are composited through the liquid, before bubbles.
-  Mark decalMark { y0, bounds, &p, false, p.markContrast * p.tubeBackDecalOpacity };
-  drawTubeBackDecal(idx, y0, p, decalMark);
+  // Rear-wall material texture, then scale marks, all before bubbles.
+  drawTubeBackDecal(idx, y0, p, bounds);
   static Labels labels;
   bool haveLabels = layoutLabels(idx, y0, p, ticksN, st.acrossTilt, st.fillTarget, labels);
   auto drawTickLayer = [&](bool onTop) {

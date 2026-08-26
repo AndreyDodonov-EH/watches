@@ -1,6 +1,7 @@
 # Kaizen — continuous-improvement backlog
 
 ## Visual / layout
+- Rear-mark compositors index row bounds before checking that the row is in range; clip `ry` first in sim and firmware.
 - Even if hour has passed, edge might be before it, example is 06:01
 - Empty space at the top and bottom of the real screen? Move tubes further away from one another?
 - Fill edge with `edgeSoft` > 0 leaves a 1 px tube-back gap before the glow: the AA loop writes

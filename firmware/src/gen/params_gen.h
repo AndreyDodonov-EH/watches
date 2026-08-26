@@ -317,12 +317,12 @@ static const Params PRESET_1 = {
   0x346A2A, // liquid
   0xB6FFA0, // liquidHi
   0x1E7515, // liquidLo
-  0x000000, // tubeBack
-  0x18212A, // tubeBack2
-  0.0f, // tubeBackGradient
-  0.0f, // tubeBackDecal
-  0x80909A, // tubeBackDecalColor
-  0.65f, // tubeBackDecalOpacity
+  0x090D10, // tubeBack
+  0x253039, // tubeBack2
+  2.0f, // tubeBackGradient
+  1.0f, // tubeBackDecal
+  0x9CABB3, // tubeBackDecalColor
+  0.32f, // tubeBackDecalOpacity
   0xA8C0C8, // glassHi
   0.1f, // glassBody
   0.55f, // glassHiBright

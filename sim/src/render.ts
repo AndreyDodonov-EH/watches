@@ -273,38 +273,56 @@ function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: n
   };
 }
 
-/** Compact rear-wall markings. They are deliberately code-drawn so their cost is a few dozen
- *  pixels, and use the same through-liquid compositor as the rear scale. */
-function drawTubeBackDecal(idx: number, y0: number, H: number, p: Params, mark: MarkFn): void {
+/** Stable integer hash shared with firmware: the texture must not shimmer between frames. */
+function decalHash(n: number): number {
+  let h = Math.imul((n ^ 0x9e3779b9) >>> 0, 0x85ebca6b) >>> 0;
+  h ^= h >>> 13;
+  return Math.imul(h, 0xc2b2ae35) >>> 0;
+}
+
+/** Procedural rear-wall material texture. Unlike scale marks, decals have no contrast floor: they
+ *  are fully visible over the dry rear wall and are attenuated by liquid transparency in the wet
+ *  part. This makes them part of the backing material instead of ink floating over the liquid. */
+function drawTubeBackDecal(idx: number, y0: number, H: number, p: Params, bounds: Edges): void {
   const mode = Math.round(p.tubeBackDecal), opacity = Math.max(0, Math.min(1, p.tubeBackDecalOpacity));
-  if (mode < 1 || mode > 2 || opacity <= 0 || H < 15) return;
-  const c = q(scale(hexToRgb(p.tubeBackDecalColor), p.brightness));
-  const glyph = (rows: number[], bits: number, x0: number, yy0: number, s: number): void => {
-    for (let gy = 0; gy < rows.length; gy++) for (let gx = 0; gx < bits; gx++)
-      if (rows[gy] & (1 << (bits - 1 - gx)))
-        for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) mark(x0 + gx * s + dx, yy0 + gy * s + dy, c, opacity);
+  if (mode < 1 || mode > 2 || opacity <= 0 || H < 8) return;
+  const light = q(scale(hexToRgb(p.tubeBackDecalColor), p.brightness));
+  const dark = q(scale(hexToRgb(p.tubeBack), p.brightness * 0.28));
+  const texturePx = (x: number, ry: number, c: number, strength: number): void => {
+    if (x < 0 || x >= TUBE_LENGTH_PX || ry < 1 || ry >= H - 1) return;
+    const through = x >= bounds.lo[ry] && x < bounds.hi[ry] ? p.liquidTransparency : 1;
+    pxa(x, y0 + ry, c, opacity * strength * through);
   };
-  const frame = (x0: number, yy0: number, w: number, h: number): void => {
-    const a = opacity * 0.65;
-    for (let x = x0 + 2; x < x0 + w - 2; x++) { mark(x, yy0, c, a); mark(x, yy0 + h - 1, c, a); }
-    for (let y = yy0 + 2; y < yy0 + h - 2; y++) { mark(x0, y, c, a); mark(x0 + w - 1, y, c, a); }
-    mark(x0 + 1, yy0 + 1, c, a); mark(x0 + w - 2, yy0 + 1, c, a);
-    mark(x0 + 1, yy0 + h - 2, c, a); mark(x0 + w - 2, yy0 + h - 2, c, a);
-  };
-  const s = H >= 28 ? 2 : 1;
-  if (mode === 1) {
-    const rows = idx === 0
-      ? [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001]
-      : [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001];
-    const w = 5 * s + 8, h = 7 * s + 8, x0 = TUBE_LENGTH_PX - w - 7, yy0 = y0 + Math.floor((H - h) / 2);
-    frame(x0, yy0, w, h); glyph(rows, 5, x0 + 4, yy0 + 4, s);
-  } else {
-    const digits = idx === 0 ? [1, 2] : [6, 0];
-    const w = 7 * s + 8, h = 5 * s + 8, x0 = TUBE_LENGTH_PX - w - 7, yy0 = y0 + Math.floor((H - h) / 2);
-    frame(x0, yy0, w, h);
-    glyph(FONT_3x5.g[digits[0]], 3, x0 + 4, yy0 + 4, s);
-    glyph(FONT_3x5.g[digits[1]], 3, x0 + 4 + 4 * s, yy0 + 4, s);
-    mark(x0 - 2, yy0 + (h >> 1), c, opacity * 0.55); mark(x0 + w + 1, yy0 + (h >> 1), c, opacity * 0.55);
+
+  // Fine, mostly axial streaks suggest rolled/brushed metal without a bitmap or per-pixel noise.
+  const strokes = mode === 1 ? 24 : 16;
+  for (let i = 0; i < strokes; i++) {
+    const h = decalHash(i + idx * 97), len = 16 + ((h >>> 18) % 82);
+    const x0 = ((h >>> 7) % (TUBE_LENGTH_PX + 70)) - 35;
+    const ry0 = 2 + (h % Math.max(1, H - 4));
+    const strength = 0.12 + ((h >>> 25) / 127) * (mode === 1 ? 0.3 : 0.18);
+    const c = (h & 0x40) !== 0 ? light : dark;
+    for (let k = 0; k < len; k++) {
+      if (((k + (h >>> 11)) % 23) === 0) continue; // tiny breaks keep the strokes organic
+      const ry = ry0 + (k > (len * 2) / 3 && (h & 0x200) !== 0 ? ((h & 0x400) !== 0 ? 1 : -1) : 0);
+      texturePx(x0 + k, ry, c, strength);
+    }
+  }
+
+  if (mode !== 2) return;
+  // Worn metal adds a few directional gouges and impact pits over the subtler brushing.
+  for (let i = 0; i < 10; i++) {
+    const h = decalHash(0x400 + i + idx * 131), len = 14 + ((h >>> 20) % 42);
+    const x0 = (h >>> 7) % TUBE_LENGTH_PX, ry0 = 3 + (h % Math.max(1, H - 6));
+    const rise = 5 + ((h >>> 16) % 6), dir = (h & 0x80) !== 0 ? 1 : -1;
+    for (let k = 0; k < len; k++)
+      texturePx(x0 + k, ry0 + dir * Math.floor(k / rise), light, 0.34 + 0.24 * (1 - k / len));
+  }
+  for (let i = 0; i < 18; i++) {
+    const h = decalHash(0x800 + i + idx * 173), x = (h >>> 8) % TUBE_LENGTH_PX;
+    const ry = 2 + (h % Math.max(1, H - 4)), c = (h & 0x10000) !== 0 ? light : dark;
+    texturePx(x, ry, c, 0.5); texturePx(x + 1, ry, c, 0.25);
+    if ((h & 0x20000) !== 0) texturePx(x, ry + 1, c, 0.22);
   }
 }
 
@@ -737,8 +755,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     }
   }
 
-  // Rear marks are composited through the liquid, before bubbles.
-  drawTubeBackDecal(idx, y0, H, p, markFn(y0, bounds, p, false, p.markContrast * p.tubeBackDecalOpacity));
+  // Rear-wall material texture, then scale marks, all before bubbles.
+  drawTubeBackDecal(idx, y0, H, p, bounds);
   const labels = layoutLabels(y0, p, ticksN, state.acrossTilt, state.fillTarget);
   const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
