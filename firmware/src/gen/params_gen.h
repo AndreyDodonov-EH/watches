@@ -101,6 +101,10 @@ struct Params {
   bool digitsLeadingZero;
   float digitMinuteStep;
   float digitHourStep;
+  float digitHourStart;
+  float digitMinuteStart;
+  bool digitsLastOnlyH;
+  bool digitsLastOnlyM;
   float fillK;
   float fillDamp;
   float fillSloshGain;
@@ -127,8 +131,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 121
-#define PARAMS_SCHEMA_CRC 0xf7dc6c8eu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 125
+#define PARAMS_SCHEMA_CRC 0x8c7839a4u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -230,6 +234,10 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"digitsLeadingZero", 'b', (uint16_t)offsetof(Params, digitsLeadingZero)},
   {"digitMinuteStep", 'f', (uint16_t)offsetof(Params, digitMinuteStep)},
   {"digitHourStep", 'f', (uint16_t)offsetof(Params, digitHourStep)},
+  {"digitHourStart", 'f', (uint16_t)offsetof(Params, digitHourStart)},
+  {"digitMinuteStart", 'f', (uint16_t)offsetof(Params, digitMinuteStart)},
+  {"digitsLastOnlyH", 'b', (uint16_t)offsetof(Params, digitsLastOnlyH)},
+  {"digitsLastOnlyM", 'b', (uint16_t)offsetof(Params, digitsLastOnlyM)},
   {"fillK", 'f', (uint16_t)offsetof(Params, fillK)},
   {"fillDamp", 'f', (uint16_t)offsetof(Params, fillDamp)},
   {"fillSloshGain", 'f', (uint16_t)offsetof(Params, fillSloshGain)},
@@ -355,6 +363,10 @@ static const Params PRESET_1 = {
   false, // digitsLeadingZero
   15.0f, // digitMinuteStep
   3.0f, // digitHourStep
+  0.0f, // digitHourStart
+  0.0f, // digitMinuteStart
+  false, // digitsLastOnlyH
+  false, // digitsLastOnlyM
   246.0f, // fillK
   14.8f, // fillDamp
   5.5f, // fillSloshGain

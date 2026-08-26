@@ -119,5 +119,9 @@
   "brightness": 0.92,
   "liquidBright": 1.29,
   "tickBright": 1.2,
-  "digitBright": 0.82
+  "digitBright": 0.82,
+  "digitHourStart": 0,
+  "digitMinuteStart": 0,
+  "digitsLastOnlyH": false,
+  "digitsLastOnlyM": false
 }

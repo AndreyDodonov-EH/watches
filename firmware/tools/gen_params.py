@@ -37,7 +37,7 @@ FIELDS = [
  ('digitScaleX','float'),('digitScaleY','float'),('digitScaleXMin','float'),('digitScaleYMin','float'),
  ('digitBottomMin','float'),('digitBottom','float'),('digitsOnTop','bool'),('bottomLens','float'),('topLens','float'),('topParallax','float'),
  ('liquidTransparency','float'),('markContrast','float'),('digitsLeadingZero','bool'),
- ('digitMinuteStep','float'),('digitHourStep','float'),
+ ('digitMinuteStep','float'),('digitHourStep','float'),('digitHourStart','float'),('digitMinuteStart','float'),('digitsLastOnlyH','bool'),('digitsLastOnlyM','bool'),
  ('fillK','float'),('fillDamp','float'),('fillSloshGain','float'),('angleK','float'),('angleDamp','float'),
  ('angleTiltGain','float'),('angleGyroGain','float'),('angleMax','float'),('lightPhys','float'),('lightAngle','float'),('acrossK','float'),('acrossDamp','float'),('acrossGyroGain','float'),('shakeGain','float'),('deadzone','float'),
  ('accelLpHz','float'),('gyroHpHz','float'),('gyroDeadzone','float'),('gyroMax','float'),('inputGain','float'),

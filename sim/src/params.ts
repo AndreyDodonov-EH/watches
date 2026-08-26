@@ -110,6 +110,10 @@ export interface Params {
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
   digitMinuteStep: number; // label every N minutes (5,10,15,20,30)
   digitHourStep: number;   // label every N hours (1..6)
+  digitHourStart: number;  // first labelled hour (0 = step); step 2 + start 1 = odd hours
+  digitMinuteStart: number; // first labelled minute (0 = step)
+  digitsLastOnlyH: boolean; // hours: one label only, the last passed hour (none before 1)
+  digitsLastOnlyM: boolean; // minutes: one label only, last passed multiple of digitMinuteStep
   // --- physics (fixed-step 50 Hz) ---
   fillK: number;         // spring stiffness of fill-edge position (1/s^2)
   fillDamp: number;      // damping ratio-ish (1/s)
@@ -225,6 +229,10 @@ export const DEFAULT_PARAMS: Params = {
   digitsLeadingZero: false,
   digitMinuteStep: 15,
   digitHourStep: 3,
+  digitHourStart: 0,
+  digitMinuteStart: 0,
+  digitsLastOnlyH: false,
+  digitsLastOnlyM: false,
   fillK: 246,
   fillDamp: 14.8,
   fillSloshGain: 5.5,
@@ -643,11 +651,15 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   topParallax: { help: 'Across-shift of top digits per g of across-tilt, countering the apparent shift under the physical lens. Sign flips direction.', group: 'Digits', label: 'front parallax px/g', min: -10, max: 10, step: 0.25 },
   // digits — hours tube
   digitHourStep: { help: 'Label every N hours.', group: 'Digits · hours', label: 'label every N h', min: 1, max: 6, step: 1 },
+  digitsLastOnlyH: { help: 'Show only the last passed hour.', group: 'Digits · hours', label: 'last passed only' },
+  digitHourStart: { help: 'First labelled hour; 0 = same as step. Step 2 + start 1 = odd hours.', group: 'Digits · hours', label: 'first label h', min: 0, max: 11, step: 1 },
   digitScaleX: { help: 'Hours tube horizontal scale (nearest-neighbour).', group: 'Digits · hours', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
   digitScaleY: { help: 'Hours tube vertical scale. Keep below X to counter the vial vertical stretch.', group: 'Digits · hours', label: 'scale Y', min: 0.5, max: 6, step: 0.25 },
   digitBottom: { help: 'Hours tube: px from the tube bottom edge to the digit baseline.', group: 'Digits · hours', label: 'baseline from bottom', min: 0, max: 40, step: 1 },
   // digits — minutes tube
   digitMinuteStep: { help: 'Label every N minutes.', group: 'Digits · minutes', label: 'label every N min', min: 5, max: 30, step: 5 },
+  digitsLastOnlyM: { help: 'Show only the last passed multiple of the step.', group: 'Digits · minutes', label: 'last passed only' },
+  digitMinuteStart: { help: 'First labelled minute; 0 = same as step.', group: 'Digits · minutes', label: 'first label min', min: 0, max: 55, step: 5 },
   digitsLeadingZero: { help: 'Minutes as 05, 10 instead of 5, 10.', group: 'Digits · minutes', label: 'leading zero (05)' },
   digitScaleXMin: { help: 'Minutes tube horizontal scale.', group: 'Digits · minutes', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
   digitScaleYMin: { help: 'Minutes tube vertical scale.', group: 'Digits · minutes', label: 'scale Y', min: 0.5, max: 6, step: 0.25 },

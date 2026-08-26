@@ -257,7 +257,7 @@ static void digitRowColors(const Params &p, int bh, uint16_t *out) {
   }
 }
 
-static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, float acrossTilt, Labels &lb) {
+static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, float acrossTilt, float fill, Labels &lb) {
   if (!p.digits) return false;
   bool minutes = ticksN == 60;
   int every = (int)fmaxf(1, jround(minutes ? p.digitMinuteStep : p.digitHourStep));
@@ -282,14 +282,23 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, float ac
     if (ry > lb.ry1) lb.ry1 = ry;
   }
   lb.n = 0;
-  for (int i = every; i < ticksN && lb.n < 12; i += every) {
+  int start = (int)jround(minutes ? p.digitMinuteStart : p.digitHourStart); if (start <= 0) start = every;
+  int first = start, last = ticksN - 1;
+  if (minutes ? p.digitsLastOnlyM : p.digitsLastOnlyH) {
+    float f = fill < 0 ? 0 : fill * ticksN; if (f > ticksN - 1e-3f) f = ticksN - 1e-3f;
+    int s = minutes ? every : 1; first = last = (int)f / s * s;
+    if (first == 0) first = 1;
+  }
+  for (int i = first; i <= last && lb.n < 12; i += every) {
     Label &l = lb.list[lb.n++];
     if (minutes && p.digitsLeadingZero) { l.text[0] = '0' + i / 10; l.text[1] = '0' + i % 10; l.len = 2; }
     else if (i >= 10) { l.text[0] = '0' + i / 10; l.text[1] = '0' + i % 10; l.len = 2; }
     else { l.text[0] = '0' + i; l.len = 1; }
     int w = -gap;
     for (int k = 0; k < l.len; k++) { l.adv[k] = sprite ? sprite[l.text[k] - '0'].w : bw; w += l.adv[k] + gap; }
-    l.x0 = (int)jround((float)i * L / ticksN - w / 2.0f);
+    int x0 = (int)jround((float)i * L / ticksN - w / 2.0f);
+    int m = (int)jround(p.cornerR);
+    l.x0 = x0 < m ? m : x0 > L - w - m ? L - w - m : x0;
   }
   lb.bw = bw; lb.bh = bh; lb.yTop = yTop;
   lb.sprite = sprite; lb.font = font; lb.gap = gap; lb.shadow = shadow;
@@ -576,7 +585,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
 
   // Rear marks are composited through the liquid, before bubbles.
   static Labels labels;
-  bool haveLabels = layoutLabels(idx, y0, p, ticksN, st.acrossTilt, labels);
+  bool haveLabels = layoutLabels(idx, y0, p, ticksN, st.acrossTilt, st.fillTarget, labels);
   auto drawTickLayer = [&](bool onTop) {
     if (p.ticksOnTop == onTop) {
       int16_t rows[TUBE_HEIGHT_MAX];
