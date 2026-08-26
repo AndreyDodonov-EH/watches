@@ -84,6 +84,7 @@ export interface Params {
   ticksOnTop: boolean;   // false rear/bottom surface, true curved front/top surface
   tickLens: number;      // 0..1 cylinder depth warp before the whole-tube lens
   tickParallax: number;  // px rear-surface shift per g of tilt
+  tickDryLens: number;   // 0..1 share of cylinder warp + parallax rear ticks keep outside the liquid (behind air)
   tickEmboss: number;    // 0..1 glass-cut edge strength
   // --- digits along the bottom of the tube (3x5 pixel font) ---
   digits: boolean;
@@ -204,6 +205,7 @@ export const DEFAULT_PARAMS: Params = {
   ticksOnTop: false,
   tickLens: 0.35,
   tickParallax: 3,
+  tickDryLens: 0.3,
   tickEmboss: 0.25,
   digits: true,
   digitColor: '#e3e3e3',
@@ -532,6 +534,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   if ('digitFontBig' in r) { r.digitFont = r.digitFontBig ? 2 : 0; delete r.digitFontBig; }
   if ('tickLayer' in r) { r.ticksOnTop = r.tickLayer === 1; delete r.tickLayer; }
   if (!('tickLens' in r) && typeof r.bottomLens === 'number') r.tickLens = r.bottomLens;
+  if (!('tickDryLens' in r)) r.tickDryLens = 1;   // older presets: warp everywhere, as before
   if (from < 2) {
     // v1 counted "major every N-th minor tick"; v2 counts units (hours / minutes).
     for (const [every, step] of [['tickMajorEveryH', 'tickStepH'], ['tickMajorEveryM', 'tickStepM']] as const) {
@@ -605,6 +608,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzSquash: { help: 'Extra vertical pre-squash on fizz discs at mid-height (fades to none at top/bottom), on top of lens + topLens compensation. >1 flattens the center on screen so the stronger glass magnification there rounds them.', group: 'Bubble', label: 'fizz squash', min: 0.5, max: 2, step: 0.05 },
   ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
   tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
+  tickDryLens: { help: 'How much of the cylinder warp and parallax rear ticks keep where the tube is empty. Liquid lenses strongly, air barely, so the scale visibly jumps at the fill edge. 1 = same everywhere.', group: 'Ticks', label: 'dry-side lens share', min: 0, max: 1, step: 0.05 },
   tickParallax: { help: 'Rear tick displacement at the tube centre per g of tilt. Circular depth bows the mark while its edge stays attached to the silhouette.', group: 'Ticks', label: 'rear parallax px/g', min: 0, max: 10, step: 0.25 },
   tickEmboss: { help: 'Highlight and shadow around ticks, like grooves cut into glass. 0 = flat.', group: 'Ticks', label: 'glass-cut emboss', min: 0, max: 1, step: 0.05 },
   ticksH: { help: 'Show the hours tick ladder.', group: 'Ticks · hours', label: 'show ticks' },
