@@ -283,7 +283,7 @@ function markSourceRows(H: number, lens: number, curve = 1): Int16Array {
 }
 
 /** Measure (but do not draw) the labels of one tube. Returns null when digits are off. */
-function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number): Labels | null {
+function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number, fill: number): Labels | null {
   if (!p.digits) return null;
   const minutes = ticksN === 60;
   const every = Math.max(1, Math.round(minutes ? p.digitMinuteStep : p.digitHourStep));
@@ -308,13 +308,17 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number)
     ry0 = Math.min(ry0, ry); ry1 = Math.max(ry1, ry);
   }
   const list: Label[] = [];
-  for (let i = every; i < ticksN; i += every) {
+  const start = Math.round(minutes ? p.digitMinuteStart : p.digitHourStart) || every;
+  const push = (i: number) => {
     const text = minutes && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
     const adv = [...text].map((ch) => sprite?.[ch.charCodeAt(0) - 48]?.w ?? bw);
     const w = adv.reduce((a, b) => a + b + gap, -gap);
-    const x0 = Math.round((i * TUBE_LENGTH_PX) / ticksN - w / 2);
+    const m = Math.round(p.cornerR);
+    const x0 = Math.max(m, Math.min(TUBE_LENGTH_PX - w - m, Math.round((i * TUBE_LENGTH_PX) / ticksN - w / 2)));
     list.push({ text, x0, adv });
-  }
+  };
+  if (minutes ? p.digitsLastOnlyM : p.digitsLastOnlyH) { const s = minutes ? every : 1, i = Math.floor(Math.min(ticksN - 1e-6, Math.max(0, fill) * ticksN) / s) * s; if (i > 0) push(i); }
+  else for (let i = start; i < ticksN; i += every) push(i);
   return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, sprite, font, gap, rows: digitRowColors(p, bh), shadow };
 }
 
@@ -582,7 +586,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   }
 
   // Rear marks are composited through the liquid, before bubbles.
-  const labels = layoutLabels(y0, p, ticksN, state.acrossTilt);
+  const labels = layoutLabels(y0, p, ticksN, state.acrossTilt, state.fillTarget);
   const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
       const rows = markSourceRows(H, p.tickLens);
