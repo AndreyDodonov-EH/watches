@@ -56,6 +56,7 @@ export interface Params {
   fizzDriftGain: number; // 0..2 steering: fraction of rise speed that goes toward the high end per g of along-tilt
   fizzAcrossGain: number; // 0..2, across-tilt → on-screen rise direction (1 = rises toward the physically high edge)
   fizzFlatRise: number;   // 0..1, on-screen rise speed when the face points up (bubbles rise toward the viewer)
+  fizzSquash: number;     // 0.5..2, extra vertical pre-squash on fizz discs (>1 = flatter on screen)
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
@@ -188,6 +189,7 @@ export const DEFAULT_PARAMS: Params = {
   fizzDriftGain: 1,
   fizzAcrossGain: 1,
   fizzFlatRise: 0.3,
+  fizzSquash: 1,
   fizzSpeed: 14,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 16, tickMinorWidthH: 1, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMinorWidthM: 1, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
@@ -586,6 +588,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzDriftGain: { help: 'Fraction of rise speed steered toward the high end per g of along-tilt.', group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
   fizzAcrossGain: { help: 'Across-tilt → on-screen rise direction. 1 = rises toward the physically high edge.', group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },
   fizzFlatRise: { help: 'On-screen rise speed when the face points up (bubbles rise toward the viewer).', group: 'Bubble', label: 'fizz rise when face up', min: 0, max: 1, step: 0.05 },
+  fizzSquash: { help: 'Extra vertical pre-squash on fizz discs, on top of lens + topLens compensation. >1 flattens on screen so glass magnification rounds them.', group: 'Bubble', label: 'fizz squash', min: 0.5, max: 2, step: 0.05 },
   ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
   tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
   tickParallax: { help: 'Rear tick displacement at the tube centre per g of tilt. Circular depth bows the mark while its edge stays attached to the silhouette.', group: 'Ticks', label: 'rear parallax px/g', min: 0, max: 10, step: 0.25 },

@@ -431,10 +431,10 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   }
 }
 
-// Dest rows per source row under applyLens (1 = no stretch). See sim lensMagRows.
+// Dest rows per source row under rendered lens + glass (topLens), times fizzSquash. See sim lensMagRows.
 static void lensMagRows(const Params &p, float *rows) {
-  for (int y = 0; y < H; y++) rows[y] = 1;
-  float lens = clampf(p.lens, -1, 1), curve = clampf(p.lensCurve, -3, 3);
+  for (int y = 0; y < H; y++) rows[y] = p.fizzSquash;
+  float lens = clampf(p.lens + p.topLens, -1, 1), curve = clampf(p.lensCurve, -3, 3);
   float signedCurve = lens < 0 ? -curve : curve, strength = fabsf(lens);
   if (strength == 0 || signedCurve == 0) return;
   float e = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
@@ -447,7 +447,7 @@ static void lensMagRows(const Params &p, float *rows) {
   }
   float last = 0;
   for (int y = 0; y < H; y++) if (rows[y] > 0) { last = rows[y]; break; }
-  for (int y = 0; y < H; y++) { if (rows[y] > 0) last = rows[y]; else rows[y] = last; }
+  for (int y = 0; y < H; y++) { if (rows[y] > 0) last = rows[y]; else rows[y] = last; rows[y] *= p.fizzSquash; }
 }
 
 // ---------------------------------------------------------------------------------------------
