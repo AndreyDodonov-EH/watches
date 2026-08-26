@@ -51,7 +51,9 @@ export interface Params {
   // --- fizz (small drifting bubbles, like the reference photo) ---
   fizz: boolean;
   fizzCount: number;
-  fizzSize: number;      // px (1..3)
+  fizzSize: number;      // px (1..8)
+  fizzSizeVar: number;   // 0..1, per-bubble size spread (bigger ones rise faster)
+  fizzShadeOff: number;  // 0..1, dark core offset toward lower-right, fraction of radius
   fizzSpeed: number;
   fizzDriftGain: number; // 0..2 steering: fraction of rise speed that goes toward the high end per g of along-tilt
   fizzAcrossGain: number; // 0..2, across-tilt → on-screen rise direction (1 = rises toward the physically high edge)
@@ -186,6 +188,8 @@ export const DEFAULT_PARAMS: Params = {
   fizz: true,
   fizzCount: 10,
   fizzSize: 2,
+  fizzSizeVar: 0.5,
+  fizzShadeOff: 0.3,
   fizzDriftGain: 1,
   fizzAcrossGain: 1,
   fizzFlatRise: 0.3,
@@ -573,17 +577,19 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   glowStrength: { help: 'Brightness of the glow at the edge.', group: 'Shape', min: 0, max: 1, step: 0.01 },
   cornerR: { help: 'Rounding of the column left end (tube end cap), px.', group: 'Shape', min: 0, max: 36, step: 1 },
   edgeLightGain: { help: 'How much along-tilt brightens (+) / dims (-) the fill-edge light.', group: 'Shape', label: 'edge light vs tilt', min: 0, max: 1, step: 0.05 },
+  bubbleDark: { help: 'Darkening of bubble and fizz interiors.', group: 'Bubble', label: 'bubble & fizz dark', min: 0, max: 1, step: 0.01 },
   bubble: { help: 'Show the spirit-level bubble.', group: 'Bubble' },
   bubbleW: { help: 'Bubble width, px.', group: 'Bubble', min: 2, max: 40, step: 1 },
   bubbleH: { help: 'Bubble height, px.', group: 'Bubble', min: 2, max: 30, step: 1 },
   bubbleGap: { help: 'Distance from fill edge to bubble centre, px.', group: 'Bubble', min: 0, max: 80, step: 1 },
   bubbleY: { help: 'Vertical position in the tube. 0.5 = centre.', group: 'Bubble', min: 0.1, max: 0.9, step: 0.01 },
-  bubbleDark: { help: 'Darkening of the bubble interior.', group: 'Bubble', min: 0, max: 1, step: 0.01 },
   bubbleRollGain: { help: 'Bubble rise toward the high wall per g of across-tilt. 1 = follows the wall.', group: 'Bubble', label: 'bubble rise vs across tilt', min: 0, max: 2, step: 0.05 },
   bubbleTiltGain: { help: 'Bubble slides toward the high end per g of along-tilt, px.', group: 'Bubble', label: 'bubble slides to high end px/g', min: 0, max: 80, step: 1 },
   fizz: { help: 'Small drifting bubbles.', group: 'Bubble' },
   fizzCount: { help: 'Number of fizz bubbles in a full tube.', group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 60, step: 1 },
-  fizzSize: { help: 'Fizz bubble size, px.', group: 'Bubble', min: 1, max: 4, step: 1 },
+  fizzSize: { help: 'Fizz bubble size, px.', group: 'Bubble', min: 1, max: 8, step: 0.5 },
+  fizzSizeVar: { help: 'Per-bubble size spread. 0 = all equal; 1 = 0.5x..1.5x. Bigger bubbles rise faster.', group: 'Bubble', label: 'fizz size spread', min: 0, max: 1, step: 0.05 },
+  fizzShadeOff: { help: 'Offset of the dark core toward lower-right, as a fraction of radius. Thickens the rim on the lit side.', group: 'Bubble', label: 'fizz shade offset', min: 0, max: 1, step: 0.05 },
   fizzSpeed: { help: 'Fizz rise speed, px/s.', group: 'Bubble', min: 0, max: 60, step: 1 },
   fizzDriftGain: { help: 'Fraction of rise speed steered toward the high end per g of along-tilt.', group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
   fizzAcrossGain: { help: 'Across-tilt → on-screen rise direction. 1 = rises toward the physically high edge.', group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },

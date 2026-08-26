@@ -606,18 +606,20 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Step 5: fizz — anti-aliased discs at float positions, squashed vertically by the local lens
   // magnification so they come out round after applyLens (size >= 3: darker interior, bright rim).
   if (p.fizz) {
-    const mag = lensMagRows(H, p), r = p.fizzSize / 2;
+    const mag = lensMagRows(H, p);
     for (const f of fizz[idx]) {
       const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
       if (f.x < 2 || f.x >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
-      const m = mag[fy], ry = r / m;
+      const r = p.fizzSize / 2 * (1 + (f.v - 1) * p.fizzSizeVar);
+      const m = mag[fy], ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
       for (let iy = Math.floor(f.y - ry - 1); iy <= Math.ceil(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
         for (let ix = Math.floor(f.x - r - 1); ix <= Math.ceil(f.x + r); ix++) {
           const dx = ix + 0.5 - f.x, dy = (iy + 0.5 - f.y) * m;
           const d = Math.sqrt(dx * dx + dy * dy), cov = Math.min(1, r + 0.5 - d);
           if (cov <= 0) continue;
-          pxa(mapX(ix), y0 + iy, r >= 1.5 && d < r - 1 ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
+          const cx = dx - off, cy = dy - off, dc = Math.sqrt(cx * cx + cy * cy);
+          pxa(mapX(ix), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }
       }
     }
