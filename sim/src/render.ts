@@ -648,13 +648,14 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   drawDigitLayer(true);
 }
 
-/** Dest rows per source row under `applyLens` (1 = no stretch), so pre-lens sprites can be pre-squashed. */
+/** Dest rows per source row under the rendered lens plus the physical glass (`topLens`), times `fizzSquash`,
+ *  so pre-lens sprites can be pre-squashed. */
 let lensMagCache: { key: string; rows: Float32Array } | null = null;
 function lensMagRows(H: number, p: Params): Float32Array {
-  const key = `${H}:${p.lens}:${p.lensCurve}`;
+  const key = `${H}:${p.lens}:${p.topLens}:${p.lensCurve}:${p.fizzSquash}`;
   if (lensMagCache && lensMagCache.key === key) return lensMagCache.rows;
   const rows = new Float32Array(H).fill(1);
-  const lens = Math.max(-1, Math.min(1, p.lens)), curve = Math.max(-3, Math.min(3, p.lensCurve));
+  const lens = Math.max(-1, Math.min(1, p.lens + p.topLens)), curve = Math.max(-3, Math.min(3, p.lensCurve));
   const signedCurve = lens < 0 ? -curve : curve, strength = Math.abs(lens);
   if (strength !== 0 && signedCurve !== 0) {
     const e = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
@@ -669,6 +670,7 @@ function lensMagRows(H: number, p: Params): Float32Array {
     for (let y = 0; y < H; y++) if (rows[y] > 0) { last = rows[y]; break; }
     for (let y = 0; y < H; y++) rows[y] > 0 ? (last = rows[y]) : (rows[y] = last);
   }
+  for (let y = 0; y < H; y++) rows[y] *= p.fizzSquash;
   lensMagCache = { key, rows };
   return rows;
 }

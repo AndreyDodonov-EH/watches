@@ -46,6 +46,7 @@
   "fizzDriftGain": 1,
   "fizzAcrossGain": 1,
   "fizzFlatRise": 0.3,
+  "fizzSquash": 1,
   "fizzSpeed": 14,
   "ticksH": true,
   "tickStepH": 1,
