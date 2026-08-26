@@ -82,13 +82,17 @@ else `display_init` fails at boot before `ble_init`.
 - **Presets** (`PRESETS` in `sim/src/params.ts`, picker in the panel bar, `?preset=<id>`): each is a whole
   look — liquid optics, glass, scale, labels and the physics of that liquid's density and viscosity — and is
   applied over `DEFAULT_PARAMS` (`presetParams`), so a preset is reproducible whatever the session held.
-  Signature: `blood` (opaque venous red, viscous, syringe print on the glass) · `sparkling` (near-clear,
-  per-minute lab graduations, constant fizz) · `xenon` (violet discharge, glow past the column end, no slosh)
-  · `mercury` (non-wetting convex bead, gravity-driven specular `lightPhys` 0.8, numerals etched into the
-  metal by `markContrast` 55) · `malt` (amber, clings to the wall, brass numerals) · `molten` (emissive
-  orange, heavy, forged numerals) · `cryo` (pale blue, boiling, frosted wall, watery physics) · `ink`
-  (matte black, ivory enamel numerals, panel mostly off) · `champagne` (pale gold, dense bead).
-  Legacy: `user1` / `mint` / `neon` / `concept`. Panel shots: `images/presets/<id>.png`.
+  All liquids share `MODERN_BASE` (from `examples/nice_meniscus.json`: thin tubes at the panel edges, lens −0.5,
+  physical light, rear sprite digits every hour / 5 min, free slug); opaque ones and lab glass use `FRONT_PRINT`.
+  Each preset declares a *material* (`mat`: viscosity class, opacity, emissive, wetting, gas) and
+  `npm run check:presets` (`sim/tools/check-presets.ts`) enforces the ranges that material implies — spring
+  ζ, slosh, meniscus stiffness/lag/film, transparency vs rear-vs-top marks, glow only when emissive, fizz
+  only with gas… (rules and the full list: `presets/PRESETS.md`). 2026-08-27 set: `frizzante` (colourless
+  sparkling water) · `urine` · `blood` · `milk` · `mercury` (etched scale on top: nothing shows through
+  metal) · `honey` (overdamped, clings) · `cola` · `malt` · `champagne` · `cryo` · `ink` · `glow` (glow
+  stick, emissive) · `xenon` (plasma, no inertia) · `molten` · `free` (user-tuned slug, exempt from the
+  checker); each also as `<id>-big` for the wider rod (`bigLens()`, 72 px tubes, lens −0.05). Legacy `user1` / `mint` / `neon` / `concept` and `sparkling` are gone. Panel shots:
+  `images/presets/<id>.png` / `<id>-big.png` (+ `contact-sheet.png`, `contact-sheet-big.png`).
   `npm run dump:presets` writes each as a full params JSON into `presets/<id>.json` — the input format of
   `firmware/tools/gen_params.py`.
 - Brightness is layered: `brightness` = panel dimmer (0x51), plus per-layer trims `liquidBright` /
@@ -119,7 +123,7 @@ else `display_init` fails at boot before `ble_init`.
   `tickPosH/M` independently select the top, bottom, or both edges.
   Marks inside the liquid keep a minimum luma distance from it (`markContrast`). Contract: `throughLiquid` in `sim/src/render.ts`.
 - Layer order is rear ticks → rear digits → bubbles/fizz → front ticks → tube lens remap → front digits. Ticks are never dropped for label bounds; later marks overwrite only intersecting pixels. `lens` and `lensCurve` use the same nearest-row remap in the simulator and firmware; `lensSmooth` is a simulator view option. Top ticks follow the curved tube. Top digits stay outside the tube lens; signed `topLens` independently pre-distorts them to compensate physical glass.
-- URL params, applied on top of the restored session: `?fresh=1&preset=neon&t=10:09&along=0.3&across=0&settle=1&cuff=0&lens=0.6&lenscurve=1&lenssmooth=1&leather=black&grid=1&scale=3&demo=120&p.<key>=<v>`.
+- URL params, applied on top of the restored session: `?fresh=1&preset=frizzante&t=10:09&along=0.3&across=0&settle=1&cuff=0&lens=0.6&lenscurve=1&lenssmooth=1&leather=black&grid=1&scale=3&demo=120&p.<key>=<v>`.
 - Parts sourcing research: `docs/parts-sourcing.md` (board is 57.5 × 24.5 mm; 8×4 mm acrylic half-round rod recommended).
 - **Pinned-liquid model + IMU hardening (2026-08-20, session 3)** — real accelerometer input no longer sends
   the visuals crazy, and the liquid can never appear/disappear with motion: `serial.ts` normalises by a slow

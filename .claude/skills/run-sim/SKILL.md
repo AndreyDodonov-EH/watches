@@ -16,7 +16,7 @@ Leave it running.
 
 ## 2. State via URL params (`sim/src/main.ts`, "URL params" block)
 
-`fresh=1` ignore saved session · `preset=<id>` (ids in `PRESETS`, `sim/src/params.ts`) · `t=HH:MM` · `demo=N` · `settle=1` springs at rest ·
+`fresh=1` ignore saved session · `preset=<id>` (ids in `PRESETS`, `sim/src/params.ts`; `<id>-big` = wide-rod twin) · `t=HH:MM` · `demo=N` · `settle=1` springs at rest ·
 `along=` `across=` tilt · `scale=` · `cuff=0` no leather · `lens=` `leather=black` · `grid=1` ·
 `p.<paramKey>=<value>` any param from `sim/src/params.ts` (colours URL-encoded: `%23ff0000`; bools `1`/`0`).
 
