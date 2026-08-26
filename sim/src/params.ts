@@ -310,252 +310,302 @@ const PLAIN_TUBE_BACK: Partial<Params> = {
   tubeBackDecalColor: '#80909a', tubeBackDecalOpacity: 0.65,
 };
 
-/** Neon preset close to images/reference-liquid.jpg */
-export const PRESET_NEON: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#39ff14', liquidHi: '#b6ffa0', liquidLo: '#158f08', bubbleRim: '#d8ffcc', tubeBack: '#061006',
-  fizz: true,
-};
-/** Concept-art preset (images/concept-cuff.jpg): rounded ends, convex bright front, neon. */
-export const PRESET_CONCEPT: Partial<Params> = {
-  ...PRESET_NEON, meniscusDepth: -14, meniscusPow: 2.2, cornerR: 36, frontBright: 16, edgeGlow: 18, glowStrength: 0.45,
-  highlightH: 14, highlightInset: 30, bubble: false, fizz: true, fizzCount: 10, fizzSize: 2, shadeDepth: 0.7,
-};
-/** User-tuned look (2026-08-20): deep green body, wide highlight, convex bright front, fizz. */
-export const PRESET_USER_V1: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#346a2a', liquidHi: '#b6ffa0', liquidLo: '#1e7515', tubeBack: '#000000', bubbleRim: '#b0c7a9',
-  highlightH: 30, highlightInset: 0, shadeDepth: 0.7, meniscusDepth: -8.5, meniscusPow: 1.6, edgeSoft: 2.7,
-  frontBright: 32, edgeGlow: 25, glowStrength: 0.47, cornerR: 0, bubble: false, fizz: true, fizzCount: 10, fizzSize: 2, fizzSpeed: 14,
-};
-export const PRESET_MINT: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#5dcaa5', liquidHi: '#9fe1cb', liquidLo: '#1f6b52', bubbleRim: '#bff5dc', tubeBack: '#000000',
-  fizz: false,
-};
-
 // ---------------------------------------------------------------------------
-// Signature presets. Each one is a whole look: liquid optics, glass, scale,
-// labels and the physics that go with that liquid's density and viscosity.
-// Applied over DEFAULT_PARAMS (see applyPreset), so they are reproducible.
+// Signature presets. Each one is a real liquid in a real vessel: optics, glass,
+// scale, labels and the physics of that liquid's viscosity, wetting and density.
+// The `mat` descriptor on each PRESETS entry is the contract the numbers must
+// satisfy — see presets/PRESETS.md and tools/check-presets.ts.
+// Applied over DEFAULT_PARAMS (see presetParams), so they are reproducible.
 // ---------------------------------------------------------------------------
 
-/** Venous blood in a graduated syringe: opaque, viscous, matte, clinical print on the glass. */
-export const PRESET_BLOOD: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#8c0f1c', liquidHi: '#d94a45', liquidLo: '#2a040b', tubeBack: '#050203', bubbleRim: '#e08a80',
-  glassHi: '#93a2ae', glassBody: 0.07, glassHiBright: 0.34, glassReflect: 0.14, glassRim: 0.5, glassOverLiquid: 0.22,
-  highlightH: 8, highlightBright: 0.9, highlightSharp: 2.6, highlightInset: 0, shadeDepth: 0.86,
-  meniscusDepth: 6, meniscusPow: 2, meniscusTiltGain: 0.4, meniscusAsym: 0.75,
-  edgeSoft: 1.6, frontBright: 8, edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.5,
-  bubble: false, fizz: false,
-  liquidTransparency: 0.05, markContrast: 0,
-  ticksOnTop: true, tickEmboss: 0, tickLens: 0, tickParallax: 0,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 7, tickMajorHeightH: 13, tickMajorWidthH: 2,
-  tickColorH: '#9aa4ac', tickMajorColorH: '#e8eef2', tickPosH: 0,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 7, tickMajorHeightM: 13, tickMajorWidthM: 2,
-  tickColorM: '#9aa4ac', tickMajorColorM: '#e8eef2', tickPosM: 0,
-  digits: true, digitFont: 1, digitsOnTop: true, digitShadow: false,
-  digitColor: '#eef3f6', digitColor2: '#aab6be', digitShadowColor: '#101010',
-  digitScaleX: 3.5, digitScaleY: 3.5, digitBottom: 4, digitHourStep: 3,
-  digitScaleXMin: 2.5, digitScaleYMin: 2.5, digitBottomMin: 4, digitMinuteStep: 15, digitsLeadingZero: true,
-  fillK: 170, fillDamp: 22, fillSloshGain: 3, angleK: 220, angleDamp: 24, angleTiltGain: 3, angleGyroGain: 0.15, angleMax: 4,
-  lightPhys: 0.2, lightAngle: 48,
-  brightness: 0.9, liquidBright: 1.05, tickBright: 1, digitBright: 1,
+/** What the preset claims to be; check-presets.ts derives the allowed ranges from it. */
+export interface Material {
+  viscosity: 'watery' | 'medium' | 'viscous' | 'metal' | 'plasma';
+  opacity: 'opaque' | 'translucent' | 'clear';
+  emissive: boolean;
+  wetting: boolean;   // concave meniscus + wet film vs convex bead
+  gas: 'none' | 'carbonated' | 'boiling' | 'trapped';
+}
+
+/** The modern base every liquid preset is built on (from examples/nice_meniscus.json, 2026-08-27):
+ *  thin tubes spread to the panel edges, lens −0.5 + topLens 0.35 for the physical rod, physical light
+ *  with a broad soft highlight, rear sprite digits every hour / 5 min, dark rear ticks on both edges,
+ *  a hysteretic wetting meniscus (contact lag, film, hard edge, faint caustic) and the free slug. */
+const MODERN_BASE: Partial<Params> = {
+  tubeHeight: 46, hoursY: 12, minutesY: 185,
+  tubeBack: '#000000', tubeBack2: '#000000', tubeBackGradient: 1,
+  tubeBackDecal: 1, tubeBackDecalColor: '#36393a', tubeBackDecalOpacity: 0.35,
+  glassHi: '#859093', glassBody: 0.04, glassHiBright: 0.34, glassReflect: 0.2, glassRim: 0.52, glassOverLiquid: 0.4,
+  lens: -0.5, lensCurve: -0.05,
+  highlightH: 17, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.68,
+  meniscusDepth: 4.5, meniscusPow: 3.6, meniscusTiltGain: 0.9, meniscusAsym: 1.05, meniscusLens: 0,
+  meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, contactLag: 3, wetFilm: 15,
+  edgeSoft: 0, frontBright: 0, edgeGlow: 19, glowStrength: 0.06, cornerR: 0, edgeLightGain: 0.55,
+  bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleTiltGain: 14, bubbleDark: 0.91,
+  fizz: false, fizzCount: 10, fizzSize: 2, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 14,
+  fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2,
+  ticksOnTop: false, tickLens: 0.4, tickParallax: 4.75, tickDryLens: 1, tickEmboss: 0.3,
+  ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3,
+  tickColorH: '#404040', tickMajorColorH: '#4d4d4d', tickPosH: 2,
+  ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 10, tickMajorHeightM: 28, tickMinorWidthM: 2, tickMajorWidthM: 2,
+  tickColorM: '#383838', tickMajorColorM: '#4d4d4d', tickPosM: 2,
+  digits: true, digitFont: 7, digitsOnTop: false, digitShadow: true, digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadowColor: '#101010',
+  digitTint: '#827c40', digitTintAmount: 0.9, digitTone: -0.4,
+  digitScaleX: 3.5, digitScaleY: 3.25, digitBottom: 15, digitHourStep: 1, digitHourStart: 0, digitsLastOnlyH: false,
+  digitScaleXMin: 2.5, digitScaleYMin: 2.75, digitBottomMin: 13, digitMinuteStep: 5, digitMinuteStart: 0, digitsLeadingZero: false, digitsLastOnlyM: false,
+  bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10,
+  liquidTransparency: 0.52, markContrast: 0,
+  freeLiquid: true, freeGain: 570, freeDamp: 0.8, freeBounce: 0.15, freeHomeK: 150, readFaceUp: 1, readAlongMax: 0.3, readTurn: 125, readHold: 11,
+  fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6, angleTiltGain: 5.5, angleGyroGain: 0.37, angleMax: 6,
+  lightPhys: 1, lightAngle: 73,
+  brightness: 1, liquidBright: 2, tickBright: 1.2, digitBright: 1.75,
 };
 
-/** Sparkling mineral water in a lab cylinder: near-clear, printed graduations, constant fizz. */
-export const PRESET_SPARKLING: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#79b6c9', liquidHi: '#f2ffff', liquidLo: '#22596c', tubeBack: '#03080a', bubbleRim: '#eaffff',
-  glassHi: '#d3e9f2', glassBody: 0.15, glassHiBright: 0.7, glassReflect: 0.3, glassRim: 0.75, glassOverLiquid: 0.55,
-  highlightH: 5, highlightBright: 1.25, highlightSharp: 3.2, highlightInset: 0, shadeDepth: 0.55,
-  meniscusDepth: 9, meniscusPow: 1.8, meniscusTiltGain: 0.5, meniscusAsym: 0.45,
-  edgeSoft: 2, frontBright: 14, edgeGlow: 6, glowStrength: 0.12, cornerR: 0, edgeLightGain: 0.9,
-  bubble: false, fizz: true, fizzCount: 46, fizzSize: 1, fizzSpeed: 40, fizzFlatRise: 0.5, fizzDriftGain: 1, fizzAcrossGain: 1,
-  liquidTransparency: 0.72, markContrast: 26,
+/** Wider tubes pushed to the panel edges (examples/frizzante_slightly_fixed.json). */
+const LAYOUT_WIDE: Partial<Params> = { tubeHeight: 55, hoursY: 7, minutesY: 224 };
+
+/** Print on the front of the glass: no cylinder lens, no parallax, opaque over the liquid. Used for opaque
+ *  liquids (nothing shows through) and lab glassware. Light tick colours so the ladder reads on the dry side. */
+const FRONT_PRINT: Partial<Params> = {
   ticksOnTop: true, tickEmboss: 0, tickLens: 0, tickParallax: 0,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 8, tickMajorHeightH: 16, tickMajorWidthH: 2,
-  tickColorH: '#8fb3bf', tickMajorColorH: '#ffffff', tickPosH: 0,
-  ticksM: true, tickStepM: 1, tickMajorEveryM: 5, tickMinorHeightM: 6, tickMajorHeightM: 13, tickMajorWidthM: 2,
-  tickColorM: '#7fa3af', tickMajorColorM: '#ffffff', tickPosM: 0,
-  digits: true, digitFont: 1, digitsOnTop: true, digitShadow: false,
-  digitColor: '#ffffff', digitColor2: '#cfe6ef',
+  tickMinorWidthH: 1, tickMajorWidthH: 2, tickMinorWidthM: 1, tickMajorWidthM: 2,
+  tickMinorHeightH: 7, tickMajorHeightH: 14, tickMinorHeightM: 6, tickMajorHeightM: 12,
+  tickMajorEveryH: 3, tickMajorEveryM: 15,
+  tickColorH: '#9aa4ac', tickMajorColorH: '#e8eef2', tickColorM: '#9aa4ac', tickMajorColorM: '#e8eef2',
+  tickPosH: 0, tickPosM: 0,
+  digitsOnTop: true, digitShadow: false,
+};
+
+// Viscosity classes on top of the base (checker ranges in tools/check-presets.ts).
+const WATERY: Partial<Params> = { freeDamp: 0.8, freeBounce: 0.2, meniscusK: 475, meniscusDamp: 8, meniscusInertia: 3, contactLag: 2, wetFilm: 10, angleTiltGain: 6.5, angleGyroGain: 0.42 };
+const MEDIUM: Partial<Params> = { freeDamp: 2.5, freeBounce: 0.1, meniscusK: 280, meniscusDamp: 16, meniscusInertia: 2, contactLag: 2.6, wetFilm: 15, angleTiltGain: 4, angleGyroGain: 0.25 };
+const VISCOUS: Partial<Params> = { freeDamp: 9, freeBounce: 0, meniscusK: 90, meniscusDamp: 34, meniscusInertia: 1, contactLag: 3, wetFilm: 26, angleTiltGain: 1.5, angleGyroGain: 0.06 };
+const METAL: Partial<Params> = { freeDamp: 1, freeBounce: 0.55, meniscusK: 650, meniscusDamp: 12, meniscusInertia: 4, contactLag: 0.1, wetFilm: 0, angleTiltGain: 2, angleGyroGain: 0.4 };
+
+/** Sparkling mineral water in a lab cylinder: the water itself is colourless — what you see is the
+ *  back through it, a white surface reflection, the meniscus and a constant fine bead. */
+export const PRESET_FRIZZANTE: Partial<Params> = {
+  ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...WATERY,
+  liquid: '#5d6c72', liquidHi: '#f4ffff', liquidLo: '#2b3438', tubeBack: '#0a0e10', tubeBack2: '#1c2529', tubeBackGradient: 2,
+  bubbleRim: '#f4ffff',
+  glassHi: '#dfeef4', glassBody: 0.12, glassHiBright: 0.55, glassReflect: 0.28, glassRim: 0.75, glassOverLiquid: 0.7,
+  highlightH: 8, highlightBright: 0.9, highlightSharp: 3, shadeDepth: 0.45,
+  meniscusDepth: 6, meniscusPow: 2.4,
+  fizz: true, fizzCount: 50, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 42, fizzFlatRise: 0.5, fizzSquash: 1.3,
+  liquidTransparency: 0.85, markContrast: 20,
+  tickStepM: 1, tickMajorEveryM: 5, tickColorH: '#9fb8c2', tickMajorColorH: '#ffffff', tickColorM: '#8fa9b4', tickMajorColorM: '#ffffff',
+  digitFont: 9, digitTintAmount: 0, digitTone: 0,
   digitScaleX: 3.25, digitScaleY: 3.25, digitBottom: 5, digitHourStep: 3,
-  digitScaleXMin: 2.25, digitScaleYMin: 2.25, digitBottomMin: 5, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 300, fillDamp: 9, fillSloshGain: 12, angleK: 190, angleDamp: 12, angleTiltGain: 9, angleGyroGain: 0.6, angleMax: 10,
-  lightPhys: 0.35, lightAngle: 55,
-  brightness: 0.95, liquidBright: 1.15, tickBright: 1.1, digitBright: 1.05,
+  digitScaleXMin: 2.25, digitScaleYMin: 2.25, digitBottomMin: 16, digitMinuteStep: 15,
+  liquidBright: 1.3, tickBright: 1.1, digitBright: 1.1,
 };
 
-/** Xenon discharge tube: violet plasma, no slosh, glow past the column end, seven-segment scale. */
-export const PRESET_XENON: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#6a3cf5', liquidHi: '#d9c8ff', liquidLo: '#1a0570', tubeBack: '#05020c', bubbleRim: '#d8ccff',
-  glassHi: '#a394d8', glassBody: 0.13, glassHiBright: 0.5, glassReflect: 0.2, glassRim: 0.6, glassOverLiquid: 0.6,
-  highlightH: 12, highlightBright: 0.85, highlightSharp: 1.5, highlightInset: 0, shadeDepth: 0.42,
-  meniscusDepth: -6, meniscusPow: 2, meniscusTiltGain: 0, meniscusAsym: 0,
-  edgeSoft: 0, frontBright: 22, edgeGlow: 26, glowStrength: 0.6, cornerR: 20, edgeLightGain: 0.3,
-  bubble: false, fizz: false,
-  liquidTransparency: 0.5, markContrast: 34,
-  ticksOnTop: false, tickLens: 0.4, tickParallax: 2, tickEmboss: 0.4,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 10, tickMajorHeightH: 20, tickMajorWidthH: 2,
-  tickColorH: '#3a2a6a', tickMajorColorH: '#9a86ff', tickPosH: 2,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 10, tickMajorHeightM: 20, tickMajorWidthM: 2,
-  tickColorM: '#3a2a6a', tickMajorColorM: '#9a86ff', tickPosM: 2,
-  digits: true, digitFont: 4, digitsOnTop: true, bottomLens: 0.35, digitShadow: false,
-  digitColor: '#00e5ff', digitColor2: '#00708f',
-  digitScaleX: 4.5, digitScaleY: 4, digitBottom: 14, digitHourStep: 3,
-  digitScaleXMin: 3.25, digitScaleYMin: 3.75, digitBottomMin: 17, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 260, fillDamp: 22, fillSloshGain: 0.5, angleK: 300, angleDamp: 26, angleTiltGain: 0.5, angleGyroGain: 0.05, angleMax: 2,
-  lightPhys: 0, lightAngle: 40,
-  brightness: 1, liquidBright: 1.18, tickBright: 1, digitBright: 0.9,
+/** Urine in a specimen cup: tinted amber (translucent, not colourless), watery, no bead
+ *  (examples/urine_1.json + nice_meniscus.json, minus the bubbles). */
+export const PRESET_URINE: Partial<Params> = {
+  ...MODERN_BASE, ...WATERY,
+  liquid: '#6d6112', liquidHi: '#809419', liquidLo: '#79792a', bubbleRim: '#322606',
+  meniscusDepth: 4.5, meniscusPow: 3.6, meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, contactLag: 3, wetFilm: 15,
+  fizz: false, liquidTransparency: 0.52,
 };
 
-/** Mercury column: non-wetting convex bead, mirror specular that follows real gravity, etched glass scale. */
+/** Venous blood in a graduated syringe: opaque, a few times thicker than water, coats the glass. */
+export const PRESET_BLOOD: Partial<Params> = {
+  ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...MEDIUM,
+  liquid: '#6e0b16', liquidHi: '#c8443f', liquidLo: '#1c0306', tubeBack: '#050203', tubeBack2: '#0a0405', bubbleRim: '#e08a80',
+  glassHi: '#93a2ae', glassBody: 0.06, glassHiBright: 0.3, glassReflect: 0.14, glassRim: 0.5, glassOverLiquid: 0.22,
+  highlightH: 10, highlightBright: 0.5, highlightSharp: 2, shadeDepth: 0.86,
+  meniscusDepth: 5, meniscusPow: 2.6,
+  liquidTransparency: 0.05,
+  digitFont: 9, digitTintAmount: 0, digitTone: 0,
+  digitScaleX: 3.25, digitScaleY: 3.25, digitBottom: 5, digitHourStep: 3,
+  digitScaleXMin: 2.25, digitScaleYMin: 2.25, digitBottomMin: 16, digitMinuteStep: 15, digitsLeadingZero: true,
+  liquidBright: 1.4, tickBright: 1, digitBright: 1.1,
+};
+
+/** Milk: an opaque scattering colloid — soft wide highlight, gentle shading, a little thicker than water. */
+export const PRESET_MILK: Partial<Params> = {
+  ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...MEDIUM,
+  liquid: '#c9c5ba', liquidHi: '#ffffff', liquidLo: '#7a7568', tubeBack: '#0a0a0a', tubeBack2: '#101010', bubbleRim: '#ffffff',
+  glassHi: '#d8dde0', glassBody: 0.08, glassHiBright: 0.4, glassReflect: 0.18, glassRim: 0.5, glassOverLiquid: 0.35,
+  highlightH: 16, highlightBright: 0.4, highlightSharp: 0.8, shadeDepth: 0.5,
+  meniscusDepth: 4, meniscusPow: 2.6,
+  liquidTransparency: 0.03,
+  tickColorH: '#7aa3bd', tickMajorColorH: '#5b8db0', tickColorM: '#7aa3bd', tickMajorColorM: '#5b8db0',
+  digitFont: 10, digitTint: '#4f86ab', digitTintAmount: 0.8, digitTone: -0.1,
+  digitScaleX: 3.25, digitScaleY: 3.25, digitBottom: 5, digitHourStep: 3,
+  digitScaleXMin: 2.25, digitScaleYMin: 2.25, digitBottomMin: 16, digitMinuteStep: 15,
+  liquidBright: 1.2, tickBright: 1.1, digitBright: 1.3,
+};
+
+/** Mercury thermometer: opaque non-wetting bead with a mirror specular that follows real gravity;
+ *  the scale is etched on the glass because nothing shows through the metal. */
 export const PRESET_MERCURY: Partial<Params> = {
-  liquid: '#b7c1c8', liquidHi: '#ffffff', liquidLo: '#333c44',
-  tubeBack: '#10171c', tubeBack2: '#46545d', tubeBackGradient: 2,
-  tubeBackDecal: 2, tubeBackDecalColor: '#d2dce0', tubeBackDecalOpacity: 0.52,
+  ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...METAL,
+  liquid: '#8f9aa2', liquidHi: '#ffffff', liquidLo: '#232b31',
+  tubeBack: '#3a444c', tubeBack2: '#6a7880', tubeBackGradient: 2,
+  tubeBackDecal: 2, tubeBackDecalColor: '#8a9aa4', tubeBackDecalOpacity: 0.52,
   bubbleRim: '#e8f0f5',
   glassHi: '#e2edf5', glassBody: 0.13, glassHiBright: 0.6, glassReflect: 0.35, glassRim: 0.78, glassOverLiquid: 0.5,
-  highlightH: 6, highlightBright: 1.45, highlightSharp: 3.6, highlightInset: 0, shadeDepth: 0.95,
-  meniscusDepth: -11, meniscusPow: 2.4, meniscusTiltGain: 0.35, meniscusAsym: 0.15,
-  edgeSoft: 1, frontBright: 30, edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.7,
-  bubble: false, fizz: false,
-  liquidTransparency: 0, markContrast: 55,
-  ticksOnTop: true, tickLens: 0, tickParallax: 0, tickEmboss: 0.35,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 8, tickMajorHeightH: 16, tickMajorWidthH: 2,
-  tickColorH: '#8b959d', tickMajorColorH: '#e6eef4', tickPosH: 0,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 8, tickMajorHeightM: 16, tickMajorWidthM: 2,
-  tickColorM: '#8b959d', tickMajorColorM: '#e6eef4', tickPosM: 0,
-  digits: true, digitFont: 10, digitsOnTop: false, bottomLens: 0.5,
-  digitTint: '#dfe9f0', digitTintAmount: 0.6, digitTone: 0.3,
-  digitScaleX: 5, digitScaleY: 4.25, digitBottom: 12, digitHourStep: 3,
-  digitScaleXMin: 3.5, digitScaleYMin: 4, digitBottomMin: 14, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 120, fillDamp: 8, fillSloshGain: 9, angleK: 260, angleDamp: 14, angleTiltGain: 2, angleGyroGain: 0.5, angleMax: 5,
-  lightPhys: 0.8, lightAngle: 50,
-  brightness: 0.88, liquidBright: 1.1, tickBright: 1.05, digitBright: 1.15,
+  highlightH: 7, highlightBright: 1.3, highlightSharp: 3.6, shadeDepth: 0.95,
+  meniscusDepth: -8, meniscusPow: 2.4, meniscusTiltGain: 0.35, meniscusAsym: 0.15,
+  frontBright: 22, edgeGlow: 0, glowStrength: 0, edgeLightGain: 0.7,
+  liquidTransparency: 0,
+  tickEmboss: 0.35, tickColorH: '#0e1418', tickMajorColorH: '#060a0c', tickColorM: '#0e1418', tickMajorColorM: '#060a0c',
+  digitFont: 10, digitTint: '#1e262c', digitTintAmount: 0.6, digitTone: -0.6,
+  digitScaleX: 3.5, digitScaleY: 3.25, digitBottom: 6, digitHourStep: 3,
+  digitScaleXMin: 2.5, digitScaleYMin: 2.5, digitBottomMin: 16, digitMinuteStep: 15,
+  liquidBright: 1.35, tickBright: 1.05, digitBright: 1,
 };
 
-/** Single malt in cut crystal: warm amber, alcohol clings to the wall, brass numerals under the liquid. */
+/** Honey: translucent amber syrup — overdamped, climbs and clings, a few slow trapped bubbles,
+ *  brass numerals seen through it. */
+export const PRESET_HONEY: Partial<Params> = {
+  ...MODERN_BASE, ...VISCOUS,
+  liquid: '#7a4206', liquidHi: '#f0c060', liquidLo: '#3d1c03', tubeBack: '#0c0703', tubeBack2: '#1c1208', bubbleRim: '#ffd890',
+  glassHi: '#f0dcb0', glassBody: 0.08, glassHiBright: 0.45, glassReflect: 0.25, glassRim: 0.6,
+  highlightH: 14, highlightBright: 0.4, highlightSharp: 1.8, shadeDepth: 0.78,
+  meniscusDepth: 9, meniscusPow: 2.2,
+  fizz: true, fizzCount: 5, fizzSize: 3, fizzSizeVar: 0.6, fizzShadeOff: 0.5, fizzSpeed: 3, fizzFlatRise: 0.15, fizzDriftGain: 0.4, fizzAcrossGain: 0.8, fizzSquash: 1.4,
+  liquidTransparency: 0.32,
+  tickColorH: '#4a3210', tickMajorColorH: '#5a3e14', tickColorM: '#4a3210', tickMajorColorM: '#5a3e14',
+  digitFont: 6, digitTint: '#d4923a', digitTintAmount: 0.5, digitTone: 0,
+  liquidBright: 1.8, tickBright: 1.1, digitBright: 1.5,
+};
+
+/** Cola: dark but translucent in a thin tube, watery, lively bead; cream enamel numerals behind. */
+export const PRESET_COLA: Partial<Params> = {
+  ...MODERN_BASE, ...WATERY,
+  liquid: '#3a1206', liquidHi: '#e8b890', liquidLo: '#120602', tubeBack: '#070403', tubeBack2: '#140c07', bubbleRim: '#f0d8c4',
+  glassHi: '#e8dcd2', glassBody: 0.08, glassHiBright: 0.5, glassReflect: 0.25, glassRim: 0.6, glassOverLiquid: 0.5,
+  highlightH: 9, highlightBright: 0.5, highlightSharp: 3, shadeDepth: 0.7,
+  meniscusDepth: 5, meniscusPow: 2.6,
+  fizz: true, fizzCount: 40, fizzSize: 1.5, fizzSizeVar: 0.6, fizzSpeed: 36, fizzFlatRise: 0.45, fizzSquash: 1.3,
+  liquidTransparency: 0.38, markContrast: 24,
+  tickColorH: '#4a3e32', tickMajorColorH: '#5a4a3c', tickColorM: '#4a3e32', tickMajorColorM: '#5a4a3c',
+  digitFont: 9, digitTint: '#f3e6c8', digitTintAmount: 0.4, digitTone: 0,
+  liquidBright: 1.7, tickBright: 1.1, digitBright: 1.4,
+};
+
+/** Single malt in cut crystal: warm amber, a shade thicker than water, alcohol legs on the wall,
+ *  brass numerals under the liquid, ticks cut into the glass. */
 export const PRESET_MALT: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#b3600f', liquidHi: '#ffcf7a', liquidLo: '#431a04', tubeBack: '#0a0603', bubbleRim: '#f0c88a',
-  glassHi: '#f2e0b4', glassBody: 0.16, glassHiBright: 0.65, glassReflect: 0.35, glassRim: 0.8, glassOverLiquid: 0.45,
-  highlightH: 12, highlightBright: 1, highlightSharp: 1.4, highlightInset: 0, shadeDepth: 0.8,
-  meniscusDepth: 7, meniscusPow: 2.2, meniscusTiltGain: 0.6, meniscusAsym: 0.8,
-  edgeSoft: 2.6, frontBright: 18, edgeGlow: 10, glowStrength: 0.22, cornerR: 0, edgeLightGain: 1,
-  bubble: false, fizz: false,
-  liquidTransparency: 0.45, markContrast: 34,
-  ticksOnTop: false, tickLens: 0.4, tickParallax: 3, tickEmboss: 0.5,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 10, tickMajorHeightH: 18, tickMajorWidthH: 2,
-  tickColorH: '#6b4a1f', tickMajorColorH: '#d9a441', tickPosH: 2,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 10, tickMajorHeightM: 18, tickMajorWidthM: 2,
-  tickColorM: '#6b4a1f', tickMajorColorM: '#d9a441', tickPosM: 2,
-  digits: true, digitFont: 6, digitsOnTop: false, bottomLens: 0.35,
-  digitTint: '#c08a2a', digitTintAmount: 0.35, digitTone: 0.2,
-  digitScaleX: 6, digitScaleY: 5, digitBottom: 16, digitHourStep: 3,
-  digitScaleXMin: 3.75, digitScaleYMin: 4.5, digitBottomMin: 19, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 200, fillDamp: 13, fillSloshGain: 7, angleK: 200, angleDamp: 16, angleTiltGain: 6, angleGyroGain: 0.3, angleMax: 8,
-  lightPhys: 0.25, lightAngle: 52,
-  brightness: 0.85, liquidBright: 1.15, tickBright: 1, digitBright: 1.1,
+  ...MODERN_BASE, ...MEDIUM,
+  liquid: '#7a4e14', liquidHi: '#ffe0a8', liquidLo: '#2e1704', tubeBack: '#0a0603', tubeBack2: '#160e05', bubbleRim: '#f0c88a',
+  glassHi: '#f2e0b4', glassBody: 0.1, glassHiBright: 0.5, glassReflect: 0.3, glassRim: 0.7, glassOverLiquid: 0.45,
+  highlightH: 12, highlightBright: 0.5, highlightSharp: 1.6, shadeDepth: 0.78,
+  meniscusDepth: 7, meniscusPow: 2.4, wetFilm: 18,
+  liquidTransparency: 0.42, markContrast: 24,
+  ticksOnTop: true, tickLens: 0, tickParallax: 0, tickEmboss: 0.5,
+  tickMinorWidthH: 1, tickMajorWidthH: 2, tickMinorWidthM: 1, tickMajorWidthM: 2, tickMajorEveryH: 3, tickMajorEveryM: 15,
+  tickColorH: '#6a5a40', tickMajorColorH: '#b09660', tickColorM: '#6a5a40', tickMajorColorM: '#b09660',
+  digitFont: 6, digitTint: '#c08a2a', digitTintAmount: 0.4, digitTone: 0.1,
+  liquidBright: 1.8, tickBright: 0.9, digitBright: 1.4,
 };
 
-/** Molten iron in a sooted vial: emissive, opaque, slow and heavy, forged numerals. */
-export const PRESET_MOLTEN: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#ff5a00', liquidHi: '#ffd98a', liquidLo: '#5e0e00', tubeBack: '#0b0300', bubbleRim: '#ffd08a',
-  glassHi: '#c08a60', glassBody: 0.09, glassHiBright: 0.4, glassReflect: 0.18, glassRim: 0.45, glassOverLiquid: 0.3,
-  highlightH: 8, highlightBright: 0.85, highlightSharp: 1.2, highlightInset: 0, shadeDepth: 0.78,
-  meniscusDepth: -4, meniscusPow: 2, meniscusTiltGain: 0.5, meniscusAsym: 0.5,
-  edgeSoft: 0, frontBright: 20, edgeGlow: 26, glowStrength: 0.6, cornerR: 0, edgeLightGain: 1,
-  bubble: false, fizz: true, fizzCount: 12, fizzSize: 2, fizzSpeed: 8, fizzFlatRise: 0.25, fizzDriftGain: 0.6, fizzAcrossGain: 0.8,
-  liquidTransparency: 0.06, markContrast: 44,
-  ticksOnTop: false, tickLens: 0.35, tickParallax: 2, tickEmboss: 0.35,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 10, tickMajorHeightH: 18, tickMajorWidthH: 3,
-  tickColorH: '#4a3a34', tickMajorColorH: '#9a8478', tickPosH: 2,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 10, tickMajorHeightM: 18, tickMajorWidthM: 3,
-  tickColorM: '#4a3a34', tickMajorColorM: '#9a8478', tickPosM: 2,
-  digits: true, digitFont: 8, digitsOnTop: false, bottomLens: 0.35,
-  digitTint: '#b06a34', digitTintAmount: 0.45, digitTone: 0.3,
-  digitScaleX: 6, digitScaleY: 5, digitBottom: 15, digitHourStep: 3,
-  digitScaleXMin: 3.75, digitScaleYMin: 4.5, digitBottomMin: 18, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 140, fillDamp: 20, fillSloshGain: 4, angleK: 180, angleDamp: 22, angleTiltGain: 3, angleGyroGain: 0.15, angleMax: 5,
-  lightPhys: 0.15, lightAngle: 45,
-  brightness: 0.95, liquidBright: 1.2, tickBright: 1, digitBright: 1.1,
+/** Champagne flute: tinted pale gold (translucent), watery, dense fine bead, amber-resin numerals. */
+export const PRESET_CHAMPAGNE: Partial<Params> = {
+  ...MODERN_BASE, ...WATERY,
+  liquid: '#8a7228', liquidHi: '#fff8dc', liquidLo: '#4a3808', tubeBack: '#080602', tubeBack2: '#161004', bubbleRim: '#fff4cc',
+  glassHi: '#f6ecd0', glassBody: 0.1, glassHiBright: 0.55, glassReflect: 0.3, glassRim: 0.7, glassOverLiquid: 0.55,
+  highlightH: 9, highlightBright: 0.55, highlightSharp: 2.6, shadeDepth: 0.55,
+  meniscusDepth: 5, meniscusPow: 2.6,
+  fizz: true, fizzCount: 60, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 46, fizzFlatRise: 0.45, fizzSquash: 1.3,
+  liquidTransparency: 0.5, markContrast: 24,
+  tickColorH: '#4a3e18', tickMajorColorH: '#5a4c20', tickColorM: '#4a3e18', tickMajorColorM: '#5a4c20',
+  digitFont: 11, digitTint: '#e0b45a', digitTintAmount: 0.2, digitTone: 0,
+  liquidBright: 1.8, tickBright: 1.1, digitBright: 1.1,
 };
 
-/** Cryogenic oxygen: pale blue, boiling hard, frosted wall, very low viscosity. */
+/** Cryogenic oxygen: clear pale blue, thinner than water, boiling hard, frosted wall. */
 export const PRESET_CRYO: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#5fb4e8', liquidHi: '#ffffff', liquidLo: '#0e3f66', tubeBack: '#03070c', bubbleRim: '#f0fbff',
-  glassHi: '#e2f4ff', glassBody: 0.2, glassHiBright: 0.5, glassReflect: 0.28, glassRim: 0.85, glassOverLiquid: 0.6,
-  highlightH: 9, highlightBright: 1.1, highlightSharp: 1.6, highlightInset: 0, shadeDepth: 0.6,
-  meniscusDepth: 10, meniscusPow: 1.6, meniscusTiltGain: 0.5, meniscusAsym: 0.4,
-  edgeSoft: 3, frontBright: 12, edgeGlow: 12, glowStrength: 0.2, cornerR: 0, edgeLightGain: 0.9,
-  bubble: false, fizz: true, fizzCount: 55, fizzSize: 1, fizzSpeed: 52, fizzFlatRise: 0.6, fizzDriftGain: 1.2, fizzAcrossGain: 1,
-  liquidTransparency: 0.6, markContrast: 40,
-  ticksOnTop: true, tickEmboss: 0, tickLens: 0, tickParallax: 0,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 7, tickMajorHeightH: 12, tickMajorWidthH: 2,
-  tickColorH: '#9ec4d6', tickMajorColorH: '#ffffff', tickPosH: 2,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 7, tickMajorHeightM: 12, tickMajorWidthM: 2,
-  tickColorM: '#9ec4d6', tickMajorColorM: '#ffffff', tickPosM: 2,
-  digits: true, digitFont: 5, digitsOnTop: false, bottomLens: 0.35,
-  digitTint: '#a6d8ff', digitTintAmount: 0.6, digitTone: 0.15,
-  digitScaleX: 5.5, digitScaleY: 4.75, digitBottom: 15, digitHourStep: 3,
-  digitScaleXMin: 3.5, digitScaleYMin: 4.25, digitBottomMin: 18, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 320, fillDamp: 7, fillSloshGain: 14, angleK: 170, angleDamp: 10, angleTiltGain: 11, angleGyroGain: 0.7, angleMax: 12,
-  lightPhys: 0.4, lightAngle: 58,
-  brightness: 0.95, liquidBright: 1.2, tickBright: 1.1, digitBright: 0.95,
+  ...MODERN_BASE, ...WATERY,
+  liquid: '#3a7aa8', liquidHi: '#ffffff', liquidLo: '#0e3f66', tubeBack: '#03070c', tubeBack2: '#0c1620', bubbleRim: '#f0fbff',
+  glassHi: '#e2f4ff', glassBody: 0.16, glassHiBright: 0.45, glassReflect: 0.28, glassRim: 0.85, glassOverLiquid: 0.6,
+  highlightH: 10, highlightBright: 0.45, highlightSharp: 1.8, shadeDepth: 0.45,
+  meniscusDepth: 6, meniscusPow: 2.2, meniscusK: 520, meniscusDamp: 4, meniscusInertia: 4, contactLag: 1.5, wetFilm: 8,
+  freeDamp: 0.5, freeBounce: 0.3, angleTiltGain: 8, angleGyroGain: 0.5,
+  fizz: true, fizzCount: 55, fizzSize: 1, fizzSizeVar: 0.5, fizzSpeed: 52, fizzFlatRise: 0.6, fizzDriftGain: 1.2, fizzSquash: 1.3,
+  liquidTransparency: 0.72, markContrast: 20,
+  tickColorH: '#3a5060', tickMajorColorH: '#465e70', tickColorM: '#3a5060', tickMajorColorM: '#465e70',
+  digitFont: 5, digitTint: '#a6d8ff', digitTintAmount: 0.6, digitTone: 0.15,
+  liquidBright: 1.6, tickBright: 1.1, digitBright: 1.3,
 };
 
 /** India ink: matte black body, almost every pixel off, enamel numerals printed on the glass. */
 export const PRESET_INK: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#141d36', liquidHi: '#6178a8', liquidLo: '#03040c', tubeBack: '#000000', bubbleRim: '#4a5a78',
-  glassHi: '#8c9bb5', glassBody: 0.06, glassHiBright: 0.3, glassReflect: 0.22, glassRim: 0.45, glassOverLiquid: 0.3,
-  highlightH: 5, highlightBright: 1.1, highlightSharp: 2.6, highlightInset: 0, shadeDepth: 0.9,
-  meniscusDepth: 5, meniscusPow: 2.2, meniscusTiltGain: 0.4, meniscusAsym: 0.6,
-  edgeSoft: 2, frontBright: 16, edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.6,
-  bubble: false, fizz: false,
-  liquidTransparency: 0, markContrast: 0,
-  ticksOnTop: true, tickEmboss: 0, tickLens: 0, tickParallax: 0,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 6, tickMajorHeightH: 14, tickMajorWidthH: 1,
-  tickColorH: '#5c6470', tickMajorColorH: '#e8e4d8', tickPosH: 0,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 6, tickMajorHeightM: 14, tickMajorWidthM: 1,
-  tickColorM: '#5c6470', tickMajorColorM: '#e8e4d8', tickPosM: 0,
-  digits: true, digitFont: 9, digitsOnTop: true,
-  digitTint: '#efe7d2', digitTintAmount: 0.5, digitTone: 0.1,
-  digitScaleX: 5.5, digitScaleY: 4.75, digitBottom: 14, digitHourStep: 3,
-  digitScaleXMin: 3.5, digitScaleYMin: 4.25, digitBottomMin: 17, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 180, fillDamp: 18, fillSloshGain: 5, angleK: 210, angleDamp: 20, angleTiltGain: 4, angleGyroGain: 0.2, angleMax: 5,
-  lightPhys: 0.2, lightAngle: 50,
-  brightness: 0.8, liquidBright: 1.15, tickBright: 1.2, digitBright: 1.1,
+  ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...MEDIUM,
+  liquid: '#0e1428', liquidHi: '#5a70a0', liquidLo: '#03040c', tubeBack: '#000000', tubeBack2: '#000000', bubbleRim: '#4a5a78',
+  glassHi: '#8c9bb5', glassBody: 0.05, glassHiBright: 0.3, glassReflect: 0.2, glassRim: 0.45, glassOverLiquid: 0.3,
+  highlightH: 7, highlightBright: 0.8, highlightSharp: 2.6, shadeDepth: 0.9,
+  meniscusDepth: 4, meniscusPow: 2.6,
+  liquidTransparency: 0,
+  tickMinorWidthH: 1, tickMajorWidthH: 1, tickMinorWidthM: 1, tickMajorWidthM: 1,
+  tickColorH: '#5c6470', tickMajorColorH: '#e8e4d8', tickColorM: '#5c6470', tickMajorColorM: '#e8e4d8',
+  digitFont: 9, digitTint: '#efe7d2', digitTintAmount: 0.5, digitTone: 0.1,
+  digitScaleX: 3.25, digitScaleY: 3.25, digitBottom: 5, digitHourStep: 3,
+  digitScaleXMin: 2.25, digitScaleYMin: 2.25, digitBottomMin: 16, digitMinuteStep: 15,
+  brightness: 0.85, liquidBright: 1.3, tickBright: 1.2, digitBright: 1.1,
 };
 
-/** Champagne flute: pale gold, dense fine bead, amber-resin numerals read through the wine. */
-export const PRESET_CHAMPAGNE: Partial<Params> = {
-  ...PLAIN_TUBE_BACK,
-  liquid: '#d8ae55', liquidHi: '#fff8dc', liquidLo: '#6f4a0c', tubeBack: '#080602', bubbleRim: '#fff4cc',
-  glassHi: '#f6ecd0', glassBody: 0.15, glassHiBright: 0.68, glassReflect: 0.32, glassRim: 0.8, glassOverLiquid: 0.5,
-  highlightH: 7, highlightBright: 0.95, highlightSharp: 2.4, highlightInset: 0, shadeDepth: 0.6,
-  meniscusDepth: 8, meniscusPow: 1.8, meniscusTiltGain: 0.55, meniscusAsym: 0.6,
-  edgeSoft: 2.2, frontBright: 16, edgeGlow: 8, glowStrength: 0.18, cornerR: 0, edgeLightGain: 1,
-  bubble: false, fizz: true, fizzCount: 60, fizzSize: 1, fizzSpeed: 46, fizzFlatRise: 0.45, fizzDriftGain: 1, fizzAcrossGain: 1,
-  liquidTransparency: 0.6, markContrast: 30,
-  ticksOnTop: false, tickLens: 0.35, tickParallax: 3, tickEmboss: 0.45,
-  ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 6, tickMajorHeightH: 16, tickMajorWidthH: 2,
-  tickColorH: '#7a6320', tickMajorColorH: '#f0dca0', tickPosH: 2,
-  ticksM: true, tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 6, tickMajorHeightM: 16, tickMajorWidthM: 2,
-  tickColorM: '#7a6320', tickMajorColorM: '#f0dca0', tickPosM: 2,
-  digits: true, digitFont: 11, digitsOnTop: false, bottomLens: 0.35,
-  digitTint: '#e0b45a', digitTintAmount: 0.4, digitTone: 0.1,
-  digitScaleX: 5.75, digitScaleY: 4.75, digitBottom: 15, digitHourStep: 3,
-  digitScaleXMin: 3.5, digitScaleYMin: 4.25, digitBottomMin: 18, digitMinuteStep: 15, digitsLeadingZero: false,
-  fillK: 280, fillDamp: 8, fillSloshGain: 11, angleK: 185, angleDamp: 11, angleTiltGain: 9, angleGyroGain: 0.55, angleMax: 10,
-  lightPhys: 0.3, lightAngle: 55,
-  brightness: 0.95, liquidBright: 1.05, tickBright: 1, digitBright: 0.95,
+/** Glow stick: fluorescent green ester, its own light source — glow past the cap, no world light,
+ *  a shade thicker than water; seven-segment print on the tube. */
+export const PRESET_GLOW: Partial<Params> = {
+  ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...MEDIUM,
+  liquid: '#5ad81e', liquidHi: '#e4ffc8', liquidLo: '#1f7a08', tubeBack: '#020602', tubeBack2: '#061006', bubbleRim: '#dfffc0',
+  tubeBackDecal: 0,
+  glassHi: '#a8d8a0', glassBody: 0.06, glassHiBright: 0.35, glassReflect: 0.15, glassRim: 0.4, glassOverLiquid: 0.4,
+  highlightH: 14, highlightBright: 0.6, highlightSharp: 1.2, shadeDepth: 0.55,
+  meniscusDepth: 5, meniscusPow: 2.6,
+  edgeSoft: 0, frontBright: 14, edgeGlow: 28, glowStrength: 0.7, edgeLightGain: 0.3,
+  liquidTransparency: 0.35, markContrast: 30,
+  tickPosH: 2, tickPosM: 2, tickColorH: '#4f8a3e', tickMajorColorH: '#c6ffb0', tickColorM: '#4f8a3e', tickMajorColorM: '#c6ffb0',
+  digitFont: 3, digitColor: '#e6ffd6', digitColor2: '#8fe070',
+  digitScaleX: 3.5, digitScaleY: 3.25, digitBottom: 10, digitHourStep: 3,
+  digitScaleXMin: 2.5, digitScaleYMin: 2.75, digitBottomMin: 14, digitMinuteStep: 15,
+  lightPhys: 0, lightAngle: 45,
+  liquidBright: 1.3, tickBright: 1, digitBright: 1,
+};
+
+/** Xenon discharge tube: violet plasma has no inertia — no slosh, no meniscus dynamics, no film, no slug —
+ *  glow past the column end, bold print. */
+export const PRESET_XENON: Partial<Params> = {
+  ...MODERN_BASE, ...LAYOUT_WIDE,
+  liquid: '#5a30d8', liquidHi: '#d9c8ff', liquidLo: '#1a0570', tubeBack: '#05020c', tubeBack2: '#0a0418', bubbleRim: '#d8ccff',
+  tubeBackDecal: 0,
+  glassHi: '#a394d8', glassBody: 0.1, glassHiBright: 0.5, glassReflect: 0.2, glassRim: 0.6, glassOverLiquid: 0.4,
+  highlightH: 14, highlightBright: 0.7, highlightSharp: 1.5, shadeDepth: 0.42,
+  meniscusDepth: -5, meniscusPow: 2, meniscusTiltGain: 0, meniscusAsym: 0,
+  meniscusK: 400, meniscusDamp: 30, meniscusInertia: 0, contactLag: 0, wetFilm: 0,
+  edgeSoft: 0, frontBright: 18, edgeGlow: 26, glowStrength: 0.6, cornerR: 14, edgeLightGain: 0.3,
+  liquidTransparency: 0.5, markContrast: 34,
+  tickMajorEveryH: 3, tickMajorEveryM: 15, tickColorH: '#3a2a6a', tickMajorColorH: '#9a86ff', tickColorM: '#3a2a6a', tickMajorColorM: '#9a86ff',
+  digitFont: 4, digitsOnTop: true, digitShadow: false, digitColor: '#00e5ff', digitColor2: '#00708f',
+  digitScaleX: 3.5, digitScaleY: 3.25, digitBottom: 10, digitHourStep: 3,
+  digitScaleXMin: 2.5, digitScaleYMin: 2.75, digitBottomMin: 14, digitMinuteStep: 15,
+  freeLiquid: false, fillK: 260, fillDamp: 22, fillSloshGain: 0.5, angleK: 300, angleDamp: 26, angleTiltGain: 0.5, angleGyroGain: 0.03, angleMax: 2,
+  lightPhys: 0, lightAngle: 40,
+  liquidBright: 1.3, tickBright: 1, digitBright: 0.9,
+};
+
+/** Molten iron in a sooted vial: emissive, opaque, dense, does not wet the wall, slow gas bubbles;
+ *  forged numerals printed on the glass. */
+export const PRESET_MOLTEN: Partial<Params> = {
+  ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...MEDIUM,
+  liquid: '#e04c00', liquidHi: '#ffd98a', liquidLo: '#5e0e00', tubeBack: '#0b0300', tubeBack2: '#160600', bubbleRim: '#ffd08a',
+  glassHi: '#c08a60', glassBody: 0.07, glassHiBright: 0.4, glassReflect: 0.18, glassRim: 0.45, glassOverLiquid: 0.3,
+  highlightH: 10, highlightBright: 0.6, highlightSharp: 1.2, shadeDepth: 0.78,
+  meniscusDepth: -4, meniscusPow: 2, meniscusK: 400, meniscusDamp: 14, meniscusInertia: 4, contactLag: 0.2, wetFilm: 0,
+  freeDamp: 2.5, freeBounce: 0.05,
+  edgeSoft: 0, frontBright: 16, edgeGlow: 26, glowStrength: 0.6, edgeLightGain: 1,
+  fizz: true, fizzCount: 10, fizzSize: 2.5, fizzSizeVar: 0.5, fizzShadeOff: 0.4, fizzSpeed: 7, fizzFlatRise: 0.25, fizzDriftGain: 0.6, fizzAcrossGain: 0.8, fizzSquash: 1.4,
+  liquidTransparency: 0.06,
+  tickEmboss: 0.35, tickPosH: 2, tickPosM: 2, tickColorH: '#6a5248', tickMajorColorH: '#b39a8c', tickColorM: '#6a5248', tickMajorColorM: '#b39a8c',
+  digitFont: 8, digitTint: '#b06a34', digitTintAmount: 0.45, digitTone: 0.3,
+  digitScaleX: 3.5, digitScaleY: 3.25, digitBottom: 6, digitHourStep: 3,
+  digitScaleXMin: 2.5, digitScaleYMin: 2.5, digitBottomMin: 16, digitMinuteStep: 15,
+  lightPhys: 0, lightAngle: 45,
+  liquidBright: 1.3, tickBright: 1, digitBright: 1.1,
 };
 
 /** Free liquid: the column slides as a slug and only parks to show the time on a wrist turn into the reading pose
@@ -582,25 +632,51 @@ const PRESET_FREE: Partial<Params> = {
   fillK: 756, fillDamp: 40, lightPhys: 1, brightness: 1, liquidBright: 2, digitBright: 1.53,
 };
 
-export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; legacy?: boolean }
+export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; mat?: Material; legacy?: boolean; big?: boolean }
+
+/** Big-lens twin of a preset (examples/urine_big.json, 2026-08-27): the second physical rod is wider and
+ *  barely magnifies, so the tubes grow to 72 px at y 11 / 144, `lens` drops to −0.05 with a −3 curve, and
+ *  the marks move with the tube. Thin (46 px) presets take the example's hand-tuned mark values; wider ones
+ *  scale their own by 72 / tubeHeight. */
+export function bigLens(p: Partial<Params>): Partial<Params> {
+  const base = { ...DEFAULT_PARAMS, ...p };
+  const out: Partial<Params> = { ...p, tubeHeight: 72, hoursY: 11, minutesY: 144, lens: -0.05, lensCurve: -3 };
+  // front digits were pre-warped against the thin rod's magnification; the big rod hardly magnifies
+  if (base.digitsOnTop) Object.assign(out, { topLens: 0, topParallax: -3 });
+  if (base.tubeHeight === MODERN_BASE.tubeHeight) {
+    Object.assign(out, { tickMinorHeightH: 21, tickMinorHeightM: 16, digitScaleYMin: 3, digitBottom: 25, digitBottomMin: 26 });
+    if (!base.ticksOnTop) Object.assign(out, { tickLens: 0.45, tickParallax: 3.75, tickDryLens: 0.45, tickEmboss: 0.25 });
+  } else {
+    const k = 72 / base.tubeHeight;
+    for (const key of ['tickMinorHeightH', 'tickMajorHeightH', 'tickMinorHeightM', 'tickMajorHeightM', 'digitBottom', 'digitBottomMin'] as const)
+      out[key] = Math.round(base[key] * k);
+  }
+  return out;
+}
+
+const M = (viscosity: Material['viscosity'], opacity: Material['opacity'], emissive: boolean, wetting: boolean, gas: Material['gas']): Material =>
+  ({ viscosity, opacity, emissive, wetting, gas });
 
 /** Everything the preset picker and `?preset=<id>` offer. */
 export const PRESETS: PresetEntry[] = [
-  { id: 'blood', name: 'Blood', note: 'opaque venous red, viscous, syringe print', p: PRESET_BLOOD },
-  { id: 'sparkling', name: 'Mineral water', note: 'clear, carbonated, lab graduations', p: PRESET_SPARKLING },
-  { id: 'xenon', name: 'Xenon', note: 'violet discharge tube, glowing ends, no slosh', p: PRESET_XENON },
-  { id: 'mercury', name: 'Mercury', note: 'convex bead, mirror specular, etched scale', p: PRESET_MERCURY },
-  { id: 'malt', name: 'Single malt', note: 'amber, clings to the wall, brass numerals', p: PRESET_MALT },
-  { id: 'molten', name: 'Molten iron', note: 'emissive orange, heavy, forged numerals', p: PRESET_MOLTEN },
-  { id: 'cryo', name: 'Cryo oxygen', note: 'pale blue, boiling, frosted wall', p: PRESET_CRYO },
-  { id: 'ink', name: 'India ink', note: 'matte black, enamel numerals, panel mostly off', p: PRESET_INK },
-  { id: 'champagne', name: 'Champagne', note: 'pale gold, dense bead, amber resin numerals', p: PRESET_CHAMPAGNE },
+  { id: 'frizzante', name: 'Frizzante', note: 'colourless sparkling water, lab print, fine bead', p: PRESET_FRIZZANTE, mat: M('watery', 'clear', false, true, 'carbonated') },
+  { id: 'urine', name: 'Urine sample', note: 'clear amber, watery, specimen-cup graduations', p: PRESET_URINE, mat: M('watery', 'translucent', false, true, 'none') },
+  { id: 'blood', name: 'Blood', note: 'opaque venous red, coats the glass, syringe print', p: PRESET_BLOOD, mat: M('medium', 'opaque', false, true, 'none') },
+  { id: 'milk', name: 'Milk', note: 'opaque white colloid, soft highlight, printed scale', p: PRESET_MILK, mat: M('medium', 'opaque', false, true, 'none') },
+  { id: 'mercury', name: 'Mercury', note: 'convex bead, mirror specular, etched scale', p: PRESET_MERCURY, mat: M('metal', 'opaque', false, false, 'none') },
+  { id: 'honey', name: 'Honey', note: 'amber syrup, overdamped, clings, trapped air', p: PRESET_HONEY, mat: M('viscous', 'translucent', false, true, 'trapped') },
+  { id: 'cola', name: 'Cola', note: 'dark translucent, lively bead, enamel numerals', p: PRESET_COLA, mat: M('watery', 'translucent', false, true, 'carbonated') },
+  { id: 'malt', name: 'Single malt', note: 'amber, legs on the wall, brass numerals', p: PRESET_MALT, mat: M('medium', 'translucent', false, true, 'none') },
+  { id: 'champagne', name: 'Champagne', note: 'pale gold, dense bead, amber resin numerals', p: PRESET_CHAMPAGNE, mat: M('watery', 'translucent', false, true, 'carbonated') },
+  { id: 'cryo', name: 'Cryo oxygen', note: 'pale blue, boiling, frosted wall', p: PRESET_CRYO, mat: M('watery', 'clear', false, true, 'boiling') },
+  { id: 'ink', name: 'India ink', note: 'matte black, enamel numerals, panel mostly off', p: PRESET_INK, mat: M('medium', 'opaque', false, true, 'none') },
+  { id: 'glow', name: 'Glow stick', note: 'fluorescent green, glows past the cap, seven-segment print', p: PRESET_GLOW, mat: M('medium', 'translucent', true, true, 'none') },
+  { id: 'xenon', name: 'Xenon', note: 'violet discharge tube, glowing ends, no inertia', p: PRESET_XENON, mat: M('plasma', 'translucent', true, false, 'none') },
+  { id: 'molten', name: 'Molten iron', note: 'emissive orange, dense, non-wetting, forged numerals', p: PRESET_MOLTEN, mat: M('medium', 'opaque', true, false, 'trapped') },
   { id: 'free', name: 'Free liquid', note: 'bottle green slug that slides with the wrist; parks to show time on a raise', p: PRESET_FREE },
-  { id: 'user1', name: 'User v1', note: 'legacy: deep green, wide highlight', p: PRESET_USER_V1, legacy: true },
-  { id: 'mint', name: 'Mint (spec)', note: 'legacy: spec colour', p: PRESET_MINT, legacy: true },
-  { id: 'neon', name: 'Neon (ref photo)', note: 'legacy: reference photo green', p: PRESET_NEON, legacy: true },
-  { id: 'concept', name: 'Concept art', note: 'legacy: rounded ends, convex front', p: PRESET_CONCEPT, legacy: true },
 ];
+// Every preset also exists for the big rod: `<id>-big`.
+PRESETS.push(...PRESETS.map((e) => ({ ...e, id: e.id + '-big', name: e.name + ' (big lens)', p: bigLens(e.p), big: true })));
 
 /** Presets are whole looks: apply over the defaults, not over the current edit. */
 export function presetParams(e: PresetEntry): Params {

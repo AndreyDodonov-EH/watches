@@ -89,3 +89,16 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `lensSmooth` / `gloss` are simulator-only. Port smoothing only if nearest-row bands are visible through the acrylic rod.
 - codex exec in parallel background jobs needs `</dev/null`, else stdin race (EAGAIN) kills ~half the jobs.
 - Image lanes (see pigeon_drop skills): cursor `agent -p -f --model cursor-grok-4.5-high-fast "<prompt + output path>"`; cursor `agent -p` hangs headlessly (even text-only). agy: `agy --mode accept-edits --print="Use your generate_image tool… Do not run shell commands. Reply with the full saved path."`; file lands in ~/.gemini/antigravity-cli/brain/<id>/, copy it out. Gemini image quota exhausts after ~10 parallel renders.
+
+## Presets / materials (2026-08-27)
+- `liquidTransparency` conflates tint and clarity: it mixes the body toward the tube back, so a coloured
+  *clear* liquid (urine, champagne) turns khaki above ~0.6. A separate tint/absorption term (multiply the
+  back by the body colour, then add the lit body) would let tinted liquids stay clear.
+- Rear sprite digits at `digitScaleY` 5 / `digitBottom` 16 clip at the tube's top row (the "3" loses its
+  top) in honey/malt/cola; either cap the scale from the tube height or clamp the baseline.
+- `check:presets` ranges (tools/check-presets.ts) are hand-set from the 14 looks; if a new mechanic lands,
+  add its coherence rule there rather than tuning presets ad hoc.
+- Milk: opaque white with marks printed on the glass — no single mark colour reads well on both the white
+  column and the black dry side (mid-blue chosen). A per-side mark colour (wet/dry) would fix it.
+- Free slug + rear digits: at `readFaceUp` 1 the time is only true while the slug is home; presets inherit
+  the user's read settings (turn 125 dps, hold 11 s) — revisit once the wrist-turn detector is tuned on the board.

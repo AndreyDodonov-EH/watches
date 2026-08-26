@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "check:imu": "tsc tools/replay-check.ts --rootDir .. --outDir node_modules/.cache/replay-check --module commonjs --target es2021 --moduleResolution node --esModuleInterop && node -e \"require('fs').writeFileSync('node_modules/.cache/replay-check/package.json','{}')\" && node node_modules/.cache/replay-check/sim/tools/replay-check.js",
+    "check:presets": "tsc tools/check-presets.ts --outDir node_modules/.cache/check-presets --module commonjs --target es2021 --moduleResolution node --esModuleInterop && node -e \"require('fs').writeFileSync('node_modules/.cache/check-presets/package.json','{}')\" && node node_modules/.cache/check-presets/tools/check-presets.js",
     "dump:presets": "tsc tools/dump-presets.ts --outDir node_modules/.cache/dump-presets --module commonjs --target es2021 --moduleResolution node --esModuleInterop && node -e \"require('fs').writeFileSync('node_modules/.cache/dump-presets/package.json','{}')\" && node node_modules/.cache/dump-presets/tools/dump-presets.js"
   },
   "devDependencies": {

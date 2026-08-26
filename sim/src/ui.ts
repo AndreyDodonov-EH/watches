@@ -1,5 +1,5 @@
 // Minimal control panel generated from PARAM_META. No framework.
-import { DEFAULT_PARAMS, PARAM_META, PRESETS, migrateParams, presetParams, type Params } from './params';
+import { DEFAULT_PARAMS, PARAM_META, PRESETS, migrateParams, presetParams, type Params, type PresetEntry } from './params';
 
 /** `key` is set for a single-field edit; absent for preset/import/reset (whole struct changed). */
 export interface UiHooks { onChange: (key?: keyof Params) => void; }
@@ -63,9 +63,9 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   const apply = (src: Partial<Params>) => { Object.assign(p, src); refresh(); hooks.onChange(); };
   const sel = document.createElement('select'); sel.className = 'presets';
   sel.add(new Option('preset…', ''));
-  for (const [label, legacy] of [['Signature', false], ['Legacy', true]] as const) {
+  for (const [label, pick] of [['Signature', (e: PresetEntry) => !e.legacy && !e.big], ['Big lens', (e: PresetEntry) => !!e.big], ['Legacy', (e: PresetEntry) => !!e.legacy]] as const) {
     const g = document.createElement('optgroup'); g.label = label;
-    for (const e of PRESETS) if (!!e.legacy === legacy) { const o = new Option(e.name, e.id); o.title = e.note; g.appendChild(o); }
+    for (const e of PRESETS) if (pick(e)) { const o = new Option(e.name, e.id); o.title = e.note; g.appendChild(o); }
     sel.appendChild(g);
   }
   sel.oninput = () => { const e = PRESETS.find((x) => x.id === sel.value); if (e) apply(presetParams(e)); };
