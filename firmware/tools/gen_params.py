@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Generate firmware/src/gen/params_gen.h (Params struct + presets) and
-firmware/src/gen/sprites_gen.h (digit sprite sheets, RGBA8 in flash) from the sim's
-preset JSON files and sprite assets.
+firmware/src/gen/sprites_gen.h (digit sprite sheets) from the sim's preset JSON files and assets.
 
 Usage (from repo root):  python3 firmware/tools/gen_params.py presets/1.json [more.json ...]
 The first preset becomes PRESET_DEFAULT.
@@ -16,12 +15,11 @@ SHEETS = [
     'digits-forged-iron', 'digits-ivory-enamel', 'digits-carved-slate',
     'digits-amber-resin',
 ]  # digitFont 5..11
-
 # (name, ctype) — order defines the struct layout. Mirrors sim/src/params.ts `Params`.
 FIELDS = [
  ('v','int'),
  ('tubeHeight','float'),('hoursY','float'),('minutesY','float'),
- ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('tubeBack','rgb'),('glassHi','rgb'),('glassBody','float'),('glassHiBright','float'),('glassReflect','float'),('glassRim','float'),('glassOverLiquid','float'),('lens','float'),('lensCurve','float'),('bubbleRim','rgb'),
+ ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('tubeBack','rgb'),('tubeBack2','rgb'),('tubeBackGradient','float'),('tubeBackDecal','float'),('tubeBackDecalColor','rgb'),('tubeBackDecalOpacity','float'),('glassHi','rgb'),('glassBody','float'),('glassHiBright','float'),('glassReflect','float'),('glassRim','float'),('glassOverLiquid','float'),('lens','float'),('lensCurve','float'),('bubbleRim','rgb'),
  ('remaining','bool'),('highlightH','float'),('highlightInset','float'),('highlightBright','float'),('highlightSharp','float'),('shadeDepth','float'),('meniscusDepth','float'),
  ('meniscusPow','float'),('meniscusTiltGain','float'),('meniscusAsym','float'),('meniscusLens','float'),
  ('meniscusK','float'),('meniscusDamp','float'),('meniscusInertia','float'),('contactLag','float'),('wetFilm','float'),('edgeSoft','float'),

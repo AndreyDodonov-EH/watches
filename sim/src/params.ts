@@ -8,6 +8,11 @@ export interface Params {
   liquidHi: string;      // specular highlight strip
   liquidLo: string;      // bottom shade (cylinder shading)
   tubeBack: string;      // colour behind the liquid and glass layers (very dark; 0 = AMOLED off)
+  tubeBack2: string;     // second colour used by the tube-back gradient
+  tubeBackGradient: number; // 0 solid, 1 top-to-bottom, 2 centre band, 3 edge bands
+  tubeBackDecal: number; // 0 none, 1 H/M vial ID, 2 12/60 capacity seal
+  tubeBackDecalColor: string;
+  tubeBackDecalOpacity: number;
   // --- glass tube shading (empty part; specular also over the liquid) ---
   glassHi: string;       // specular colour of the glass wall
   glassBody: number;     // 0..1 ambient cylinder shade of the empty wall (0 = pure black, AMOLED off)
@@ -163,7 +168,7 @@ export interface Params {
   digitBright: number;   // numeric labels only (glyph gradient, emboss shadow and image sheets)
 }
 
-export const PARAMS_VERSION = 12;
+export const PARAMS_VERSION = 15;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -175,6 +180,11 @@ export const DEFAULT_PARAMS: Params = {
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
   tubeBack: '#000000',
+  tubeBack2: '#18212a',
+  tubeBackGradient: 0,
+  tubeBackDecal: 0,
+  tubeBackDecalColor: '#80909a',
+  tubeBackDecalOpacity: 0.65,
   glassHi: '#a8c0c8',
   glassBody: 0.1,
   glassHiBright: 0.55,
@@ -617,7 +627,21 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
 /** UI metadata: [min, max, step] for numeric params; grouping for the panel. */
 export const PARAM_META: Record<string, { group: string; label?: string; help?: string; min?: number; max?: number; step?: number; options?: readonly string[] }> = {
   liquid: { help: 'Body colour of the liquid.', group: 'Colour' }, liquidHi: { help: 'Specular highlight strip colour.', group: 'Colour' }, liquidLo: { help: 'Bottom shade colour (cylinder shading).', group: 'Colour' },
-  tubeBack: { help: 'Colour behind the liquid and glass layers. #000000 = AMOLED pixels off.', group: 'Colour', label: 'tube back' }, bubbleRim: { help: 'Rim colour of the spirit-level bubble and fizz.', group: 'Colour' },
+  tubeBack: { help: 'First tube-back colour. #000000 = AMOLED pixels off when the gradient is Solid.', group: 'Colour', label: 'tube back colour 1' },
+  tubeBack2: { help: 'Second colour used by the tube-back gradient.', group: 'Colour', label: 'tube back colour 2' },
+  tubeBackGradient: {
+    help: 'Fast two-colour gradient across the short axis of the tube. It is folded into the existing per-row colour table.',
+    group: 'Colour', label: 'tube back gradient', min: 0, max: 3, step: 1,
+    options: ['Solid colour 1', 'Colour 1 → colour 2', 'Colour 2 centre band', 'Colour 2 edge bands'],
+  },
+  tubeBackDecal: {
+    help: 'Small rear-wall marking drawn in code and viewed through the liquid and glass.',
+    group: 'Colour', label: 'tube back decal', min: 0, max: 2, step: 1,
+    options: ['None', 'H / M vial ID', '12 / 60 capacity seal'],
+  },
+  tubeBackDecalColor: { help: 'Colour of the rear-wall decal.', group: 'Colour', label: 'decal colour' },
+  tubeBackDecalOpacity: { help: 'Strength of the rear-wall decal; liquid transparency still controls how much is visible.', group: 'Colour', label: 'decal opacity', min: 0, max: 1, step: 0.01 },
+  bubbleRim: { help: 'Rim colour of the spirit-level bubble and fizz.', group: 'Colour' },
   glassHi: { help: 'Specular colour of the glass wall.', group: 'Glass', label: 'specular colour' },
   glassBody: { help: 'Ambient cylinder shade of the empty wall. 0 = pure black.', group: 'Glass', label: 'ambient body', min: 0, max: 0.5, step: 0.01 },
   glassHiBright: { help: 'Strength of the glass specular band (same rows as the liquid highlight).', group: 'Glass', label: 'specular', min: 0, max: 1, step: 0.01 },

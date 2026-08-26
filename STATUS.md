@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-21 (Phase 3: liquid face and expanded digit sprites)_
+_Last update: 2026-08-26 (gradient tube backs and rear-wall decals)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -95,6 +95,11 @@ else `display_init` fails at boot before `ble_init`.
   `tickBright` / `digitBright` in the Colour group. Dimming the digits sits them in the shadow at the bottom
   wall of the tube; the trim also scales that layer's `markContrast` floor, so the shadow survives over the
   liquid. `tubeBack` follows the panel dimmer only.
+- Tube backs use the same fast row LUT as the liquid: `tubeBack` / `tubeBack2` can render solid,
+  top-to-bottom, centre-band, or edge-band gradients across the short axis. Two optional code-drawn rear-wall
+  decals identify the tubes (`H` / `M`) or their capacity (`12` / `60`); decal colour and opacity are live
+  params. Gradients and decals pass through the existing glass, lens, brightness, and liquid-transparency
+  compositors without bitmap assets, flash blobs, image decoding, or per-pixel texture caches.
 - Digits include five bitmap fonts and seven generated image fonts: steel, brass steampunk, copper gauge,
   forged iron, ivory enamel, carved slate, and amber resin. Image fonts remain behind the liquid/glass layers
   and support brightness, tint, and black-to-white tone controls in the simulator and firmware.
@@ -143,8 +148,9 @@ else `display_init` fails at boot before `ble_init`.
   (t in 1/256, luma in 1/1000) → ±1 LSB on gradient pixels, verified 0 pixels off by >12/255.
 - `Params` is a runtime struct generated from the sim preset: `python3 firmware/tools/gen_params.py presets/1.json`
   → `src/gen/params_gen.h` (struct + `PARAM_FIELDS` name/type/offset table + `PRESET_1`; first file given
-  becomes `PRESET_DEFAULT`). Re-run after exporting a new preset or adding a key to `params.ts` (also add it
-  to `FIELDS` in the generator). The field table is what the later Wi-Fi / GATT / JSON control will use.
+  becomes `PRESET_DEFAULT`). The same run embeds digit sprites in `sprites_gen.h`. Re-run after exporting a
+  new preset, changing a digit asset, or adding a key to `params.ts`
+  (also add it to `FIELDS` in the generator). The field table is what the later Wi-Fi / GATT / JSON control will use.
 - Pipeline per frame: IMU → `GravityNorm` → `ImuFilter` → `stepTube` ×2 (50 Hz fixed step, catch-up ≤5) →
   `renderTube` into a 72-row strip in **internal DMA RAM** → `display_push_strip_async` (panel DMA reads
   the strip directly, no bounce copy) while the other tube renders. The two strips (2 × 77 KB, internal DMA

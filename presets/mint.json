@@ -1,5 +1,5 @@
 {
-  "v": 12,
+  "v": 15,
   "tubeHeight": 72,
   "hoursY": 0,
   "minutesY": 168,
@@ -8,6 +8,11 @@
   "liquidHi": "#9fe1cb",
   "liquidLo": "#1f6b52",
   "tubeBack": "#000000",
+  "tubeBack2": "#18212a",
+  "tubeBackGradient": 0,
+  "tubeBackDecal": 0,
+  "tubeBackDecalColor": "#80909a",
+  "tubeBackDecalOpacity": 0.65,
   "glassHi": "#a8c0c8",
   "glassBody": 0.1,
   "glassHiBright": 0.55,
