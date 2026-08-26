@@ -114,15 +114,17 @@ static void buildPalette(const Params &p, float lightDeg, Palette &pal) {
     if (t < 0.33f) c = mix(mix(body, lo, 0.25f), body, t / 0.33f);
     else c = mix(body, lo, ((t - 0.33f) / 0.67f) * p.shadeDepth);
     if (p.lightPhys > 0) c = mix(c, mix(lo, body, 1 - p.shadeDepth * (1 - lam)), p.lightPhys);
+    // transparent liquid shows the tube back through it; the highlight is a surface reflection, so it goes on after (sim buildPalette)
+    c = mix(scale(c, br), scale(tubeBack, p.brightness), p.liquidTransparency);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       float k = powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
-      c = mix(c, hi, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
+      c = mix(c, scale(hi, br), fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
     float gw = glassW(p, y, hiTop, lam);
     pal.tubeBackRows[y] = q(scale(mix(tubeBack, ghi, gw), p.brightness));
-    c = mix(c, ghi, gw * p.glassOverLiquid);
-    pal.rows[y] = q(scale(c, br));
-    pal.bubbleIn[y] = q(scale(mix(c, {0, 0, 0}, p.bubbleDark), br));
+    c = mix(c, scale(ghi, p.brightness), gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency));   // glass weight rises to the dry-side one with transparency
+    pal.rows[y] = q(c);
+    pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
   }
   pal.body = q(scale(body, br));
   pal.tubeBack = q(scale(tubeBack, p.brightness));

@@ -90,15 +90,22 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     if (t < 0.33) c = mix(mix(body, lo, 0.25), body, t / 0.33);
     else c = mix(body, lo, ((t - 0.33) / 0.67) * p.shadeDepth);
     if (p.lightPhys > 0) c = mix(c, mix(lo, body, 1 - p.shadeDepth * (1 - lambert(y))), p.lightPhys);
+    // A transparent liquid shows the tube back through it: blend the lit liquid toward the
+    // (panel-dimmed) back. The highlight is a reflection off the liquid surface, so it goes on
+    // after that (undiluted), and the glass wall over both.
+    c = mix(scale(c, br), scale(tubeBack, p.brightness), p.liquidTransparency);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       const k = Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp); // tent
-      c = mix(c, hi, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
+      c = mix(c, scale(hi, br), Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
     }
     const gw = glassW(y);
     tubeBackRows[y] = q(scale(mix(tubeBack, ghi, gw), p.brightness));
-    c = mix(c, ghi, gw * p.glassOverLiquid);
-    rows[y] = q(scale(c, br));
-    bubbleIn[y] = q(scale(mix(c, [0, 0, 0], p.bubbleDark), br));
+    // Glass shading over the liquid: `glassOverLiquid` of the dry-side weight for an opaque liquid,
+    // rising to the full dry-side weight as the liquid turns transparent (the lower reflection
+    // band must run continuously across the meniscus of a clear liquid).
+    c = mix(c, scale(ghi, p.brightness), gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency));
+    rows[y] = q(c);
+    bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
   }
   return { rows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn };
 }
