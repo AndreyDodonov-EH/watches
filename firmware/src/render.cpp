@@ -217,11 +217,13 @@ static uint16_t throughLiquid(uint16_t bg, uint16_t mark, const Params &p, float
 }
 
 // rel = +1 / -1: emboss highlight / shadow of body colour c, derived after the liquid pass.
+// Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi.
+struct Edges { const float *lo, *hi; };
 struct Mark {
-  int y0; const float *edges; const Params *p; bool onTop; float contrast;
+  int y0; Edges edges; const Params *p; bool onTop; float contrast;
   void operator()(int x, int y, uint16_t c, float cov = 1, int rel = 0) const {
     int ry = y - y0;
-    bool inside = p->remaining ? x >= edges[ry] : x < edges[ry];
+    bool inside = x >= edges.lo[ry] && x < edges.hi[ry];
     if (!onTop && inStrip(x, y) && inside)
       c = throughLiquid(rd(x, y), c, *p, contrast);
     if (rel > 0) c = q(mix(to888(c), {255, 255, 255}, 0.7f));
@@ -315,9 +317,9 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, float ac
 
 // Which column is behind liquid; edges null (digits on top) = all wet.
 struct Wet {
-  const float *edges; float edgeMid; bool remaining;
-  Wet(const float *e, int H, bool rem) : edges(e), edgeMid(e ? e[H >> 1] : 0), remaining(rem) {}
-  bool operator()(int x) const { return !edges || (remaining ? x >= edgeMid : x < edgeMid); }
+  bool all; float lo, hi;
+  Wet(const Edges *e, int H) : all(!e), lo(e ? e->lo[H >> 1] : 0), hi(e ? e->hi[H >> 1] : 0) {}
+  bool operator()(int x) const { return all || (x >= lo && x < hi); }
 };
 // Column by column so each column can take the wet or dry warp.
 static void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) {
@@ -365,7 +367,7 @@ static void drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mar
 
 // wetRows/dryRows: source-row tables behind liquid vs behind air; edges null = all wet. Parallax is liquid-only.
 static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
-                      const float *edges, const Mark &mark, float dxFull = 0, float dyFull = 0) {
+                      const Edges *edges, const Mark &mark, float dxFull = 0, float dyFull = 0) {
   bool minutes = ticksN == 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   int step = (int)fmaxf(1, jround(minutes ? p.tickStepM : p.tickStepH));
@@ -378,7 +380,7 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRow
   uint16_t cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   uint16_t cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   int pos = (int)jround(minutes ? p.tickPosM : p.tickPosH);
-  float edgeMid = edges ? edges[H >> 1] : 0;
+  float edgeLo = edges ? edges->lo[H >> 1] : 0, edgeHi = edges ? edges->hi[H >> 1] : 0;
   auto warpedRange = [&](const int16_t *sourceRows, int sourceA, int sourceB, int &a, int &b) {
     a = H; b = -1;
     for (int ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceA && sourceRows[ry] <= sourceB) {
@@ -420,7 +422,7 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRow
     int h = major ? hMaj : hMin; if (h <= 0) continue;
     int w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
     int topA, topB, botA, botB;
-    bool wet = !edges || (p.remaining ? xc >= edgeMid : xc < edgeMid);
+    bool wet = !edges || (xc >= edgeLo && xc < edgeHi);
     const int16_t *rows = wet ? wetRows : dryRows; float k = wet ? 1 : 0;   // air refracts nothing: no parallax
     warpedRange(rows, 0, h - 1, topA, topB); warpedRange(rows, H - h, H - 1, botA, botB);
     if (pos != 1) drawSegment(x0, w, c, topA, topB, true, k);
@@ -489,14 +491,41 @@ static void lensMagRows(const Params &p, float *rows) {
 // ---------------------------------------------------------------------------------------------
 // tube
 // ---------------------------------------------------------------------------------------------
-// tilt = along follower (edgeLight), side = across follower (acrossTilt); see sim edgeX.
-static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt, float side) {
+// Row coordinate -1..1 as seen through the physical glass (meniscusLens, same warp as topLens).
+static float lensRow(float d, const Params &p) {
+  float lens = clampf(p.meniscusLens, -1, 1), strength = fabsf(lens);
+  float curve = clampf(p.lensCurve, -3, 3), signedCurve = lens < 0 ? -curve : curve;
+  if (strength == 0 || signedCurve == 0) return d;
+  float exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  float u = fabsf(d);
+  return (d < 0 ? -1 : 1) * ((1 - strength) * u + strength * powf(u, exponent));
+}
+// Cap profile: px the contact line at row ry leads the surface centre along +x. cap = dynamic
+// centre lead in the edge's own +x sense. tilt = along follower (edgeLight), side = across follower.
+// Capillary wall climb (|d|^meniscusPow) plus a circular pressure/inertia bulge (tilt, cap); see sim edgeCap.
+static float edgeCap(int ry, const Params &p, float tilt, float side, float cap) {
   const float yc = (H - 1) / 2.0f;
-  float d = (ry - yc) / yc;
-  float skew = tanf(angleDeg * (float)M_PI / 180) * (ry - yc);
+  float d = lensRow((ry - yc) / yc, p), u = fabsf(d);
   float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f) * (p.meniscusDepth < 0 ? -1 : 1);
-  float depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
-  return xe + skew + depth * powf(fabsf(d), p.meniscusPow);
+  float climb = p.meniscusDepth * (1 - asymEff * d) * powf(u, p.meniscusPow);
+  float bulge = p.meniscusTiltGain * tilt * fabsf(p.meniscusDepth) + cap;
+  return climb - bulge * (1 - sqrtf(fmaxf(0, 1 - u * u)));
+}
+// Caps of a column len px long may not exceed half of it in total (short slug = bead). See sim capScale.
+static float capScale(float len, const Params &p, float tilt, float cap) {
+  float feat = fabsf(p.meniscusDepth) * (1 + fabsf(p.meniscusTiltGain * tilt)) + fabsf(cap);
+  return fminf(1, fmaxf(0, len) / 2 / fmaxf(1, feat));
+}
+static float edgeX(int ry, float xe, float angleDeg, const Params &p, float tilt, float side, float cap, float k) {
+  const float yc = (H - 1) / 2.0f;
+  float skew = tanf(angleDeg * (float)M_PI / 180) * (ry - yc);
+  return xe + skew + k * edgeCap(ry, p, tilt, side, cap);
+}
+// Home-end edge of a free slug centred at xs: mirror image of edgeX, flattening onto the end cap.
+static float edgeXL(int ry, float xs, float angleDeg, const Params &p, float tilt, float side, float cap, float k) {
+  const float yc = (H - 1) / 2.0f;
+  float skew = tanf(angleDeg * (float)M_PI / 180) * (ry - yc);
+  return xs + fminf(1, xs / 8) * (skew - k * edgeCap(ry, p, -tilt, side, -cap));
 }
 
 static void applyLens(const Params &p) {
@@ -526,87 +555,128 @@ static void applyLens(const Params &p) {
 // flipped before panel-coordinate marks and bubbles are composited.
 static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, int ticksN) {
   TubeState s = st;
-  if (p.remaining) { s.fillPos = -st.fillPos; s.edgeLight = -st.edgeLight; }
+  if (p.remaining) { s.fillPos = -st.fillPos; s.edgeLight = -st.edgeLight; s.cap = -st.cap; }
   float angle = s.angle;
-  float xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;
+  float len = columnLen(s.fillTarget, p);
+  float xs = p.freeLiquid ? (p.remaining ? L - len - s.slugPos : s.slugPos) : 0;   // home-end edge centre
+  float xe = xs + len + clampf(s.fillPos, -len, len);                                // time-edge centre; slosh can't exceed the volume
   float lightK = fmaxf(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
-  ensureFizz(idx, p, clampf(xe - 6, 0, L), s.agitation);
+  float lightKL = fmaxf(0.25f, 1 - p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
+  int xsI = (int)jround(xs);
+  float capK = capScale(len, p, s.edgeLight, s.cap);
+  const bool hasLiquid = xe - xs >= 0.5f;   // an empty column draws nothing, not even an AA sliver
+  ensureFizz(idx, p, clampf(xe - xs - 6, 0, L), s.agitation);
 
-  // 1 + 3: tube back and liquid column
-  static float edges[TUBE_HEIGHT_MAX];
+  // 1 + 3: tube back and liquid column between the two edges (home edge on the end cap unless free)
+  static float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];
+  static int16_t capX0[TUBE_HEIGHT_MAX];
   for (int ry = 0; ry < H; ry++) {
-    float ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt);
-    edges[ry] = ex;
+    float ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK);
+    float exL = p.freeLiquid ? edgeXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK) : 0;
+    edges[ry] = ex; edgesL[ry] = exL;
     int x0 = 0;
     if (p.cornerR > 0) {
       float r = fminf(p.cornerR, H / 2.0f), yc = (H - 1) / 2.0f, dy = fabsf(ry - yc);
       if (dy > yc - r) { float k = (dy - (yc - r)) / r; x0 = (int)jround(r - sqrtf(fmaxf(0, 1 - k * k)) * r); }
     }
+    capX0[ry] = x0;
+    hspan(y0 + ry, 0, L, pal.tubeBackRows[ry]);
+    if (!hasLiquid) continue;
     int xi = (int)floorf(ex); float frac = ex - xi;
-    if (x0 > 0) hspan(y0 + ry, 0, x0, pal.tubeBackRows[ry]);
-    hspan(y0 + ry, x0 > xi ? x0 : xi, L, pal.tubeBackRows[ry]);
-    hspan(y0 + ry, x0, xi, pal.rows[ry]);
+    int xiL = (int)floorf(exL); float fracL = exL - xiL;
+    int xa = x0 > xiL + 1 ? x0 : xiL + 1;
+    hspan(y0 + ry, xa, xi, pal.rows[ry]);
     if (p.edgeSoft > 0) {
       int w = (int)fmaxf(1, jround(p.edgeSoft));
       for (int k = 0; k < w; k++) {
         float t = clampf((frac - k) + (w > 1 ? 0.5f : 0), 0, 1);
         if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], t));
+        float tL = clampf((1 - fracL - k) + (w > 1 ? 0.5f : 0), 0, 1);
+        if (xiL - k >= x0 && xiL - k < xi) px(xiL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], tL));
       }
-    } else if (frac >= 0.5f) px(xi, y0 + ry, pal.rows[ry]);
+    } else {
+      if (frac >= 0.5f) px(xi, y0 + ry, pal.rows[ry]);
+      if (fracL < 0.5f && xiL >= x0) px(xiL, y0 + ry, pal.rows[ry]);
+    }
   }
 
   // 3a: front brightening, weighted by row luma
-  if (p.frontBright > 0) {
+  if (hasLiquid && p.frontBright > 0) {
     uint16_t hiC = q(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright));
     float w[TUBE_HEIGHT_MAX]; float lmax = 1;
     for (int ry = 0; ry < H; ry++) { w[ry] = luma(to888(pal.rows[ry])); lmax = fmaxf(lmax, w[ry]); }
     for (int ry = 0; ry < H; ry++) {
       int xi = (int)floorf(edges[ry]); float rowK = w[ry] / lmax;
+      int xiL = (int)floorf(edgesL[ry]);
       for (int k = 1; k <= p.frontBright; k++) {
         int x = xi - k; if (x < 0) break;
         float t = 1 - k / p.frontBright;
         px(x, y0 + ry, blend565(pal.rows[ry], hiC, fminf(1, t * t * 0.85f * lightK * rowK)));
       }
-    }
-  }
-
-  // 3b: edge glow
-  if (p.edgeGlow > 0 && p.glowStrength > 0) {
-    for (int ry = 0; ry < H; ry++) {
-      int xs = (int)ceilf(edges[ry] + (p.edgeSoft > 0 ? jround(p.edgeSoft) : 0));
-      for (int k = 0; k < p.edgeGlow; k++) {
-        float t = 1 - k / p.edgeGlow;
-        uint16_t c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK));
-        if (xs + k < L) px(xs + k, y0 + ry, c);
+      if (!p.freeLiquid) continue;
+      for (int k = 1; k <= p.frontBright; k++) {   // home edge: lit by the opposite tilt
+        int x = xiL + k; if (x >= xi - p.frontBright) break;
+        float t = 1 - k / p.frontBright;
+        px(x, y0 + ry, blend565(pal.rows[ry], hiC, fminf(1, t * t * 0.85f * lightKL * rowK)));
       }
     }
   }
 
+  // 3b: edge glow
+  int softW = p.edgeSoft > 0 ? (int)jround(p.edgeSoft) : 0;
+  if (hasLiquid && p.edgeGlow > 0 && p.glowStrength > 0) {
+    for (int ry = 0; ry < H; ry++) {
+      int xg = (int)ceilf(edges[ry] + softW), xgL = (int)floorf(edgesL[ry]) - softW;
+      for (int k = 0; k < p.edgeGlow; k++) {
+        float t = 1 - k / p.edgeGlow;
+        uint16_t c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK));
+        if (xg + k < L) px(xg + k, y0 + ry, c);
+        if (p.freeLiquid && xgL - k >= capX0[ry]) px(xgL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightKL)));
+      }
+    }
+  }
+
+  // 3c: wet film left by a receding edge (see sim step 3c)
+  if (hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02f || (p.freeLiquid && s.filmHome > 0.02f))) {
+    const float yc = (H - 1) / 2.0f;
+    for (int ry = 0; ry < H; ry++) {
+      float d = (ry - yc) / yc, rowW = 0.4f + 0.6f * d * d;
+      int nR = (int)jround(p.wetFilm * s.filmFree), nL = p.freeLiquid ? (int)jround(p.wetFilm * s.filmHome) : 0;
+      int xg = (int)ceilf(edges[ry] + softW), xgL = (int)floorf(edgesL[ry]) - softW;
+      for (int k = 0; k < nR; k++) if (xg + k < L) pxa(xg + k, y0 + ry, pal.rows[ry], 0.35f * s.filmFree * rowW * (1 - (float)k / nR));
+      for (int k = 0; k < nL; k++) if (xgL - k >= capX0[ry]) pxa(xgL - k, y0 + ry, pal.rows[ry], 0.35f * s.filmHome * rowW * (1 - (float)k / nL));
+    }
+  }
+
   // 4: highlight inset
-  if (p.highlightInset > 0) {
+  if (hasLiquid && p.highlightInset > 0) {
     int hiTop = highlightTop(p, s.light);
     for (int ry = hiTop; ry < hiTop + p.highlightH && ry < H; ry++) {
       if (ry < 0) continue;
       float ex = edges[ry];
       int bi = hiTop + (int)p.highlightH + 1; if (bi > H - 1) bi = H - 1;
       uint16_t bodyRow = pal.rows[bi];
+      int xl = (int)fmaxf(0, floorf(edgesL[ry]));   // home edge (0 unless the liquid is free)
       for (int x = (int)floorf(ex - p.highlightInset); x < (int)floorf(ex); x++) {
-        if (x < 0) continue;
+        if (x < xl) continue;   // never outside the column
         float t = (x - (ex - p.highlightInset)) / p.highlightInset;
         px(x, y0 + ry, blend565(pal.rows[ry], bodyRow, t));
       }
-      for (int x = 0; x < p.highlightInset && x < ex; x++) {
-        float t = 1 - x / p.highlightInset;
+      for (int x = xl; x < xl + p.highlightInset && x < ex; x++) {
+        float t = 1 - (float)(x - xl) / p.highlightInset;
         px(x, y0 + ry, blend565(pal.rows[ry], bodyRow, t));
       }
     }
   }
 
+  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi).
+  static float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];
+  Edges bounds = p.remaining ? Edges{boundLo, boundHi} : Edges{edgesL, edges};
   if (p.remaining) {
     for (int ry = 0; ry < H; ry++) {
       uint16_t *row = FB + ry * PANEL_W;
       for (int a = 0, b = L - 1; a < b; a++, b--) { uint16_t t = row[a]; row[a] = row[b]; row[b] = t; }
-      edges[ry] = L - edges[ry];
+      boundLo[ry] = L - edges[ry]; boundHi[ry] = L - edgesL[ry];
     }
   }
 
@@ -618,16 +688,16 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
       int16_t wetRows[TUBE_HEIGHT_MAX], dryRows[TUBE_HEIGHT_MAX];
       markSourceRows(H, p.tickLens, wetRows);
       if (!onTop) markSourceRows(H, p.tickDryLens, dryRows);
-      Mark tickMark { y0, edges, &p, onTop, p.markContrast * p.tickBright };
+      Mark tickMark { y0, bounds, &p, onTop, p.markContrast * p.tickBright };
       float dx = onTop ? 0 : -st.edgeLight * p.tickParallax;
       float dy = onTop ? 0 : st.acrossTilt * p.tickParallax;
-      drawTicks(y0, p, ticksN, wetRows, onTop ? wetRows : dryRows, onTop ? nullptr : edges, tickMark, dx, dy);
+      drawTicks(y0, p, ticksN, wetRows, onTop ? wetRows : dryRows, onTop ? nullptr : &bounds, tickMark, dx, dy);
     }
   };
   auto drawDigitLayer = [&](bool onTop) {
     if (haveLabels && p.digitsOnTop == onTop) {
-      Mark digitMark { y0, edges, &p, onTop, p.markContrast * p.digitBright };
-      drawLabels(y0, labels, Wet(onTop ? nullptr : edges, H, p.remaining), digitMark);
+      Mark digitMark { y0, bounds, &p, onTop, p.markContrast * p.digitBright };
+      drawLabels(y0, labels, Wet(onTop ? nullptr : &bounds, H), digitMark);
     }
   };
   drawTickLayer(false);
@@ -645,7 +715,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     for (int k = 0; k < fizzN[idx]; k++) {
       const Fizz &f = fizz[idx][k];
       int fy = (int)clampf(jround(f.y), 0, H - 1);
-      if (f.x < 2 || f.x >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
+      if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
       const float m = mag[fy], ry = r / m;
       for (int iy = (int)floorf(f.y - ry - 1); iy <= (int)ceilf(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
@@ -653,7 +723,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
           float dx = ix + 0.5f - f.x, dy = (iy + 0.5f - f.y) * m;
           float d = sqrtf(dx * dx + dy * dy), cov = fminf(1, r + 0.5f - d);
           if (cov <= 0) continue;
-          pxa(mapX(ix), y0 + iy, r >= 1.5f && d < r - 1 ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
+          pxa(mapX(ix + xsI), y0 + iy, r >= 1.5f && d < r - 1 ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }
       }
     }
@@ -663,7 +733,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   if (p.bubble) {
     float bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - (H - 1) / 2.0f * s.acrossTilt * p.bubbleRollGain;
     float rx = p.bubbleW / 2, ry_ = p.bubbleH / 2;
-    if (bx - rx > 2) {
+    if (bx - rx > xs + 2) {
       for (int yy = (int)floorf(by - ry_); yy <= (int)ceilf(by + ry_); yy++) {
         float dy = (yy - by) / ry_;
         if (fabsf(dy) > 1) continue;

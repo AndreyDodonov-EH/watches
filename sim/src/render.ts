@@ -6,7 +6,7 @@ import {
   rgb565, rgb565to888,
 } from '@spec/layout';
 import type { Params } from './params';
-import type { TubeState } from './physics';
+import { columnLen, type TubeState } from './physics';
 
 export const fb = new Uint16Array(PANEL_W * PANEL_H);
 const lensScratch = new Uint16Array(PANEL_W * TUBE_HEIGHT_MAX);
@@ -244,11 +244,11 @@ function throughLiquid(bg: number, mark: number, p: Params, contrast: number): n
 }
 /** Mark compositor for one tube. `onTop` marks ignore the liquid and are drawn opaque.
  *  Emboss pixels derive from the body's through-liquid colour so the relief survives the contrast floor. */
-function markFn(y0: number, edges: Float32Array, p: Params, onTop: boolean, contrast: number): MarkFn {
-  const H = edges.length;
+function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: number): MarkFn {
+  const H = edges.hi.length;
   return (x, y, c, cov = 1, rel = 0) => {
     const ry = y - y0;
-    const inside = p.remaining ? x >= edges[ry] : x < edges[ry];
+    const inside = x >= edges.lo[ry] && x < edges.hi[ry];
     if (!onTop && ry >= 0 && ry < H && x >= 0 && x < PANEL_W && y >= 0 && y < PANEL_H && inside)
       c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast);
     if (rel !== 0) c = embossOf(c, rel);
@@ -327,6 +327,8 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, drySourceRows, dryRy0, dryRy1, sprite, font, gap, rows: digitRowColors(p, bh), shadow };
 }
 
+/** Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi. */
+export interface Edges { lo: Float32Array; hi: Float32Array; }
 /** Which column is behind liquid: `wet(x)`; always true when digits are on top or edges are unknown. */
 type WetFn = (x: number) => boolean;
 /** Image glyph: per-pixel coverage from the pre-scaled sheet, column by column so each column can
@@ -375,9 +377,10 @@ function digitRowColors(p: Params, bh: number): Uint16Array {
   return out;
 }
 /** `edges` null = digits on top: everything uses the wet (whole-tube) tables. */
-function drawLabels(lb: Labels, p: Params, edges: Float32Array | null, mark: MarkFn): void {
-  const edgeMid = edges ? edges[edges.length >> 1] : 0;
-  const wet: WetFn = edges ? (x) => (p.remaining ? x >= edgeMid : x < edgeMid) : () => true;
+function drawLabels(lb: Labels, _p: Params, edges: Edges | null, mark: MarkFn): void {
+  const mid = edges ? edges.hi.length >> 1 : 0;
+  const lo = edges ? edges.lo[mid] : 0, hi = edges ? edges.hi[mid] : 0;
+  const wet: WetFn = edges ? (x) => x >= lo && x < hi : () => true;
   for (const l of lb.list) {
     let x = l.x0;
     for (let i = 0; i < l.text.length; i++) {
@@ -395,7 +398,7 @@ function drawLabels(lb: Labels, p: Params, edges: Float32Array | null, mark: Mar
 /** `wetRows`/`dryRows`: source-row tables for ticks behind liquid vs behind air (a liquid-filled
  *  cylinder lenses far more than an empty one). `edges` null = every tick uses `wetRows` and full parallax. */
 function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, dryRows: Int16Array,
-  edges: Float32Array | null, mark: MarkFn, dxFull = 0, dyFull = 0): void {
+  edges: Edges | null, mark: MarkFn, dxFull = 0, dyFull = 0): void {
   const minutes = ticksN === 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   const H = tubeLayout(p).H, L = TUBE_LENGTH_PX;
@@ -409,7 +412,7 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
   const cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   const cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   const pos = Math.round(minutes ? p.tickPosM : p.tickPosH);
-  const edgeMid = edges ? edges[H >> 1] : 0;
+  const edgeLo = edges ? edges.lo[H >> 1] : 0, edgeHi = edges ? edges.hi[H >> 1] : 0;
   const warpedRange = (sourceRows: Int16Array, sourceA: number, sourceB: number): [number, number] => {
     let a = H, b = -1;
     for (let ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceA && sourceRows[ry] <= sourceB) {
@@ -450,7 +453,7 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
     const major = majorEvery > 0 && i % majorEvery === 0;
     const h = major ? hMaj : hMin; if (h <= 0) continue;
     const w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1), c = major ? cMaj : cMin;
-    const wet = !edges || (p.remaining ? xc >= edgeMid : xc < edgeMid);
+    const wet = !edges || (xc >= edgeLo && xc < edgeHi);
     const rows = wet ? wetRows : dryRows, k = wet ? 1 : 0;   // air refracts nothing: no parallax
     const topRange = warpedRange(rows, 0, h - 1), botRange = warpedRange(rows, H - h, H - 1);
     if (pos !== 1) drawSegment(x0, w, c, topRange, true, k);
@@ -501,13 +504,46 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
  *  `side` = smoothed across-tilt (TubeState.acrossTilt, + = top edge up): the drop sags onto the
  *  low wall — that contact line extends, the high one retracts; stronger while draining.
  *  Face up (side = 0) the sag is toward the back glass and invisible: symmetric cap. */
-export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt = 0, side = 0): number {
+/** Row coordinate -1..1 seen through the physical glass: the cap profile is evaluated where the
+ *  row will appear, so the rod's vertical magnification does not flatten it (same warp as topLens). */
+function lensRow(d: number, p: Params): number {
+  const lens = Math.max(-1, Math.min(1, p.meniscusLens)), strength = Math.abs(lens);
+  const signedCurve = lens < 0 ? -Math.max(-3, Math.min(3, p.lensCurve)) : Math.max(-3, Math.min(3, p.lensCurve));
+  if (strength === 0 || signedCurve === 0) return d;
+  const exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  const u = Math.abs(d);
+  return Math.sign(d) * ((1 - strength) * u + strength * Math.pow(u, exponent));
+}
+/** Cap profile: px the contact line at tube-row `ry` leads the surface centre, along +x. Two shapes:
+ *  the capillary wall climb `meniscusDepth · |d|^meniscusPow` (thin horns at high powers), and the
+ *  pressure bulge — gravity into this end (tilt > 0), the flick/slide inertia `cap` — which pushes the
+ *  whole surface centre outward as a circular cap, whatever the wall-climb sign; draining hollows it.
+ *  `cap` = TubeState.cap in the edge's own +x sense (the centre leading its contact lines). */
+function edgeCap(ry: number, p: Params, tilt: number, side: number, cap: number): number {
   const H = tubeLayout(p).H, yc = (H - 1) / 2;
-  const d = (ry - yc) / yc;                  // -1..1
-  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
+  const d = lensRow((ry - yc) / yc, p), u = Math.abs(d);   // -1..1, as seen through the glass
   const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(p.meniscusDepth);
-  const depth = p.meniscusDepth * (1 + p.meniscusTiltGain * tilt) * (1 - asymEff * d);
-  return xe + skew + depth * Math.pow(Math.abs(d), p.meniscusPow); // liquid climbs the wall
+  const climb = p.meniscusDepth * (1 - asymEff * d) * Math.pow(u, p.meniscusPow);
+  const bulge = p.meniscusTiltGain * tilt * Math.abs(p.meniscusDepth) + cap;   // px the centre leads the walls
+  return climb - bulge * (1 - Math.sqrt(Math.max(0, 1 - u * u)));               // circular cap: 0 centre, 1 wall
+}
+/** Meniscus amplitude limiter: the caps of a column `len` px long may not exceed half of it in total
+ *  (a short slug is a bead, not two crossing scoops). 1 for any column longer than the features. */
+export function capScale(len: number, p: Params, tilt: number, cap: number): number {
+  const feat = Math.abs(p.meniscusDepth) * (1 + Math.abs(p.meniscusTiltGain * tilt)) + Math.abs(cap);
+  return Math.min(1, Math.max(0, len) / 2 / Math.max(1, feat));
+}
+export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt = 0, side = 0, cap = 0, k = 1): number {
+  const yc = (tubeLayout(p).H - 1) / 2;
+  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
+  return xe + skew + k * edgeCap(ry, p, tilt, side, cap);
+}
+/** Home-end edge of a free slug whose centre sits at `xs`: the mirror image of edgeX (gravity
+ *  presses the opposite way, the centre leads in -x). Flattens onto the end cap over the last 8 px. */
+export function edgeXL(ry: number, xs: number, angleDeg: number, p: Params, tilt = 0, side = 0, cap = 0, k = 1): number {
+  const yc = (tubeLayout(p).H - 1) / 2;
+  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
+  return xs + Math.min(1, xs / 8) * (skew - k * edgeCap(ry, p, -tilt, side, -cap));
 }
 
 /** Draw one tube. y0 = top of tube in panel coords.
@@ -518,40 +554,56 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
                          lensEffect = true, lensSmooth = false): void {
   const H = pal.rows.length, L = TUBE_LENGTH_PX;
   // Mirroring flips along-axis quantities only; across-axis ones (angle, light, acrossTilt) are invariant.
-  const s = p.remaining ? { ...state, fillPos: -state.fillPos, edgeLight: -state.edgeLight } : state;
+  const s = p.remaining ? { ...state, fillPos: -state.fillPos, edgeLight: -state.edgeLight, cap: -state.cap } : state;
   const angle = s.angle;
-  const xe = (p.remaining ? 1 - s.fillTarget : s.fillTarget) * L + s.fillPos;   // edge centre
+  const len = columnLen(s.fillTarget, p);
+  const xs = p.freeLiquid ? (p.remaining ? L - len - s.slugPos : s.slugPos) : 0; // home-end edge centre
+  const xe = xs + len + Math.max(-len, Math.min(len, s.fillPos));              // time-edge centre; slosh can't exceed the volume
   // Tilt changes the LIGHT at the fill edge, not the liquid itself: gravity pressing the
   // liquid into the right end brightens the cap glow, draining away from it dims it.
   const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
-  ensureFizz(idx, p, Math.max(0, Math.min(L, xe - 6)), s.agitation);
+  const lightKL = Math.max(0.25, 1 - p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
+  const xsI = Math.round(xs);
+  const capK = capScale(len, p, s.edgeLight, s.cap);
+  const hasLiquid = xe - xs >= 0.5;   // an empty column draws nothing, not even an anti-aliased sliver
+  ensureFizz(idx, p, Math.max(0, Math.min(L, xe - xs - 6)), s.agitation);
 
   // Step 1: tube back — whole strip
   for (let ry = 0; ry < H; ry++) hspan(y0 + ry, 0, L, pal.tubeBackRows[ry]);
 
-  // Step 3: liquid column — per row a horizontal span from the left cap to the (curved) edge.
-  const edges = new Float32Array(H);
+  // Step 3: liquid column — per row a horizontal span between the two (curved) edges. The
+  // home edge `edgesL` sits on the end cap (x <= 0) unless the liquid is free.
+  const edges = new Float32Array(H), edgesL = new Float32Array(H), capX0 = new Int16Array(H);
   for (let ry = 0; ry < H; ry++) {
-    const ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt);
-    edges[ry] = ex;
+    const ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK);
+    const exL = p.freeLiquid ? edgeXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK) : 0;
+    edges[ry] = ex; edgesL[ry] = exL;
     let x0 = 0;
     if (p.cornerR > 0) { // rounded left end cap
       const r = Math.min(p.cornerR, H / 2), yc = (H - 1) / 2, dy = Math.abs(ry - yc);
       if (dy > yc - r) { const k = (dy - (yc - r)) / r; x0 = Math.round(r - Math.sqrt(Math.max(0, 1 - k * k)) * r); }
     }
+    capX0[ry] = x0;
+    if (!hasLiquid) continue;
     const xi = Math.floor(ex), frac = ex - xi;
-    hspan(y0 + ry, x0, xi, pal.rows[ry]);
-    if (p.edgeSoft > 0) {  // anti-aliased edge pixel(s)
+    const xiL = Math.floor(exL), fracL = exL - xiL;
+    hspan(y0 + ry, Math.max(x0, xiL + 1), xi, pal.rows[ry]);
+    if (p.edgeSoft > 0) {  // anti-aliased edge pixel(s), both edges
       const w = Math.max(1, Math.round(p.edgeSoft));
       for (let k = 0; k < w; k++) {
         const t = Math.max(0, Math.min(1, (frac - k) / 1 + (w > 1 ? 0.5 : 0)));
         if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], t));
+        const tL = Math.max(0, Math.min(1, (1 - fracL - k) + (w > 1 ? 0.5 : 0)));
+        if (xiL - k >= x0 && xiL - k < xi) px(xiL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], tL));
       }
-    } else if (frac >= 0.5) px(xi, y0 + ry, pal.rows[ry]);
+    } else {
+      if (frac >= 0.5) px(xi, y0 + ry, pal.rows[ry]);
+      if (fracL < 0.5 && xiL >= x0) px(xiL, y0 + ry, pal.rows[ry]);
+    }
   }
 
   // Step 3a: front brightening — last `frontBright` px before the edge lerp toward the highlight colour (per row).
-  if (p.frontBright > 0) {
+  if (hasLiquid && p.frontBright > 0) {
     const hiC = q(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright));
     // Brighten RELATIVE to each row's shade (weight = row luma / max luma): the flat highlight
     // colour would light up the dark bottom wall near the cap and read as the drop bulging
@@ -560,49 +612,73 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     for (let ry = 0; ry < H; ry++) { w[ry] = luma(rgb565to888(pal.rows[ry])); lmax = Math.max(lmax, w[ry]); }
     for (let ry = 0; ry < H; ry++) {
       const ex = edges[ry]; const xi = Math.floor(ex); const rowK = w[ry] / lmax;
+      const xiL = Math.floor(edgesL[ry]);
       for (let k = 1; k <= p.frontBright; k++) {
         const x = xi - k; if (x < 0) break;
         const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(pal.rows[ry], hiC, Math.min(1, t * t * 0.85 * lightK * rowK)));
+      }
+      if (!p.freeLiquid) continue;
+      for (let k = 1; k <= p.frontBright; k++) {   // home edge: lit by the opposite tilt
+        const x = xiL + k; if (x >= xi - p.frontBright) break;
+        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(pal.rows[ry], hiC, Math.min(1, t * t * 0.85 * lightKL * rowK)));
       }
     }
   }
 
   // Step 3b: edge glow — a few px past the edge fade from liquid to the tube back.
-  if (p.edgeGlow > 0 && p.glowStrength > 0) {
+  const softW = p.edgeSoft > 0 ? Math.round(p.edgeSoft) : 0;
+  if (hasLiquid && p.edgeGlow > 0 && p.glowStrength > 0) {
     for (let ry = 0; ry < H; ry++) {
-      const ex = edges[ry]; const xs = Math.ceil(ex + (p.edgeSoft > 0 ? Math.round(p.edgeSoft) : 0));
+      const xg = Math.ceil(edges[ry] + softW), xgL = Math.floor(edgesL[ry]) - softW;
       for (let k = 0; k < p.edgeGlow; k++) {
         const t = (1 - k / p.edgeGlow); const c = blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK));
-        if (xs + k < L) px(xs + k, y0 + ry, c);
+        if (xg + k < L) px(xg + k, y0 + ry, c);
+        if (p.freeLiquid && xgL - k >= capX0[ry]) px(xgL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightKL)));
       }
+    }
+  }
+
+  // Step 3c: wet film — a receding edge leaves liquid on the glass past its contact lines: a faint
+  // liquid-coloured trail over the glow, strongest at the wall rows, fading with TubeState.film*.
+  if (hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02 || (p.freeLiquid && s.filmHome > 0.02))) {
+    const yc = (H - 1) / 2;
+    for (let ry = 0; ry < H; ry++) {
+      const d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d;
+      const nR = Math.round(p.wetFilm * s.filmFree), nL = p.freeLiquid ? Math.round(p.wetFilm * s.filmHome) : 0;
+      const xg = Math.ceil(edges[ry] + softW), xgL = Math.floor(edgesL[ry]) - softW;
+      for (let k = 0; k < nR; k++) if (xg + k < L) pxa(xg + k, y0 + ry, pal.rows[ry], 0.35 * s.filmFree * rowW * (1 - k / nR));
+      for (let k = 0; k < nL; k++) if (xgL - k >= capX0[ry]) pxa(xgL - k, y0 + ry, pal.rows[ry], 0.35 * s.filmHome * rowW * (1 - k / nL));
     }
   }
 
   // Step 4: highlight inset — erase highlight near the edge so it reads as a cylinder (optional)
   // (handled by LUT; inset applied by drawing glass over highlight rows past xe - inset? simpler: skip)
-  if (p.highlightInset > 0) {
+  if (hasLiquid && p.highlightInset > 0) {
     const hiTop = highlightTop(p, H, s.light);
     for (let ry = Math.max(0, hiTop); ry < hiTop + p.highlightH && ry < H; ry++) {
       const ex = edges[ry];
       // fade the highlight into the body colour over the last `inset` px
       const bodyRow = pal.rows[Math.min(H - 1, hiTop + p.highlightH + 1)];
+      const exL = edgesL[ry], xl = Math.max(0, Math.floor(exL));   // home edge (0 unless the liquid is free)
       for (let x = Math.floor(ex - p.highlightInset); x < Math.floor(ex); x++) {
-        if (x < 0) continue;
+        if (x < xl) continue;   // never outside the column
         const t = (x - (ex - p.highlightInset)) / p.highlightInset; // 0..1 toward edge
         px(x, y0 + ry, blend565(pal.rows[ry], bodyRow, t));
       }
-      for (let x = 0; x < p.highlightInset && x < ex; x++) {
-        const t = 1 - x / p.highlightInset;
+      for (let x = xl; x < xl + p.highlightInset && x < ex; x++) {
+        const t = 1 - (x - xl) / p.highlightInset;
         px(x, y0 + ry, blend565(pal.rows[ry], bodyRow, t));
       }
     }
   }
 
+  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi).
+  const bounds: Edges = p.remaining ? { lo: new Float32Array(H), hi: new Float32Array(H) } : { lo: edgesL, hi: edges };
   if (p.remaining) {
     for (let ry = 0; ry < H; ry++) {
       const row = (y0 + ry) * PANEL_W;
       for (let a = 0, b = L - 1; a < b; a++, b--) { const t = fb[row + a]; fb[row + a] = fb[row + b]; fb[row + b] = t; }
-      edges[ry] = L - edges[ry];
+      bounds.lo[ry] = L - edges[ry]; bounds.hi[ry] = L - edgesL[ry];
     }
   }
 
@@ -614,13 +690,13 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const dryRows = onTop ? wetRows : markSourceRows(H, p.tickDryLens);
       const dx = onTop ? 0 : -state.edgeLight * p.tickParallax;
       const dy = onTop ? 0 : state.acrossTilt * p.tickParallax;
-      drawTicks(y0, p, ticksN, wetRows, dryRows, onTop ? null : edges,
-        markFn(y0, edges, p, onTop, p.markContrast * p.tickBright), dx, dy);
+      drawTicks(y0, p, ticksN, wetRows, dryRows, onTop ? null : bounds,
+        markFn(y0, bounds, p, onTop, p.markContrast * p.tickBright), dx, dy);
     }
   };
   const drawDigitLayer = (onTop: boolean): void => {
     if (labels && p.digitsOnTop === onTop)
-      drawLabels(labels, p, onTop ? null : edges, markFn(y0, edges, p, onTop, p.markContrast * p.digitBright));
+      drawLabels(labels, p, onTop ? null : bounds, markFn(y0, bounds, p, onTop, p.markContrast * p.digitBright));
   };
   drawTickLayer(false);
   drawDigitLayer(false);
@@ -636,7 +712,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     const mag = lensMagRows(H, p);
     for (const f of fizz[idx]) {
       const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
-      if (f.x < 2 || f.x >= edgeX(fy, xe, angle, p, s.edgeLight, s.acrossTilt) - 2) continue;
+      if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
       const r = p.fizzSize / 2 * (1 + (f.v - 1) * p.fizzSizeVar);
       const m = mag[fy], ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
       for (let iy = Math.floor(f.y - ry - 1); iy <= Math.ceil(f.y + ry); iy++) {
@@ -646,7 +722,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
           const d = Math.sqrt(dx * dx + dy * dy), cov = Math.min(1, r + 0.5 - d);
           if (cov <= 0) continue;
           const cx = dx - off, cy = dy - off, dc = Math.sqrt(cx * cx + cy * cy);
-          pxa(mapX(ix), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
+          pxa(mapX(ix + xsI), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }
       }
     }
@@ -656,7 +732,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   if (p.bubble) {
     const bx = xe - p.bubbleGap - s.edgeLight * p.bubbleTiltGain, by = (H - 1) * p.bubbleY - (H - 1) / 2 * s.acrossTilt * p.bubbleRollGain;   // bubble rises toward the high wall
     const rx = p.bubbleW / 2, ry_ = p.bubbleH / 2;
-    if (bx - rx > 2) {
+    if (bx - rx > xs + 2) {
       for (let yy = Math.floor(by - ry_); yy <= Math.ceil(by + ry_); yy++) {
         const dy = (yy - by) / ry_;
         if (Math.abs(dy) > 1) continue;

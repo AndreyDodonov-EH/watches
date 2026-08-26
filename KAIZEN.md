@@ -44,6 +44,17 @@ is the dominant controllable power cost after the AMOLED itself. It also dictate
 incrementality makes every render bug harder to see, so it comes after the visuals are stable.
 
 ## Other
+- Sim `flick →` button is nearly invisible: 400 dps raw → ~60 dps after gyro HP 5 Hz + LP 12 Hz + deadzone, so
+  `fillPos` moves 0.3 px. Either shape the button burst like a real flick (100+ ms) or show the raw kick on the scope.
+- Reading gesture (`readTurn`) sums |gyroAlong|+|gyroAcross|; which IMU axis is the forearm roll on the wrist is
+  unmeasured — record a real wrist-raise with `i` and pick the axis / threshold from it.
+- `lens` is rendered by the firmware *and* the acrylic rod magnifies on top: with the rod fitted, device `lens`
+  probably wants 0 (or negative) while the sim keeps 0.6 as a preview; `meniscusLens` / `topLens` are the
+  per-layer compensations and should be calibrated together.
+- Fizz respawn ignores the free slug's motion (bubbles are in the liquid frame, fine) but a bouncing slug should
+  nucleate bubbles like `agitation` does — hook `slugAcc` into `ensureFizz`.
+- `x` STATE now dumps 12 values per tube (acrossTilt, cap, films, slugPos, reading added); compare-device.py updated,
+  anything else parsing STATE must follow.
 - Light model (`lightPhys`): physical mode ignores the light's along-axis component (it only dims, does not move the highlight) and the face-down case (`n` clamped ≥ 0).
 - `edgeLight -> lightK` is a proxy: pressure into the end fills the cap (modelled via `meniscusTiltGain`);
   the brightness change stands in for the stronger caustic of a fuller cap.

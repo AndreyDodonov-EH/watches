@@ -71,7 +71,7 @@ app.innerHTML = `
         <canvas id="scope" width="316" height="70"></canvas>
         <label>along <input type="range" id="along" min="-1" max="1" step="0.01" value="0"> <output id="alongv">0</output> g</label>
         <label>across <input type="range" id="across" min="-1" max="1" step="0.01" value="0"> <output id="acrossv">0</output> g</label>
-        <button id="center">centre</button> <button id="flick">flick →</button> <button id="flickl">← flick</button> <button id="shake">shake</button>
+        <button id="center">centre</button> <button id="flick">flick →</button> <button id="flickl">← flick</button> <button id="shake">shake</button> <button id="wrist" title="wrist turn into the reading pose (free liquid: parks the slug home)">raise wrist</button>
       </fieldset>
       <fieldset><legend>Device</legend>
         <label><select id="link"><option value="serial">Web Serial</option><option value="ble">Bluetooth</option></select> <button id="serialbtn">connect</button> <span id="serialst">disconnected</span></label>
@@ -172,6 +172,8 @@ $('flickl').onclick = () => { kick = -400; };
 let shakeT = 0;
 const SHAKE_T = 2.5;
 $('shake').onclick = () => { shakeT = SHAKE_T; };
+let wristT = 0;   // wrist turn: 0.5 s roll burst about the tube axis, then the reading pose on the sliders
+$('wrist').onclick = () => { wristT = 0.5; manual.along = 0; manual.across = 0.2; syncSliders(); save(); };
 
 // drag on panel = tilt
 let dragging = false;
@@ -345,6 +347,7 @@ function physics(dt: number) {
     raw.gyroAcross += Math.cos((SHAKE_T - shakeT) * 2 * Math.PI * 2.5) * 120 * env;
   }
   if (kick !== 0) { raw.gyroAcross += kick; kick *= Math.exp(-dt / 0.06); if (Math.abs(kick) < 5) kick = 0; }
+  if (wristT > 0) { wristT -= dt; raw.gyroAlong += 250 * Math.sin((wristT / 0.5) * Math.PI); }
   Object.assign(input, imuFilter.step(raw, params, dt));
   scopePush(raw, input);
   if (timeMode === 'demo') demoClock += dt * 1000 * demoSpeed;
@@ -364,7 +367,7 @@ function frame(now: number) {
   drawScope();
   frames++;
   if (now - fpsT > 1000) {
-    $('fps').textContent = `${String(frames).padStart(3)} fps · fill h=${hours.fillTarget.toFixed(3)} m=${minutes.fillTarget.toFixed(3)} · angle ${hours.angle.toFixed(1).padStart(5)}°`;
+    $('fps').textContent = `${String(frames).padStart(3)} fps · fill h=${hours.fillTarget.toFixed(3)} m=${minutes.fillTarget.toFixed(3)} · angle ${hours.angle.toFixed(1).padStart(5)}° · cap ${hours.cap.toFixed(1).padStart(5)} px · read ${hours.reading.toFixed(2)}`;
     frames = 0; fpsT = now;
   }
   const d = currentDate();

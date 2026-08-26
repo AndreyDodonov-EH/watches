@@ -10,8 +10,8 @@
 //       && node /tmp/replay-check/tools/replay-check.js
 // (compiled outside sim/ so package.json "type":"module" doesn't bite the CJS output)
 import {
-  ANGLE_HARD_MAX_DEG, FILL_SLOSH_MAX_PX, GravityNorm, ImuFilter, PHYS_DT,
-  newTube, stepTube, type TiltInput,
+  ANGLE_HARD_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, GravityNorm, ImuFilter, PHYS_DT,
+  columnLen, newTube, stepTube, type TiltInput,
 } from '../src/physics';
 import { DEFAULT_PARAMS } from '../src/params';
 
@@ -20,11 +20,12 @@ const TUBE_LENGTH_PX = 536, TUBE_HEIGHT_PX = 72;
 // axis map (spec/layout.ts): along = -ay, across = -ax, gyroAcross = gx
 const mapSample = (s: number[], d: number): TiltInput =>
   ({ along: -s[1] / d, across: -s[0] / d, gyroAlong: s[4], gyroAcross: s[3] });
-function edgeX(ry: number, xe: number, angleDeg: number, tilt: number): number {
+function edgeX(ry: number, xe: number, angleDeg: number, tilt: number, side: number, cap: number): number {
   const yc = (TUBE_HEIGHT_PX - 1) / 2, d = (ry - yc) / yc, P = DEFAULT_PARAMS;
-  const asymEff = P.meniscusAsym * Math.max(0, Math.min(1, 0.4 - 0.6 * tilt)) * Math.sqrt(Math.max(0, 1 - tilt * tilt)); // no sag when vertical
-  const depth = P.meniscusDepth * (1 + P.meniscusTiltGain * tilt) * (1 - asymEff * d);
-  return xe + Math.tan((angleDeg * Math.PI) / 180) * (ry - yc) + depth * Math.pow(Math.abs(d), P.meniscusPow);
+  const asymEff = P.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(P.meniscusDepth);
+  const u = Math.abs(d), climb = P.meniscusDepth * (1 - asymEff * d) * Math.pow(u, P.meniscusPow);
+  const bulge = P.meniscusTiltGain * tilt * Math.abs(P.meniscusDepth) + cap;
+  return xe + Math.tan((angleDeg * Math.PI) / 180) * (ry - yc) + climb - bulge * (1 - Math.sqrt(Math.max(0, 1 - u * u)));
 }
 
 // deterministic noise
@@ -77,7 +78,7 @@ const p = { ...DEFAULT_PARAMS };
 // Max distance the drawn edge may ever sit from the time-true fill edge (px):
 // hard slosh cap + tan(hard angle cap)·(H/2) + |meniscus| + 1 px slack.
 const EDGE_BUDGET = FILL_SLOSH_MAX_PX + Math.tan((ANGLE_HARD_MAX_DEG * Math.PI) / 180) * (TUBE_HEIGHT_PX / 2)
-  + Math.abs(DEFAULT_PARAMS.meniscusDepth) * (1 + DEFAULT_PARAMS.meniscusTiltGain) * (1 + DEFAULT_PARAMS.meniscusAsym) + 1;
+  + Math.abs(DEFAULT_PARAMS.meniscusDepth) * (1 + DEFAULT_PARAMS.meniscusTiltGain) * (1 + DEFAULT_PARAMS.meniscusAsym) + CAP_DYN_MAX_PX + 1;
 
 let failures = 0;
 const fail = (msg: string): void => { failures++; console.error('  FAIL', msg); };
@@ -86,28 +87,65 @@ for (const [name, samples] of scenarios) {
   const norm = new GravityNorm(), filt = new ImuFilter();
   const tubes = [newTube(), newTube()];
   tubes[0].fillTarget = 0.5; tubes[1].fillTarget = 0.02; // mid-tube and the fragile near-empty case
-  let maxDev = 0, maxAngle = 0, maxFill = 0, maxIn = 0;
+  let maxDev = 0, maxAngle = 0, maxFill = 0, maxIn = 0, maxCap = 0;
   for (const s of samples) {
     const d = norm.update(Math.hypot(s[0], s[1], s[2]));
     const inp = filt.step(mapSample(s, d), p);
     maxIn = Math.max(maxIn, Math.abs(inp.along), Math.abs(inp.across));
     for (const tube of tubes) {
       stepTube(tube, inp, p);
-      if (!(isFinite(tube.fillPos) && isFinite(tube.angle) && isFinite(tube.light) && isFinite(tube.edgeLight)))
+      if (!(isFinite(tube.fillPos) && isFinite(tube.angle) && isFinite(tube.light) && isFinite(tube.edgeLight)
+        && isFinite(tube.cap) && isFinite(tube.filmFree) && isFinite(tube.slugPos) && isFinite(tube.reading)))
         { fail(`${name}: non-finite state`); break; }
       for (const ry of [0, TUBE_HEIGHT_PX >> 1, TUBE_HEIGHT_PX - 1]) {
-        const dev = Math.abs(edgeX(ry, tube.fillTarget * TUBE_LENGTH_PX + tube.fillPos, tube.angle, tube.edgeLight) - tube.fillTarget * TUBE_LENGTH_PX);
+        const dev = Math.abs(edgeX(ry, tube.fillTarget * TUBE_LENGTH_PX + tube.fillPos, tube.angle, tube.edgeLight, tube.acrossTilt, tube.cap) - tube.fillTarget * TUBE_LENGTH_PX);
         maxDev = Math.max(maxDev, dev);
       }
       maxAngle = Math.max(maxAngle, Math.abs(tube.angle));
       maxFill = Math.max(maxFill, Math.abs(tube.fillPos));
+      maxCap = Math.max(maxCap, Math.abs(tube.cap));
+      if (tube.slugPos !== 0) fail(`${name}: pinned liquid moved (slugPos ${tube.slugPos})`);
     }
   }
   if (maxFill > FILL_SLOSH_MAX_PX + 1e-9) fail(`${name}: fillPos ${maxFill.toFixed(1)} px exceeds cap ${FILL_SLOSH_MAX_PX}`);
   if (maxAngle > ANGLE_HARD_MAX_DEG + 1e-9) fail(`${name}: angle ${maxAngle.toFixed(1)}° exceeds cap ${ANGLE_HARD_MAX_DEG}`);
+  if (maxCap > CAP_DYN_MAX_PX + 1e-9) fail(`${name}: cap ${maxCap.toFixed(1)} px exceeds cap ${CAP_DYN_MAX_PX}`);
   if (maxDev > EDGE_BUDGET) fail(`${name}: edge deviation ${maxDev.toFixed(1)} px exceeds budget ${EDGE_BUDGET.toFixed(1)}`);
   if (maxIn > 1.2 * p.inputGain + 1e-9) fail(`${name}: filtered tilt ${maxIn.toFixed(2)} g exceeds clip`);
-  console.log(`${failures ? '' : 'ok  '}${name}: edge dev ${maxDev.toFixed(1)} px (budget ${EDGE_BUDGET.toFixed(1)}), angle ${maxAngle.toFixed(1)}°, slosh ${maxFill.toFixed(1)} px, tilt in ${maxIn.toFixed(2)} g`);
+  console.log(`${failures ? '' : 'ok  '}${name}: edge dev ${maxDev.toFixed(1)} px (budget ${EDGE_BUDGET.toFixed(1)}), angle ${maxAngle.toFixed(1)}°, slosh ${maxFill.toFixed(1)} px, cap ${maxCap.toFixed(1)} px, tilt in ${maxIn.toFixed(2)} g`);
+}
+
+// Free liquid: the slug must stay inside the tube through every scenario, come home on a wrist
+// turn into the reading pose, and leave again once the hold expires and the tube tilts.
+{
+  const pf = { ...DEFAULT_PARAMS, freeLiquid: true };
+  for (const [name, samples] of scenarios) {
+    const norm = new GravityNorm(), filt = new ImuFilter();
+    const tube = newTube(); tube.fillTarget = 0.3;
+    let bad = false;
+    for (const s of samples) {
+      const inp = filt.step(mapSample(s, norm.update(Math.hypot(s[0], s[1], s[2]))), pf);
+      stepTube(tube, inp, pf);
+      const travel = TUBE_LENGTH_PX - columnLen(tube.fillTarget, pf);
+      if (!(isFinite(tube.slugPos) && tube.slugPos >= 0 && tube.slugPos <= travel + 1e-6)) { bad = true; break; }
+    }
+    if (bad) fail(`free liquid, ${name}: slug left the tube (${tube.slugPos})`);
+    else console.log(`ok  free liquid, ${name}: slug ${tube.slugPos.toFixed(1)} px, reading ${tube.reading.toFixed(2)}`);
+  }
+  // turn → pose → read → hold expires → tilt → slides away
+  const tube = newTube(); tube.fillTarget = 0.3;
+  const step = (inp: TiltInput, n: number) => { for (let i = 0; i < n; i++) stepTube(tube, inp, pf); };
+  step({ along: 0.6, across: 0, gyroAlong: 0, gyroAcross: 0 }, 150);          // tilted: slug slides to the far end
+  const travel = TUBE_LENGTH_PX - columnLen(0.3, pf);
+  if (tube.slugPos < travel - 5) fail(`free liquid: slug did not slide out (${tube.slugPos.toFixed(1)} of ${travel.toFixed(1)})`);
+  step({ along: 0, across: 0.1, gyroAlong: 300, gyroAcross: 0 }, 20);        // wrist turn into the pose
+  step({ along: 0, across: 0.1, gyroAlong: 0, gyroAcross: 0 }, 150);         // hold still 3 s
+  if (tube.reading < 0.95 || tube.slugPos > 2) fail(`free liquid: did not come home on a wrist turn (reading ${tube.reading.toFixed(2)}, slug ${tube.slugPos.toFixed(1)})`);
+  else console.log(`ok  free liquid: wrist turn parks the slug home (slug ${tube.slugPos.toFixed(1)} px)`);
+  step({ along: 0, across: 0.1, gyroAlong: 0, gyroAcross: 0 }, 50 * (pf.readHold + 1));
+  step({ along: 0.6, across: 0, gyroAlong: 0, gyroAcross: 0 }, 150);
+  if (tube.reading > 0.05 || tube.slugPos < travel - 5) fail(`free liquid: stayed home after the hold expired (reading ${tube.reading.toFixed(2)}, slug ${tube.slugPos.toFixed(1)})`);
+  else console.log('ok  free liquid: released after the hold');
 }
 if (failures) throw new Error(`${failures} failure(s)`);
 console.log('all scenarios within bounds');

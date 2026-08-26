@@ -5,7 +5,7 @@
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const fs = require('fs'); declare const process: any; declare const Buffer: any; declare function require(m: string): any;
 import { renderFrame, fb, setSprite } from '../src/render';
-import type { TubeState } from '../src/physics';
+import { newTube, type TubeState } from '../src/physics';
 
 const job = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (job.sprite) {
@@ -13,7 +13,7 @@ if (job.sprite) {
   const data = new Uint8ClampedArray(fs.readFileSync(sp.rgbaFile));
   setSprite(sp.i, { cellW: sp.cellW, cellH: sp.cellH, widths: sp.widths, data, w: sp.w, h: sp.h });
 }
-const h: TubeState = job.hours, m: TubeState = job.minutes;
+const h: TubeState = { ...newTube(), ...job.hours }, m: TubeState = { ...newTube(), ...job.minutes };  // device STATE carries only the drawn fields
 renderFrame(h, m, job.params);
 fs.writeFileSync(process.argv[3], Buffer.from(fb.buffer, fb.byteOffset, fb.byteLength));
 console.log('ok');

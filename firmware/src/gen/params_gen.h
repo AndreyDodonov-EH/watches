@@ -31,6 +31,12 @@ struct Params {
   float meniscusPow;
   float meniscusTiltGain;
   float meniscusAsym;
+  float meniscusLens;
+  float meniscusK;
+  float meniscusDamp;
+  float meniscusInertia;
+  float contactLag;
+  float wetFilm;
   float edgeSoft;
   float frontBright;
   float edgeGlow;
@@ -107,6 +113,15 @@ struct Params {
   float digitMinuteStart;
   bool digitsLastOnlyH;
   bool digitsLastOnlyM;
+  bool freeLiquid;
+  float freeGain;
+  float freeDamp;
+  float freeBounce;
+  float freeHomeK;
+  float readFaceUp;
+  float readAlongMax;
+  float readTurn;
+  float readHold;
   float fillK;
   float fillDamp;
   float fillSloshGain;
@@ -133,8 +148,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 127
-#define PARAMS_SCHEMA_CRC 0xf711ae2fu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 142
+#define PARAMS_SCHEMA_CRC 0xee5e8b24u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -166,6 +181,12 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"meniscusPow", 'f', (uint16_t)offsetof(Params, meniscusPow)},
   {"meniscusTiltGain", 'f', (uint16_t)offsetof(Params, meniscusTiltGain)},
   {"meniscusAsym", 'f', (uint16_t)offsetof(Params, meniscusAsym)},
+  {"meniscusLens", 'f', (uint16_t)offsetof(Params, meniscusLens)},
+  {"meniscusK", 'f', (uint16_t)offsetof(Params, meniscusK)},
+  {"meniscusDamp", 'f', (uint16_t)offsetof(Params, meniscusDamp)},
+  {"meniscusInertia", 'f', (uint16_t)offsetof(Params, meniscusInertia)},
+  {"contactLag", 'f', (uint16_t)offsetof(Params, contactLag)},
+  {"wetFilm", 'f', (uint16_t)offsetof(Params, wetFilm)},
   {"edgeSoft", 'f', (uint16_t)offsetof(Params, edgeSoft)},
   {"frontBright", 'f', (uint16_t)offsetof(Params, frontBright)},
   {"edgeGlow", 'f', (uint16_t)offsetof(Params, edgeGlow)},
@@ -242,6 +263,15 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"digitMinuteStart", 'f', (uint16_t)offsetof(Params, digitMinuteStart)},
   {"digitsLastOnlyH", 'b', (uint16_t)offsetof(Params, digitsLastOnlyH)},
   {"digitsLastOnlyM", 'b', (uint16_t)offsetof(Params, digitsLastOnlyM)},
+  {"freeLiquid", 'b', (uint16_t)offsetof(Params, freeLiquid)},
+  {"freeGain", 'f', (uint16_t)offsetof(Params, freeGain)},
+  {"freeDamp", 'f', (uint16_t)offsetof(Params, freeDamp)},
+  {"freeBounce", 'f', (uint16_t)offsetof(Params, freeBounce)},
+  {"freeHomeK", 'f', (uint16_t)offsetof(Params, freeHomeK)},
+  {"readFaceUp", 'f', (uint16_t)offsetof(Params, readFaceUp)},
+  {"readAlongMax", 'f', (uint16_t)offsetof(Params, readAlongMax)},
+  {"readTurn", 'f', (uint16_t)offsetof(Params, readTurn)},
+  {"readHold", 'f', (uint16_t)offsetof(Params, readHold)},
   {"fillK", 'f', (uint16_t)offsetof(Params, fillK)},
   {"fillDamp", 'f', (uint16_t)offsetof(Params, fillDamp)},
   {"fillSloshGain", 'f', (uint16_t)offsetof(Params, fillSloshGain)},
@@ -297,6 +327,12 @@ static const Params PRESET_1 = {
   3.2f, // meniscusPow
   0.55f, // meniscusTiltGain
   0.5f, // meniscusAsym
+  0.0f, // meniscusLens
+  180.0f, // meniscusK
+  9.0f, // meniscusDamp
+  6.0f, // meniscusInertia
+  0.5f, // contactLag
+  6.0f, // wetFilm
   2.6f, // edgeSoft
   21.0f, // frontBright
   15.0f, // edgeGlow
@@ -373,6 +409,15 @@ static const Params PRESET_1 = {
   0.0f, // digitMinuteStart
   false, // digitsLastOnlyH
   false, // digitsLastOnlyM
+  false, // freeLiquid
+  500.0f, // freeGain
+  1.5f, // freeDamp
+  0.25f, // freeBounce
+  30.0f, // freeHomeK
+  0.7f, // readFaceUp
+  0.3f, // readAlongMax
+  80.0f, // readTurn
+  5.0f, // readHold
   246.0f, // fillK
   14.8f, // fillDamp
   5.5f, // fillSloshGain

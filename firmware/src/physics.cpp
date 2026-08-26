@@ -1,4 +1,5 @@
 #include "physics.h"
+#include "layout.h"
 #include <math.h>
 
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -12,16 +13,67 @@ float lightRest(float along, float across, const Params &p) {
   return p.lightAngle + (phys - p.lightAngle) * p.lightPhys;
 }
 
+float columnLen(float fillTarget, const Params &p) { return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX; }
+
 void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   const float along = dz(in.along, p.deadzone);
   const float across = dz(in.across, p.deadzone);
 
   const float fillRest = clampf(along * p.fillSloshGain, -FILL_SLOSH_MAX_PX, FILL_SLOSH_MAX_PX);
-  const float fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + in.gyroAcross * p.angleGyroGain * 4;
+  const float fillKick = in.gyroAcross * p.angleGyroGain * 4;
+  const float fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
   s.fillVel += fillAcc * dt;
   s.fillPos += s.fillVel * dt;
   if (s.fillPos > FILL_SLOSH_MAX_PX) { s.fillPos = FILL_SLOSH_MAX_PX; s.fillVel = fminf(0, s.fillVel); }
   if (s.fillPos < -FILL_SLOSH_MAX_PX) { s.fillPos = -FILL_SLOSH_MAX_PX; s.fillVel = fmaxf(0, s.fillVel); }
+
+  // Reading gesture: a wrist turn then the reading pose (face up, tube level) → readHold s read. See sim.
+  const float turn = fabsf(in.gyroAlong) + fabsf(in.gyroAcross);
+  const float motionT = p.readTurn <= 0 ? 1 : fminf(1, turn / p.readTurn);
+  s.motion += (motionT - s.motion) * fminf(1, (motionT > s.motion ? 20 : 1.5f) * dt);
+  const float faceUp = sqrtf(fmaxf(0, 1 - along * along - across * across));
+  const bool inPose = faceUp >= p.readFaceUp && fabsf(along) <= p.readAlongMax;
+  if (s.motion > 0.5f) s.armed = true;
+  if (!inPose) s.readTimer = 0;
+  else if (s.armed && s.motion < 0.25f) { s.armed = false; s.readTimer = p.readHold; }
+  s.readTimer = fmaxf(0, s.readTimer - dt);
+  s.reading += ((!p.freeLiquid || s.readTimer > 0 ? 1 : 0) - s.reading) * fminf(1, 4 * dt);
+
+  // Free liquid: slug slides under along-gravity with drag, bounces at the ends, parked home while reading.
+  const float travel = fmaxf(0, TUBE_LENGTH_PX - columnLen(s.fillTarget, p));
+  const float home = p.remaining ? travel : 0;
+  float slugAcc = 0;
+  if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
+  else {
+    slugAcc = along * p.freeGain - p.freeDamp * s.slugVel
+      + s.reading * (-p.freeHomeK * (s.slugPos - home) - 2 * sqrtf(p.freeHomeK) * s.slugVel);
+    const float v0 = s.slugVel;
+    s.slugVel += slugAcc * dt;
+    s.slugPos += s.slugVel * dt;
+    if (s.slugPos <= 0 || s.slugPos >= travel) {   // wall carries the load; the hit is an impulse
+      const bool hit = s.slugPos <= 0 ? s.slugVel < 0 : s.slugVel > 0;
+      s.slugPos = s.slugPos <= 0 ? 0 : travel;
+      if (hit) s.slugVel = -s.slugVel * p.freeBounce;
+      slugAcc = hit ? (s.slugVel - v0) / dt * 0.25f : 0;
+    }
+  }
+
+  // Meniscus dynamics: centre pushed ahead of the contact lines by edge acceleration (inertia) and
+  // velocity (contact-angle hysteresis), springing back with a wobble.
+  const float edgeVel = s.fillVel + s.slugVel, edgeAcc = fillKick + slugAcc;   // forcing only, see sim
+  const float capRest = p.contactLag * edgeVel * 0.1f;
+  const float capAcc = -p.meniscusK * (s.cap - capRest) - p.meniscusDamp * s.capVel + p.meniscusInertia * edgeAcc;
+  s.capVel += capAcc * dt;
+  s.cap += s.capVel * dt;
+  if (s.cap > CAP_DYN_MAX_PX) { s.cap = CAP_DYN_MAX_PX; s.capVel = fminf(0, s.capVel); }
+  if (s.cap < -CAP_DYN_MAX_PX) { s.cap = -CAP_DYN_MAX_PX; s.capVel = fmaxf(0, s.capVel); }
+
+  // Wet film: fast attack while an edge recedes, slow drain.
+  const float recede = p.remaining ? 1 : -1;
+  auto filmT = [](float v) { return clampf(v / FILM_FULL_PX_S, 0, 1); };
+  auto follow = [dt](float cur, float target) { return cur + (target - cur) * fminf(1, (target > cur ? 15 : 2) * dt); };
+  s.filmFree = follow(s.filmFree, filmT(recede * edgeVel));
+  s.filmHome = follow(s.filmHome, p.freeLiquid ? filmT(-recede * s.slugVel) : 0);
 
   const float aMax = fminf(p.angleMax, ANGLE_HARD_MAX_DEG);
   const float angleRest = clampf(across * p.angleTiltGain, -aMax, aMax);   // in-plane gravity only (see sim physics.ts)

@@ -285,9 +285,12 @@ static void handleLine(char *line) {
     case 'x': {  // dump state + both strips (hex) for offline comparison with the sim
       display_wait_all();
       renderTube(0, tubeH, params, strip[0]); renderTube(1, tubeM, params, strip[1]);
-      out.printf("STATE %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
-                    tubeH.fillTarget, tubeH.fillPos, tubeH.angle, tubeH.light, tubeH.edgeLight, tubeH.agitation,
-                    tubeM.fillTarget, tubeM.fillPos, tubeM.angle, tubeM.light, tubeM.edgeLight, tubeM.agitation);
+      auto dumpState = [&](const TubeState &t) {
+        out.printf(" %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f",
+                   t.fillTarget, t.fillPos, t.angle, t.light, t.edgeLight, t.agitation,
+                   t.acrossTilt, t.cap, t.filmFree, t.filmHome, t.slugPos, t.reading);
+      };
+      out.print("STATE"); dumpState(tubeH); dumpState(tubeM); out.println();
       static char hex[PANEL_W * 4 + 2];
       for (int t = 0; t < 2; t++) for (int y = 0; y < tubeLayout(params).H; y++) {
         const uint16_t *row = strip[t] + y * PANEL_W; char *o = hex;
