@@ -44,6 +44,7 @@ is the dominant controllable power cost after the AMOLED itself. It also dictate
 incrementality makes every render bug harder to see, so it comes after the visuals are stable.
 
 ## Other
+- Sim screenshot validation: port 5190 was occupied but unreachable, and headless Chromium intermittently aborted during sandbox shutdown; used 5191 and retried. Check stale listeners/processes if either recurs.
 - Sim `flick →` button is nearly invisible: 400 dps raw → ~60 dps after gyro HP 5 Hz + LP 12 Hz + deadzone, so
   `fillPos` moves 0.3 px. Either shape the button burst like a real flick (100+ ms) or show the raw kick on the scope.
 - Reading gesture (`readTurn`) sums |gyroAlong|+|gyroAcross|; which IMU axis is the forearm roll on the wrist is

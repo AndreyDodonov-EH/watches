@@ -77,7 +77,10 @@ static inline void pxa(int x, int y, uint16_t c, float t) {
 // ---------------------------------------------------------------------------------------------
 // palette
 // ---------------------------------------------------------------------------------------------
-struct Palette { uint16_t rows[TUBE_HEIGHT_MAX]; uint16_t bubbleIn[TUBE_HEIGHT_MAX]; uint16_t tubeBackRows[TUBE_HEIGHT_MAX]; uint16_t body, tubeBack, bubbleRim; };
+struct Palette {
+  uint16_t rows[TUBE_HEIGHT_MAX], bubbleIn[TUBE_HEIGHT_MAX], tubeBackRows[TUBE_HEIGHT_MAX];
+  uint16_t body, tubeBack, bubbleRim;
+};
 
 // Glass wall shading weight 0..1 per row (sim: glassW): ambient cylinder shade, specular tent on the
 // top wall, faint band on the lower wall, brighter outermost rows.
@@ -103,26 +106,34 @@ static int highlightTop(const Params &p, float lightDeg) {
 // Style top light blended (lightPhys) with a Lambert cylinder lit from 2*light (sim buildPalette).
 static void buildPalette(const Params &p, float lightDeg, Palette &pal) {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
-  RGB tubeBack = hexToRgb(p.tubeBack), ghi = hexToRgb(p.glassHi);
+  RGB tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
   float br = p.brightness * p.liquidBright;
+  RGB liquidHiScaled = scale(hi, br), glassHiScaled = scale(ghi, p.brightness);
   float yc = (H - 1) / 2.0f, lightRad = 2 * lightDeg * (float)M_PI / 180;
   int hiTop = highlightTop(p, lightDeg);
   for (int y = 0; y < H; y++) {
     float t = (float)y / (H - 1);
+    int gradient = (int)jround(p.tubeBackGradient);
+    float backMix = gradient == 1 ? t : gradient == 2 ? 1 - fabsf(t * 2 - 1)
+      : gradient == 3 ? fabsf(t * 2 - 1) : 0;
+    RGB back = mix(tubeBack, tubeBack2, backMix);
     float lam = fmaxf(0, cosf(asinf(clampf((yc - y) / yc, -1, 1)) - lightRad));
     RGB c;
     if (t < 0.33f) c = mix(mix(body, lo, 0.25f), body, t / 0.33f);
     else c = mix(body, lo, ((t - 0.33f) / 0.67f) * p.shadeDepth);
     if (p.lightPhys > 0) c = mix(c, mix(lo, body, 1 - p.shadeDepth * (1 - lam)), p.lightPhys);
-    // transparent liquid shows the tube back through it; the highlight is a surface reflection, so it goes on after (sim buildPalette)
-    c = mix(scale(c, br), scale(tubeBack, p.brightness), p.liquidTransparency);
+    // Transparent liquid shows the per-row tube-back gradient. The highlight remains a surface
+    // reflection and goes on after it.
+    c = scale(c, br);
+    c = mix(c, scale(back, p.brightness), p.liquidTransparency);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       float k = powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
-      c = mix(c, scale(hi, br), fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
+      c = mix(c, liquidHiScaled, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
     float gw = glassW(p, y, hiTop, lam);
-    pal.tubeBackRows[y] = q(scale(mix(tubeBack, ghi, gw), p.brightness));
-    c = mix(c, scale(ghi, p.brightness), gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency));   // glass weight rises to the dry-side one with transparency
+    float glassWet = gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency);
+    pal.tubeBackRows[y] = q(scale(mix(back, ghi, gw), p.brightness));
+    c = mix(c, glassHiScaled, glassWet);   // glass weight rises to the dry-side one with transparency
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
   }
@@ -233,6 +244,40 @@ struct Mark {
     pxa(x, y, c, cov);
   }
 };
+
+// Compact code-drawn rear-wall markings; composited through the liquid like the rear scale.
+static void drawTubeBackDecal(int idx, int y0, const Params &p, const Mark &mark) {
+  int mode = (int)jround(p.tubeBackDecal);
+  float opacity = clampf(p.tubeBackDecalOpacity, 0, 1);
+  if (mode < 1 || mode > 2 || opacity <= 0 || H < 15) return;
+  uint16_t c = q(scale(hexToRgb(p.tubeBackDecalColor), p.brightness));
+  auto glyph = [&](const uint8_t *rows, int nRows, int bits, int x0, int yy0, int s) {
+    for (int gy = 0; gy < nRows; gy++) for (int gx = 0; gx < bits; gx++)
+      if (rows[gy] & (1 << (bits - 1 - gx)))
+        for (int dy = 0; dy < s; dy++) for (int dx = 0; dx < s; dx++) mark(x0 + gx * s + dx, yy0 + gy * s + dy, c, opacity);
+  };
+  auto frame = [&](int x0, int yy0, int w, int h) {
+    float a = opacity * 0.65f;
+    for (int x = x0 + 2; x < x0 + w - 2; x++) { mark(x, yy0, c, a); mark(x, yy0 + h - 1, c, a); }
+    for (int y = yy0 + 2; y < yy0 + h - 2; y++) { mark(x0, y, c, a); mark(x0 + w - 1, y, c, a); }
+    mark(x0 + 1, yy0 + 1, c, a); mark(x0 + w - 2, yy0 + 1, c, a);
+    mark(x0 + 1, yy0 + h - 2, c, a); mark(x0 + w - 2, yy0 + h - 2, c, a);
+  };
+  int s = H >= 28 ? 2 : 1;
+  if (mode == 1) {
+    static const uint8_t ID_H[7] = {17, 17, 17, 31, 17, 17, 17};
+    static const uint8_t ID_M[7] = {17, 27, 21, 21, 17, 17, 17};
+    int w = 5 * s + 8, h = 7 * s + 8, x0 = L - w - 7, yy0 = y0 + (H - h) / 2;
+    frame(x0, yy0, w, h); glyph(idx == 0 ? ID_H : ID_M, 7, 5, x0 + 4, yy0 + 4, s);
+  } else {
+    int a = idx == 0 ? 1 : 6, b = idx == 0 ? 2 : 0;
+    int w = 7 * s + 8, h = 5 * s + 8, x0 = L - w - 7, yy0 = y0 + (H - h) / 2;
+    frame(x0, yy0, w, h);
+    glyph(FONTS[0].g[a], 5, 3, x0 + 4, yy0 + 4, s);
+    glyph(FONTS[0].g[b], 5, 3, x0 + 4 + 4 * s, yy0 + 4, s);
+    mark(x0 - 2, yy0 + h / 2, c, opacity * 0.55f); mark(x0 + w + 1, yy0 + h / 2, c, opacity * 0.55f);
+  }
+}
 
 struct Label { int x0; char text[3]; int len; int adv[2]; };
 struct Labels {
@@ -612,14 +657,16 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
       int xiL = (int)floorf(edgesL[ry]);
       for (int k = 1; k <= p.frontBright; k++) {
         int x = xi - k; if (x < 0) break;
+        if (x >= L) continue;
         float t = 1 - k / p.frontBright;
-        px(x, y0 + ry, blend565(pal.rows[ry], hiC, fminf(1, t * t * 0.85f * lightK * rowK)));
+        px(x, y0 + ry, blend565(rd(x, y0 + ry), hiC, fminf(1, t * t * 0.85f * lightK * rowK)));
       }
       if (!p.freeLiquid) continue;
       for (int k = 1; k <= p.frontBright; k++) {   // home edge: lit by the opposite tilt
         int x = xiL + k; if (x >= xi - p.frontBright) break;
+        if (x < 0 || x >= L) continue;
         float t = 1 - k / p.frontBright;
-        px(x, y0 + ry, blend565(pal.rows[ry], hiC, fminf(1, t * t * 0.85f * lightKL * rowK)));
+        px(x, y0 + ry, blend565(rd(x, y0 + ry), hiC, fminf(1, t * t * 0.85f * lightKL * rowK)));
       }
     }
   }
@@ -630,10 +677,9 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     for (int ry = 0; ry < H; ry++) {
       int xg = (int)ceilf(edges[ry] + softW), xgL = (int)floorf(edgesL[ry]) - softW;
       for (int k = 0; k < p.edgeGlow; k++) {
-        float t = 1 - k / p.edgeGlow;
-        uint16_t c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK));
-        if (xg + k < L) px(xg + k, y0 + ry, c);
-        if (p.freeLiquid && xgL - k >= capX0[ry]) px(xgL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightKL)));
+        float t = 1 - k / p.edgeGlow; int xr = xg + k, xl = xgL - k;
+        if (xr < L) px(xr, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK)));
+        if (p.freeLiquid && xl >= capX0[ry]) px(xl, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightKL)));
       }
     }
   }
@@ -683,6 +729,8 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   }
 
   // Rear marks are composited through the liquid, before bubbles.
+  Mark decalMark { y0, bounds, &p, false, p.markContrast * p.tubeBackDecalOpacity };
+  drawTubeBackDecal(idx, y0, p, decalMark);
   static Labels labels;
   bool haveLabels = layoutLabels(idx, y0, p, ticksN, st.acrossTilt, st.fillTarget, labels);
   auto drawTickLayer = [&](bool onTop) {

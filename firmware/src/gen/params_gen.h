@@ -12,6 +12,11 @@ struct Params {
   uint32_t liquidHi;
   uint32_t liquidLo;
   uint32_t tubeBack;
+  uint32_t tubeBack2;
+  float tubeBackGradient;
+  float tubeBackDecal;
+  uint32_t tubeBackDecalColor;
+  float tubeBackDecalOpacity;
   uint32_t glassHi;
   float glassBody;
   float glassHiBright;
@@ -148,8 +153,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 142
-#define PARAMS_SCHEMA_CRC 0xee5e8b24u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 147
+#define PARAMS_SCHEMA_CRC 0x74bee801u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -162,6 +167,11 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"liquidHi", 'c', (uint16_t)offsetof(Params, liquidHi)},
   {"liquidLo", 'c', (uint16_t)offsetof(Params, liquidLo)},
   {"tubeBack", 'c', (uint16_t)offsetof(Params, tubeBack)},
+  {"tubeBack2", 'c', (uint16_t)offsetof(Params, tubeBack2)},
+  {"tubeBackGradient", 'f', (uint16_t)offsetof(Params, tubeBackGradient)},
+  {"tubeBackDecal", 'f', (uint16_t)offsetof(Params, tubeBackDecal)},
+  {"tubeBackDecalColor", 'c', (uint16_t)offsetof(Params, tubeBackDecalColor)},
+  {"tubeBackDecalOpacity", 'f', (uint16_t)offsetof(Params, tubeBackDecalOpacity)},
   {"glassHi", 'c', (uint16_t)offsetof(Params, glassHi)},
   {"glassBody", 'f', (uint16_t)offsetof(Params, glassBody)},
   {"glassHiBright", 'f', (uint16_t)offsetof(Params, glassHiBright)},
@@ -300,7 +310,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  12, // v
+  15, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -308,6 +318,11 @@ static const Params PRESET_1 = {
   0xB6FFA0, // liquidHi
   0x1E7515, // liquidLo
   0x000000, // tubeBack
+  0x18212A, // tubeBack2
+  0.0f, // tubeBackGradient
+  0.0f, // tubeBackDecal
+  0x80909A, // tubeBackDecalColor
+  0.65f, // tubeBackDecalOpacity
   0xA8C0C8, // glassHi
   0.1f, // glassBody
   0.55f, // glassHiBright

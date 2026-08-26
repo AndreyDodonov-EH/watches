@@ -66,7 +66,8 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   const rows = new Uint16Array(H);
   const bubbleIn = new Uint16Array(H);
   const tubeBackRows = new Uint16Array(H);
-  const tubeBack = hexToRgb(p.tubeBack), ghi = hexToRgb(p.glassHi);
+  const tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
+  const liquidHiScaled = scale(hi, br), glassHiScaled = scale(ghi, p.brightness);
   /** Glass wall shading weight 0..1 for a row: specular tent on the top wall, a faint band on the
    *  lower wall, brighter outermost rows. */
   const glassW = (y: number): number => {
@@ -85,6 +86,10 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   const hiTop = highlightTop(p, H, lightDeg);
   for (let y = 0; y < H; y++) {
     const t = y / (H - 1);
+    const gradient = Math.round(p.tubeBackGradient);
+    const backMix = gradient === 1 ? t : gradient === 2 ? 1 - Math.abs(t * 2 - 1)
+      : gradient === 3 ? Math.abs(t * 2 - 1) : 0;
+    const back = mix(tubeBack, tubeBack2, backMix);
     // style shading: brightest around 1/3 from top, darkest at the bottom
     let c: [number, number, number];
     if (t < 0.33) c = mix(mix(body, lo, 0.25), body, t / 0.33);
@@ -93,21 +98,26 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     // A transparent liquid shows the tube back through it: blend the lit liquid toward the
     // (panel-dimmed) back. The highlight is a reflection off the liquid surface, so it goes on
     // after that (undiluted), and the glass wall over both.
-    c = mix(scale(c, br), scale(tubeBack, p.brightness), p.liquidTransparency);
+    c = scale(c, br);
+    c = mix(c, scale(back, p.brightness), p.liquidTransparency);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       const k = Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp); // tent
-      c = mix(c, scale(hi, br), Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
+      c = mix(c, liquidHiScaled, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
     }
     const gw = glassW(y);
-    tubeBackRows[y] = q(scale(mix(tubeBack, ghi, gw), p.brightness));
+    const glassWet = gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency);
+    tubeBackRows[y] = q(scale(mix(back, ghi, gw), p.brightness));
     // Glass shading over the liquid: `glassOverLiquid` of the dry-side weight for an opaque liquid,
     // rising to the full dry-side weight as the liquid turns transparent (the lower reflection
     // band must run continuously across the meniscus of a clear liquid).
-    c = mix(c, scale(ghi, p.brightness), gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency));
+    c = mix(c, glassHiScaled, glassWet);
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
   }
-  return { rows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)), bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn };
+  return {
+    rows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)),
+    bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn,
+  };
 }
 
 function hspan(y: number, x0: number, x1: number, c: number): void {
@@ -261,6 +271,41 @@ function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: n
     if (rel !== 0) c = embossOf(c, rel);
     pxa(x, y, c, cov);
   };
+}
+
+/** Compact rear-wall markings. They are deliberately code-drawn so their cost is a few dozen
+ *  pixels, and use the same through-liquid compositor as the rear scale. */
+function drawTubeBackDecal(idx: number, y0: number, H: number, p: Params, mark: MarkFn): void {
+  const mode = Math.round(p.tubeBackDecal), opacity = Math.max(0, Math.min(1, p.tubeBackDecalOpacity));
+  if (mode < 1 || mode > 2 || opacity <= 0 || H < 15) return;
+  const c = q(scale(hexToRgb(p.tubeBackDecalColor), p.brightness));
+  const glyph = (rows: number[], bits: number, x0: number, yy0: number, s: number): void => {
+    for (let gy = 0; gy < rows.length; gy++) for (let gx = 0; gx < bits; gx++)
+      if (rows[gy] & (1 << (bits - 1 - gx)))
+        for (let dy = 0; dy < s; dy++) for (let dx = 0; dx < s; dx++) mark(x0 + gx * s + dx, yy0 + gy * s + dy, c, opacity);
+  };
+  const frame = (x0: number, yy0: number, w: number, h: number): void => {
+    const a = opacity * 0.65;
+    for (let x = x0 + 2; x < x0 + w - 2; x++) { mark(x, yy0, c, a); mark(x, yy0 + h - 1, c, a); }
+    for (let y = yy0 + 2; y < yy0 + h - 2; y++) { mark(x0, y, c, a); mark(x0 + w - 1, y, c, a); }
+    mark(x0 + 1, yy0 + 1, c, a); mark(x0 + w - 2, yy0 + 1, c, a);
+    mark(x0 + 1, yy0 + h - 2, c, a); mark(x0 + w - 2, yy0 + h - 2, c, a);
+  };
+  const s = H >= 28 ? 2 : 1;
+  if (mode === 1) {
+    const rows = idx === 0
+      ? [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001]
+      : [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001];
+    const w = 5 * s + 8, h = 7 * s + 8, x0 = TUBE_LENGTH_PX - w - 7, yy0 = y0 + Math.floor((H - h) / 2);
+    frame(x0, yy0, w, h); glyph(rows, 5, x0 + 4, yy0 + 4, s);
+  } else {
+    const digits = idx === 0 ? [1, 2] : [6, 0];
+    const w = 7 * s + 8, h = 5 * s + 8, x0 = TUBE_LENGTH_PX - w - 7, yy0 = y0 + Math.floor((H - h) / 2);
+    frame(x0, yy0, w, h);
+    glyph(FONT_3x5.g[digits[0]], 3, x0 + 4, yy0 + 4, s);
+    glyph(FONT_3x5.g[digits[1]], 3, x0 + 4 + 4 * s, yy0 + 4, s);
+    mark(x0 - 2, yy0 + (h >> 1), c, opacity * 0.55); mark(x0 + w + 1, yy0 + (h >> 1), c, opacity * 0.55);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -594,7 +639,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     if (!hasLiquid) continue;
     const xi = Math.floor(ex), frac = ex - xi;
     const xiL = Math.floor(exL), fracL = exL - xiL;
-    hspan(y0 + ry, Math.max(x0, xiL + 1), xi, pal.rows[ry]);
+    const xa = Math.max(x0, xiL + 1);
+    hspan(y0 + ry, xa, xi, pal.rows[ry]);
     if (p.edgeSoft > 0) {  // anti-aliased edge pixel(s), both edges
       const w = Math.max(1, Math.round(p.edgeSoft));
       for (let k = 0; k < w; k++) {
@@ -622,12 +668,14 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const xiL = Math.floor(edgesL[ry]);
       for (let k = 1; k <= p.frontBright; k++) {
         const x = xi - k; if (x < 0) break;
-        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(pal.rows[ry], hiC, Math.min(1, t * t * 0.85 * lightK * rowK)));
+        if (x >= L) continue;
+        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(fb[(y0 + ry) * PANEL_W + x], hiC, Math.min(1, t * t * 0.85 * lightK * rowK)));
       }
       if (!p.freeLiquid) continue;
       for (let k = 1; k <= p.frontBright; k++) {   // home edge: lit by the opposite tilt
         const x = xiL + k; if (x >= xi - p.frontBright) break;
-        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(pal.rows[ry], hiC, Math.min(1, t * t * 0.85 * lightKL * rowK)));
+        if (x < 0 || x >= L) continue;
+        const t = (1 - k / p.frontBright); px(x, y0 + ry, blend565(fb[(y0 + ry) * PANEL_W + x], hiC, Math.min(1, t * t * 0.85 * lightKL * rowK)));
       }
     }
   }
@@ -638,9 +686,9 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     for (let ry = 0; ry < H; ry++) {
       const xg = Math.ceil(edges[ry] + softW), xgL = Math.floor(edgesL[ry]) - softW;
       for (let k = 0; k < p.edgeGlow; k++) {
-        const t = (1 - k / p.edgeGlow); const c = blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK));
-        if (xg + k < L) px(xg + k, y0 + ry, c);
-        if (p.freeLiquid && xgL - k >= capX0[ry]) px(xgL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightKL)));
+        const t = (1 - k / p.edgeGlow), xr = xg + k, xl = xgL - k;
+        if (xr < L) px(xr, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK)));
+        if (p.freeLiquid && xl >= capX0[ry]) px(xl, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightKL)));
       }
     }
   }
@@ -690,6 +738,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   }
 
   // Rear marks are composited through the liquid, before bubbles.
+  drawTubeBackDecal(idx, y0, H, p, markFn(y0, bounds, p, false, p.markContrast * p.tubeBackDecalOpacity));
   const labels = layoutLabels(y0, p, ticksN, state.acrossTilt, state.fillTarget);
   const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
