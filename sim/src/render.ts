@@ -265,6 +265,8 @@ interface Label { text: string; x0: number; adv: number[]; }
 /** Everything the draw pass and the tick pass need to know about a tube's labels. */
 interface Labels {
   list: Label[]; bw: number; bh: number; ry0: number; ry1: number; y0: number; yTop: number; sourceRows: Int16Array;
+  /** Rear digits behind air (see `digitDryLens`); same as the wet tables for digits on top. */
+  drySourceRows: Int16Array; dryRy0: number; dryRy1: number;
   sprite: ScaledGlyph[] | null; font: Font; gap: number; rows: Uint16Array; shadow: number;
 }
 
@@ -302,11 +304,14 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   const yBase = y0 + tubeLayout(p).H - 1 - bottom, yTop = yBase - bh + 1;
   const H = tubeLayout(p).H;
   const sourceRows = p.digitsOnTop ? markSourceRows(H, p.topLens, p.lensCurve) : markSourceRows(H, p.bottomLens);
+  const drySourceRows = p.digitsOnTop ? sourceRows : markSourceRows(H, p.digitDryLens);
   const sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
-  let ry0 = H, ry1 = -1;
-  for (let ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceRy0 && sourceRows[ry] <= sourceRy1) {
-    ry0 = Math.min(ry0, ry); ry1 = Math.max(ry1, ry);
-  }
+  const rowSpan = (rows: Int16Array): [number, number] => {
+    let a = H, b = -1;
+    for (let ry = 0; ry < H; ry++) if (rows[ry] >= sourceRy0 && rows[ry] <= sourceRy1) { a = Math.min(a, ry); b = Math.max(b, ry); }
+    return [a, b];
+  };
+  const [ry0, ry1] = rowSpan(sourceRows), [dryRy0, dryRy1] = rowSpan(drySourceRows);
   const list: Label[] = [];
   const start = Math.round(minutes ? p.digitMinuteStart : p.digitHourStart) || every;
   const push = (i: number) => {
@@ -319,33 +324,40 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   };
   if (minutes ? p.digitsLastOnlyM : p.digitsLastOnlyH) { const s = minutes ? every : 1, i = Math.floor(Math.min(ticksN - 1e-6, Math.max(0, fill) * ticksN) / s) * s; if (i > 0) push(i); }
   else for (let i = start; i < ticksN; i += every) push(i);
-  return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, sprite, font, gap, rows: digitRowColors(p, bh), shadow };
+  return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, drySourceRows, dryRy0, dryRy1, sprite, font, gap, rows: digitRowColors(p, bh), shadow };
 }
 
-/** Image glyph: per-pixel coverage from the pre-scaled sheet. */
-function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, mark: MarkFn): void {
+/** Which column is behind liquid: `wet(x)`; always true when digits are on top or edges are unknown. */
+type WetFn = (x: number) => boolean;
+/** Image glyph: per-pixel coverage from the pre-scaled sheet, column by column so each column can
+ *  take the wet or dry warp. */
+function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
   if (!g) return;
   const sourceTop = lb.yTop - lb.y0;
-  for (let ry = lb.ry0; ry <= lb.ry1; ry++) {
-    const dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
-    for (let dx = 0; dx < g.w; dx++) {
+  for (let dx = 0; dx < g.w; dx++) {
+    const w = wet(x + dx);
+    const rows = w ? lb.sourceRows : lb.drySourceRows, a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
+    for (let ry = a0; ry <= a1; ry++) {
+      const dy = rows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
       const a = g.a[dy * g.w + dx]; if (!a) continue;
       mark(x + dx, lb.y0 + ry, g.c[dy * g.w + dx], a / 255);
     }
   }
 }
 /** Bitmap glyph, nearest-neighbour scaled into bw x bh, optional 1 px emboss shadow. */
-function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, mark: MarkFn): void {
+function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
   const g = f.g[d]; if (!g) return;
   const msb = 1 << (f.w - 1);
   for (let pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
     const off = pass === 0 ? 1 : 0;
     const sourceTop = lb.yTop - lb.y0 + off;
-    for (let ry = lb.ry0; ry <= lb.ry1; ry++) {
-      const dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
-      const row = g[Math.min(f.h - 1, Math.floor((dy * f.h) / lb.bh))];
-      for (let dx = 0; dx < lb.bw; dx++) {
-        const col = Math.min(f.w - 1, Math.floor((dx * f.w) / lb.bw));
+    for (let dx = 0; dx < lb.bw; dx++) {
+      const col = Math.min(f.w - 1, Math.floor((dx * f.w) / lb.bw));
+      const w = wet(x + dx + off);
+      const rows = w ? lb.sourceRows : lb.drySourceRows, a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
+      for (let ry = a0; ry <= a1; ry++) {
+        const dy = rows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
+        const row = g[Math.min(f.h - 1, Math.floor((dy * f.h) / lb.bh))];
         if (!(row & (msb >> col))) continue;
         mark(x + dx + off, lb.y0 + ry, pass === 0 ? lb.shadow : lb.rows[dy]);
       }
@@ -362,13 +374,16 @@ function digitRowColors(p: Params, bh: number): Uint16Array {
   }
   return out;
 }
-function drawLabels(lb: Labels, mark: MarkFn): void {
+/** `edges` null = digits on top: everything uses the wet (whole-tube) tables. */
+function drawLabels(lb: Labels, p: Params, edges: Float32Array | null, mark: MarkFn): void {
+  const edgeMid = edges ? edges[edges.length >> 1] : 0;
+  const wet: WetFn = edges ? (x) => (p.remaining ? x >= edgeMid : x < edgeMid) : () => true;
   for (const l of lb.list) {
     let x = l.x0;
     for (let i = 0; i < l.text.length; i++) {
       const d = l.text.charCodeAt(i) - 48;
-      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, lb, mark);
-      else drawBitmapGlyph(lb.font, d, x, lb, mark);
+      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, lb, wet, mark);
+      else drawBitmapGlyph(lb.font, d, x, lb, wet, mark);
       x += l.adv[i] + lb.gap;
     }
   }
@@ -394,7 +409,6 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
   const cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   const cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   const pos = Math.round(minutes ? p.tickPosM : p.tickPosH);
-  const dry = Math.max(0, Math.min(1, p.tickDryLens));
   const edgeMid = edges ? edges[H >> 1] : 0;
   const warpedRange = (sourceRows: Int16Array, sourceA: number, sourceB: number): [number, number] => {
     let a = H, b = -1;
@@ -437,7 +451,7 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
     const h = major ? hMaj : hMin; if (h <= 0) continue;
     const w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1), c = major ? cMaj : cMin;
     const wet = !edges || (p.remaining ? xc >= edgeMid : xc < edgeMid);
-    const rows = wet ? wetRows : dryRows, k = wet ? 1 : dry;
+    const rows = wet ? wetRows : dryRows, k = wet ? 1 : 0;   // air refracts nothing: no parallax
     const topRange = warpedRange(rows, 0, h - 1), botRange = warpedRange(rows, H - h, H - 1);
     if (pos !== 1) drawSegment(x0, w, c, topRange, true, k);
     if (pos !== 0) drawSegment(x0, w, c, botRange, false, k);
@@ -597,7 +611,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
       const wetRows = markSourceRows(H, p.tickLens);
-      const dryRows = onTop ? wetRows : markSourceRows(H, p.tickLens * Math.max(0, Math.min(1, p.tickDryLens)));
+      const dryRows = onTop ? wetRows : markSourceRows(H, p.tickDryLens);
       const dx = onTop ? 0 : -state.edgeLight * p.tickParallax;
       const dy = onTop ? 0 : state.acrossTilt * p.tickParallax;
       drawTicks(y0, p, ticksN, wetRows, dryRows, onTop ? null : edges,
@@ -606,7 +620,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   };
   const drawDigitLayer = (onTop: boolean): void => {
     if (labels && p.digitsOnTop === onTop)
-      drawLabels(labels, markFn(y0, edges, p, onTop, p.markContrast * p.digitBright));
+      drawLabels(labels, p, onTop ? null : edges, markFn(y0, edges, p, onTop, p.markContrast * p.digitBright));
   };
   drawTickLayer(false);
   drawDigitLayer(false);

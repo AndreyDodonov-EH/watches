@@ -234,6 +234,7 @@ struct Label { int x0; char text[3]; int len; int adv[2]; };
 struct Labels {
   Label list[12]; int n; int bw, bh, ry0, ry1, yTop; ScaledGlyph *sprite; const Font *font; int gap;
   uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow;
+  int16_t drySourceRows[TUBE_HEIGHT_MAX]; int dryRy0, dryRy1;   // rear digits behind air (digitDryLens)
 };
 
 static void markSourceRows(int height, float lens, int16_t *out, float curve = 1) {
@@ -273,13 +274,19 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, float ac
   int shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   int yBase = y0 + H - 1 - (int)bottom, yTop = yBase - bh + 1;
   // NB: sim uses yBase = y0+H-1-bottom with fractional `bottom` possible; presets use integers.
-  if (p.digitsOnTop) markSourceRows(H, p.topLens, lb.sourceRows, p.lensCurve);
-  else markSourceRows(H, p.bottomLens, lb.sourceRows);
+  if (p.digitsOnTop) { markSourceRows(H, p.topLens, lb.sourceRows, p.lensCurve); memcpy(lb.drySourceRows, lb.sourceRows, sizeof(lb.sourceRows)); }
+  else { markSourceRows(H, p.bottomLens, lb.sourceRows); markSourceRows(H, p.digitDryLens, lb.drySourceRows); }
   int sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
-  lb.ry0 = H; lb.ry1 = -1;
-  for (int ry = 0; ry < H; ry++) if (lb.sourceRows[ry] >= sourceRy0 && lb.sourceRows[ry] <= sourceRy1) {
-    if (ry < lb.ry0) lb.ry0 = ry;
-    if (ry > lb.ry1) lb.ry1 = ry;
+  lb.ry0 = H; lb.ry1 = -1; lb.dryRy0 = H; lb.dryRy1 = -1;
+  for (int ry = 0; ry < H; ry++) {
+    if (lb.sourceRows[ry] >= sourceRy0 && lb.sourceRows[ry] <= sourceRy1) {
+      if (ry < lb.ry0) lb.ry0 = ry;
+      if (ry > lb.ry1) lb.ry1 = ry;
+    }
+    if (lb.drySourceRows[ry] >= sourceRy0 && lb.drySourceRows[ry] <= sourceRy1) {
+      if (ry < lb.dryRy0) lb.dryRy0 = ry;
+      if (ry > lb.dryRy1) lb.dryRy1 = ry;
+    }
   }
   lb.n = 0;
   int start = (int)jround(minutes ? p.digitMinuteStart : p.digitHourStart); if (start <= 0) start = every;
@@ -306,46 +313,57 @@ static bool layoutLabels(int slot, int y0, const Params &p, int ticksN, float ac
   return true;
 }
 
-static void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Mark &mark) {
+// Which column is behind liquid; edges null (digits on top) = all wet.
+struct Wet {
+  const float *edges; float edgeMid; bool remaining;
+  Wet(const float *e, int H, bool rem) : edges(e), edgeMid(e ? e[H >> 1] : 0), remaining(rem) {}
+  bool operator()(int x) const { return !edges || (remaining ? x >= edgeMid : x < edgeMid); }
+};
+// Column by column so each column can take the wet or dry warp.
+static void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) {
   int sourceTop = lb.yTop - y0;
-  for (int ry = lb.ry0; ry <= lb.ry1; ry++) {
-    int dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
-    for (int dx = 0; dx < g.w; dx++) {
+  for (int dx = 0; dx < g.w; dx++) {
+    bool w = wet(x + dx);
+    const int16_t *rows = w ? lb.sourceRows : lb.drySourceRows; int a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
+    for (int ry = a0; ry <= a1; ry++) {
+      int dy = rows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
       uint8_t a = g.a[dy * g.w + dx]; if (!a) continue;
       mark(x + dx, y0 + ry, g.c[dy * g.w + dx], a / 255.0f);
     }
   }
 }
-static void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Mark &mark) {
+static void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) {
   const uint8_t *g = f.g[d];
   int msb = 1 << (f.w - 1);
   for (int pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
     int off = pass == 0 ? 1 : 0;
     int sourceTop = lb.yTop - y0 + off;
-    for (int ry = lb.ry0; ry <= lb.ry1; ry++) {
-      int dy = lb.sourceRows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
-      int row = g[(dy * f.h / lb.bh) < f.h - 1 ? dy * f.h / lb.bh : f.h - 1];
-      for (int dx = 0; dx < lb.bw; dx++) {
-        int col = (dx * f.w / lb.bw) < f.w - 1 ? dx * f.w / lb.bw : f.w - 1;
+    for (int dx = 0; dx < lb.bw; dx++) {
+      int col = (dx * f.w / lb.bw) < f.w - 1 ? dx * f.w / lb.bw : f.w - 1;
+      bool w = wet(x + dx + off);
+      const int16_t *rows = w ? lb.sourceRows : lb.drySourceRows; int a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
+      for (int ry = a0; ry <= a1; ry++) {
+        int dy = rows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
+        int row = g[(dy * f.h / lb.bh) < f.h - 1 ? dy * f.h / lb.bh : f.h - 1];
         if (!(row & (msb >> col))) continue;
         mark(x + dx + off, y0 + ry, pass == 0 ? (uint16_t)lb.shadow : lb.rows[dy]);
       }
     }
   }
 }
-static void drawLabels(int y0, const Labels &lb, const Mark &mark) {
+static void drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) {
   for (int i = 0; i < lb.n; i++) {
     const Label &l = lb.list[i]; int x = l.x0;
     for (int k = 0; k < l.len; k++) {
       int d = l.text[k] - '0';
-      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, y0, lb, mark);
-      else drawBitmapGlyph(*lb.font, d, x, y0, lb, mark);
+      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, y0, lb, wet, mark);
+      else drawBitmapGlyph(*lb.font, d, x, y0, lb, wet, mark);
       x += l.adv[k] + lb.gap;
     }
   }
 }
 
-// wetRows/dryRows: source-row tables behind liquid vs behind air; edges null = all wet, full parallax.
+// wetRows/dryRows: source-row tables behind liquid vs behind air; edges null = all wet. Parallax is liquid-only.
 static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
                       const float *edges, const Mark &mark, float dxFull = 0, float dyFull = 0) {
   bool minutes = ticksN == 60;
@@ -360,7 +378,6 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRow
   uint16_t cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   uint16_t cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   int pos = (int)jround(minutes ? p.tickPosM : p.tickPosH);
-  float dryK = clampf(p.tickDryLens, 0, 1);
   float edgeMid = edges ? edges[H >> 1] : 0;
   auto warpedRange = [&](const int16_t *sourceRows, int sourceA, int sourceB, int &a, int &b) {
     a = H; b = -1;
@@ -404,7 +421,7 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRow
     int w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
     int topA, topB, botA, botB;
     bool wet = !edges || (p.remaining ? xc >= edgeMid : xc < edgeMid);
-    const int16_t *rows = wet ? wetRows : dryRows; float k = wet ? 1 : dryK;
+    const int16_t *rows = wet ? wetRows : dryRows; float k = wet ? 1 : 0;   // air refracts nothing: no parallax
     warpedRange(rows, 0, h - 1, topA, topB); warpedRange(rows, H - h, H - 1, botA, botB);
     if (pos != 1) drawSegment(x0, w, c, topA, topB, true, k);
     if (pos != 0) drawSegment(x0, w, c, botA, botB, false, k);
@@ -600,7 +617,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
     if (p.ticksOnTop == onTop) {
       int16_t wetRows[TUBE_HEIGHT_MAX], dryRows[TUBE_HEIGHT_MAX];
       markSourceRows(H, p.tickLens, wetRows);
-      if (!onTop) markSourceRows(H, p.tickLens * clampf(p.tickDryLens, 0, 1), dryRows);
+      if (!onTop) markSourceRows(H, p.tickDryLens, dryRows);
       Mark tickMark { y0, edges, &p, onTop, p.markContrast * p.tickBright };
       float dx = onTop ? 0 : -st.edgeLight * p.tickParallax;
       float dy = onTop ? 0 : st.acrossTilt * p.tickParallax;
@@ -610,7 +627,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   auto drawDigitLayer = [&](bool onTop) {
     if (haveLabels && p.digitsOnTop == onTop) {
       Mark digitMark { y0, edges, &p, onTop, p.markContrast * p.digitBright };
-      drawLabels(y0, labels, digitMark);
+      drawLabels(y0, labels, Wet(onTop ? nullptr : edges, H, p.remaining), digitMark);
     }
   };
   drawTickLayer(false);
