@@ -96,10 +96,11 @@ else `display_init` fails at boot before `ble_init`.
   wall of the tube; the trim also scales that layer's `markContrast` floor, so the shadow survives over the
   liquid. `tubeBack` follows the panel dimmer only.
 - Tube backs use the same fast row LUT as the liquid: `tubeBack` / `tubeBack2` can render solid,
-  top-to-bottom, centre-band, or edge-band gradients across the short axis. Two optional code-drawn rear-wall
-  decals identify the tubes (`H` / `M`) or their capacity (`12` / `60`); decal colour and opacity are live
-  params. Gradients and decals pass through the existing glass, lens, brightness, and liquid-transparency
-  compositors without bitmap assets, flash blobs, image decoding, or per-pixel texture caches.
+  top-to-bottom, centre-band, or edge-band gradients across the short axis. Optional deterministic rear-wall
+  textures add brushed-metal streaks or heavier scratches and pits; decal colour and opacity are live params.
+  The dry texture is fully visible while the wet part is attenuated by `liquidTransparency`, so it reads as
+  backing material rather than ink over the liquid. No bitmap assets, flash blobs, image decoding, or texture
+  caches are needed.
 - Digits include five bitmap fonts and seven generated image fonts: steel, brass steampunk, copper gauge,
   forged iron, ivory enamel, carved slate, and amber resin. Image fonts remain behind the liquid/glass layers
   and support brightness, tint, and black-to-white tone controls in the simulator and firmware.
