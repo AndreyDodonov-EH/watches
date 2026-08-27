@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-26 (gradient tube backs and rear-wall decals)_
+_Last update: 2026-08-27 (gradient tube backs; decals removed)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -100,11 +100,9 @@ else `display_init` fails at boot before `ble_init`.
   wall of the tube; the trim also scales that layer's `markContrast` floor, so the shadow survives over the
   liquid. `tubeBack` follows the panel dimmer only.
 - Tube backs use the same fast row LUT as the liquid: `tubeBack` / `tubeBack2` can render solid,
-  top-to-bottom, centre-band, or edge-band gradients across the short axis. Optional deterministic rear-wall
-  textures add brushed-metal streaks or heavier scratches and pits; decal colour and opacity are live params.
-  The dry texture is fully visible while the wet part is attenuated by `liquidTransparency`, so it reads as
-  backing material rather than ink over the liquid. No bitmap assets, flash blobs, image decoding, or texture
-  caches are needed.
+  top-to-bottom, centre-band, or edge-band gradients across the short axis. The procedural rear-wall decal
+  layer was removed (2026-08-27): per-pixel blending of a dense texture cost ~10 ms/frame on the device and
+  even the baked/cached variant hurt frame rate; see KAIZEN.
 - Digits include five bitmap fonts and seven generated image fonts: steel, brass steampunk, copper gauge,
   forged iron, ivory enamel, carved slate, and amber resin. Image fonts remain behind the liquid/glass layers
   and support brightness, tint, and black-to-white tone controls in the simulator and firmware.
