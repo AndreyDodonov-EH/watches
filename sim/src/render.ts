@@ -337,7 +337,7 @@ interface Labels {
   list: Label[]; bw: number; bh: number; ry0: number; ry1: number; y0: number; yTop: number; sourceRows: Int16Array;
   /** Rear digits behind air (see `digitDryLens`); same as the wet tables for digits on top. */
   drySourceRows: Int16Array; dryRy0: number; dryRy1: number;
-  sprite: ScaledGlyph[] | null; font: Font; gap: number; rows: Uint16Array; shadow: number;
+  sprite: ScaledGlyph[] | null; font: Font; gap: number; rows: Uint16Array; shadow: number; shadowA: number; shadowOff: number;
 }
 
 /** Destination tube row to source row for independently warped marks. */
@@ -370,12 +370,13 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
     ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, hexToRgb(p.digitTint), p.digitTintAmount, p.digitTone)
     : null;
   const gap = sprite ? Math.max(1, Math.round(bw / 5)) : Math.max(1, Math.round(kx));
-  const shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
+  const shadowA = Math.max(0, Math.min(1, p.digitShadowStrength)), shadowOff = Math.max(1, Math.round(p.digitShadowOffset));
+  const shadow = p.digitShadow && shadowA > 0 ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   const yBase = y0 + tubeLayout(p).H - 1 - bottom, yTop = yBase - bh + 1;
   const H = tubeLayout(p).H;
   const sourceRows = p.digitsOnTop ? markSourceRows(H, p.topLens, p.lensCurve) : markSourceRows(H, p.bottomLens);
   const drySourceRows = p.digitsOnTop ? sourceRows : markSourceRows(H, p.digitDryLens);
-  const sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
+  const sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? shadowOff : 0);
   const rowSpan = (rows: Int16Array): [number, number] => {
     let a = H, b = -1;
     for (let ry = 0; ry < H; ry++) if (rows[ry] >= sourceRy0 && rows[ry] <= sourceRy1) { a = Math.min(a, ry); b = Math.max(b, ry); }
@@ -394,7 +395,7 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   };
   if (minutes ? p.digitsLastOnlyM : p.digitsLastOnlyH) { const s = minutes ? every : 1, i = Math.floor(Math.min(ticksN - 1e-6, Math.max(0, fill) * ticksN) / s) * s; if (i > 0) push(i); }
   else for (let i = start; i < ticksN; i += every) push(i);
-  return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, drySourceRows, dryRy0, dryRy1, sprite, font, gap, rows: digitRowColors(p, bh), shadow };
+  return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, drySourceRows, dryRy0, dryRy1, sprite, font, gap, rows: digitRowColors(p, bh), shadow, shadowA, shadowOff };
 }
 
 /** Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi. */
@@ -402,17 +403,21 @@ export interface Edges { lo: Float32Array; hi: Float32Array; }
 /** Which column is behind liquid: `wet(x)`; always true when digits are on top or edges are unknown. */
 type WetFn = (x: number) => boolean;
 /** Image glyph: per-pixel coverage from the pre-scaled sheet, column by column so each column can
- *  take the wet or dry warp. */
+ *  take the wet or dry warp. Optional 1 px emboss shadow, same as the bitmap fonts. */
 function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
   if (!g) return;
-  const sourceTop = lb.yTop - lb.y0;
-  for (let dx = 0; dx < g.w; dx++) {
-    const w = wet(x + dx);
-    const rows = w ? lb.sourceRows : lb.drySourceRows, a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
-    for (let ry = a0; ry <= a1; ry++) {
-      const dy = rows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
-      const a = g.a[dy * g.w + dx]; if (!a) continue;
-      mark(x + dx, lb.y0 + ry, g.c[dy * g.w + dx], a / 255);
+  // pass 0 = 1 px shadow copy offset down-right (the glyph's alpha mask in the shadow colour), pass 1 = body
+  for (let pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
+    const off = pass === 0 ? lb.shadowOff : 0;
+    const sourceTop = lb.yTop - lb.y0 + off;
+    for (let dx = 0; dx < g.w; dx++) {
+      const w = wet(x + dx + off);
+      const rows = w ? lb.sourceRows : lb.drySourceRows, a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
+      for (let ry = a0; ry <= a1; ry++) {
+        const dy = rows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
+        const a = g.a[dy * g.w + dx]; if (!a) continue;
+        mark(x + dx + off, lb.y0 + ry, pass === 0 ? lb.shadow : g.c[dy * g.w + dx], (a / 255) * (pass === 0 ? lb.shadowA : 1));
+      }
     }
   }
 }
@@ -421,7 +426,7 @@ function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, wet: WetFn, 
   const g = f.g[d]; if (!g) return;
   const msb = 1 << (f.w - 1);
   for (let pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
-    const off = pass === 0 ? 1 : 0;
+    const off = pass === 0 ? lb.shadowOff : 0;
     const sourceTop = lb.yTop - lb.y0 + off;
     for (let dx = 0; dx < lb.bw; dx++) {
       const col = Math.min(f.w - 1, Math.floor((dx * f.w) / lb.bw));
@@ -431,7 +436,7 @@ function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, wet: WetFn, 
         const dy = rows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
         const row = g[Math.min(f.h - 1, Math.floor((dy * f.h) / lb.bh))];
         if (!(row & (msb >> col))) continue;
-        mark(x + dx + off, lb.y0 + ry, pass === 0 ? lb.shadow : lb.rows[dy]);
+        mark(x + dx + off, lb.y0 + ry, pass === 0 ? lb.shadow : lb.rows[dy], pass === 0 ? lb.shadowA : 1);
       }
     }
   }

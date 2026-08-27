@@ -101,8 +101,10 @@ export interface Params {
   digits: boolean;
   digitColor: string;    // top of glyph
   digitColor2: string;   // bottom of glyph (vertical gradient → metallic look; set equal for flat)
-  digitShadow: boolean;  // 1 px darker copy offset down-right (emboss)
+  digitShadow: boolean;  // 1 px darker copy offset down-right (emboss); bitmap and sprite fonts
   digitShadowColor: string;
+  digitShadowStrength: number; // 0..1 shadow opacity
+  digitShadowOffset: number;   // px, down-right
   digitTint: string;     // sprite fonts only: multiply colour (e.g. #cd7f32 bronze)
   digitTintAmount: number; // 0 = untinted sheet, 1 = fully tinted
   digitTone: number;     // sprite fonts only: -1 = black, 0 = source, 1 = white
@@ -245,6 +247,8 @@ export const DEFAULT_PARAMS: Params = {
   digitColor2: '#20312f',
   digitShadow: true,
   digitShadowColor: '#101010',
+  digitShadowStrength: 1,
+  digitShadowOffset: 1,
   digitFont: 5,
   digitTint: '#6d6617',
   digitTintAmount: 0.65,
@@ -834,8 +838,10 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   digitTone: { help: 'Sprite fonts only: darken toward black or lighten toward white after tinting.', group: 'Digits', label: 'image tone', min: -1, max: 1, step: 0.05 },
   digitColor: { help: 'Top of glyph (vertical gradient; set equal to bottom for flat).', group: 'Digits', label: 'colour top' },
   digitColor2: { help: 'Bottom of glyph.', group: 'Digits', label: 'colour bottom' },
-  digitShadow: { help: '1 px darker copy offset down-right (emboss).', group: 'Digits', label: 'emboss shadow' },
+  digitShadow: { help: 'Darker copy offset down-right (emboss), so glyphs read as physical pieces on the glass.', group: 'Digits', label: 'emboss shadow' },
   digitShadowColor: { help: 'Emboss shadow colour.', group: 'Digits', label: 'shadow colour' },
+  digitShadowStrength: { help: 'Shadow opacity. 0 = invisible.', group: 'Digits', label: 'shadow strength', min: 0, max: 1, step: 0.05 },
+  digitShadowOffset: { help: 'Shadow offset in pixels, down-right.', group: 'Digits', label: 'shadow offset', min: 1, max: 4, step: 1 },
   digitsOnTop: { help: 'Printed on the glass, opaque and excluded from the whole-tube lens. Off: behind the liquid, seen through it and depth-warped.', group: 'Digits', label: 'print on top of liquid' },
   bottomLens: { help: 'Depth warp for digits behind the liquid.', group: 'Digits', label: 'rear lens', min: 0, max: 1, step: 0.05 },
   digitDryLens: { help: 'Depth warp for rear digits where the tube is empty, chosen per pixel column. Negative stretches the edges instead of magnifying the middle.', group: 'Digits', label: 'rear lens behind air', min: -1, max: 1, step: 0.05 },
