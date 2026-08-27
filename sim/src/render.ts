@@ -740,7 +740,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
       if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
       const r = p.fizzSize / 2 * (1 + (f.v - 1) * p.fizzSizeVar);
-      const m = mag[fy], ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
+      const m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
       for (let iy = Math.floor(f.y - ry - 1); iy <= Math.ceil(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
         for (let ix = Math.floor(f.x - r - 1); ix <= Math.ceil(f.x + r); ix++) {
@@ -779,30 +779,60 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   drawDigitLayer(true);
 }
 
-/** Dest rows per source row under the rendered lens plus the physical glass (`topLens`), times a
- *  center-weighted `fizzSquash`, so pre-lens sprites can be pre-squashed. */
+/** Magnification for a bubble of radius r centred at float row y: mean of the row table over the rows
+ *  the (pre-squashed) sprite covers, iterated once since that height depends on it. Reading a single row
+ *  makes the sprite snap whenever the centre crosses a row where the table is steep. */
+function fizzMag(mag: Float32Array, H: number, y: number, r: number): number {
+  let m = 1;
+  for (let it = 0; it < 2; it++) {
+    const ry = r / m, a = Math.max(0, Math.floor(y - ry)), b = Math.min(H - 1, Math.ceil(y + ry));
+    let s = 0; for (let i = a; i <= b; i++) s += mag[i];
+    m = s / (b - a + 1);
+  }
+  return m;
+}
+
+/** Lens magnification per row (dest rows per source row): the rendered lens (`lens`, exactly as
+ *  supersampled continuous row map, averaged per source row) times the physical glass (`topLens`, continuous), times a
+ *  center-weighted `fizzSquash`, so pre-lens sprites can be pre-squashed. Rendered lens and glass act
+ *  in sequence, so their magnifications multiply. */
 let lensMagCache: { key: string; rows: Float32Array } | null = null;
+function lensExponent(lens: number, curve: number): { strength: number; e: number } | null {
+  const signedCurve = lens < 0 ? -curve : curve, strength = Math.abs(lens);
+  if (strength === 0 || signedCurve === 0) return null;
+  return { strength, e: signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2) };
+}
 function lensMagRows(H: number, p: Params): Float32Array {
   const key = `${H}:${p.lens}:${p.topLens}:${p.lensCurve}:${p.fizzSquash}`;
   if (lensMagCache && lensMagCache.key === key) return lensMagCache.rows;
   const rows = new Float32Array(H).fill(1);
-  const lens = Math.max(-1, Math.min(1, p.lens + p.topLens)), curve = Math.max(-3, Math.min(3, p.lensCurve));
-  const signedCurve = lens < 0 ? -curve : curve, strength = Math.abs(lens);
-  if (strength !== 0 && signedCurve !== 0) {
-    const e = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
-    rows.fill(0);
-    for (let yd = 0; yd < H; yd++) {
-      const d = (yd + 0.5 - H / 2) / (H / 2), u = Math.max(1e-3, Math.abs(d));
+  const curve = Math.max(-3, Math.min(3, p.lensCurve));
+  const rendered = lensExponent(Math.max(-1, Math.min(1, p.lens)), curve);
+  if (rendered) {
+    // Supersample the continuous row map: average the local magnification (1 / d src/d dest) of the
+    // samples landing on each source row; rows no sample lands on (dropped by applyLens) inherit the
+    // previous row. Averaging over what lands on a row avoids the d src/d dest singularity at mid-height.
+    const { strength, e } = rendered, N = 8, sum = new Float32Array(H), cnt = new Float32Array(H);
+    for (let i = 0; i < H * N; i++) {
+      const d = ((i + 0.5) / N - H / 2) / (H / 2), u = Math.abs(d);
       const s = Math.sign(d) * ((1 - strength) * u + strength * Math.pow(u, e));
       const src = Math.max(0, Math.min(H - 1, Math.floor(H / 2 + s * H / 2)));
-      rows[src] = Math.max(0.2, Math.min(5, 1 / ((1 - strength) + strength * e * Math.pow(u, e - 1))));
+      sum[src] += 1 / ((1 - strength) + strength * e * Math.pow(u, e - 1)); cnt[src]++;
     }
-    let last = 0;
-    for (let y = 0; y < H; y++) if (rows[y] > 0) { last = rows[y]; break; }
-    for (let y = 0; y < H; y++) rows[y] > 0 ? (last = rows[y]) : (rows[y] = last);
+    let last = 1;
+    for (let y = 0; y < H; y++) if (cnt[y] > 0) { last = sum[y] / cnt[y]; break; }
+    for (let y = 0; y < H; y++) rows[y] = cnt[y] > 0 ? (last = sum[y] / cnt[y]) : last;
+  }
+  const glass = lensExponent(Math.max(-1, Math.min(1, p.topLens)), curve);
+  if (glass) {
+    const { strength, e } = glass;
+    for (let y = 0; y < H; y++) {
+      const u = Math.max(1 / H, Math.abs((y + 0.5 - H / 2) / (H / 2)));
+      rows[y] /= (1 - strength) + strength * e * Math.pow(u, e - 1);
+    }
   }
   // Extra squash is center-weighted: full fizzSquash at mid-height, ~1 at the top/bottom edges.
-  for (let y = 0; y < H; y++) { const d = (y + 0.5 - H / 2) / (H / 2); rows[y] *= 1 + (p.fizzSquash - 1) * (1 - d * d); }
+  for (let y = 0; y < H; y++) { const d = (y + 0.5 - H / 2) / (H / 2); rows[y] = Math.max(0.2, Math.min(5, rows[y] * (1 + (p.fizzSquash - 1) * (1 - d * d)))); }
   lensMagCache = { key, rows };
   return rows;
 }
