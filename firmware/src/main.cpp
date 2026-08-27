@@ -302,8 +302,12 @@ void setup() {
   Serial.begin(115200);
   uint32_t t = millis();
   while (!Serial && millis() - t < 2500) delay(10);
-  out.printf("\nliquid-watch | cpu %lu MHz | psram %u KB | heap %u KB\n",
-                getCpuFrequencyMhz(), ESP.getPsramSize() / 1024, ESP.getFreeHeap() / 1024);
+  static const char *const RST[] = {"unknown", "poweron", "ext", "sw", "panic", "int-wdt", "task-wdt", "wdt",
+                                    "deepsleep", "brownout", "sdio", "usb", "jtag", "efuse", "pwr-glitch", "cpu-lockup"};
+  int rr = esp_reset_reason();
+  out.printf("\nliquid-watch | cpu %lu MHz | psram %u KB | heap %u KB | reset %s\n",
+                getCpuFrequencyMhz(), ESP.getPsramSize() / 1024, ESP.getFreeHeap() / 1024,
+                rr >= 0 && rr < 16 ? RST[rr] : "?");
   if (!fb.buf) { out.println("FATAL: framebuffer alloc failed"); }
   if (!display_init()) out.println("display init FAILED");
   strip[0] = display_strip(0); strip[1] = display_strip(1);

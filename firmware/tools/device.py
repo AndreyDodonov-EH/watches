@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Serial transport to the Liquid Watch board, usable from WSL or Linux.
+
+    from device import Device
+    d = Device()                 # auto: /dev/ttyACM* if attached to Linux, else Windows COMx via python.exe
+    d.talk('f')                  # -> 'fps 19.8  render 46.48 ms ...'
+    d.talk('x', end='END', timeout=60)
+
+CLI:  tools/device.py [--port P] CMD [CMD ...]     e.g. tools/device.py f s 'p?'
+
+On WSL the board normally stays on the Windows side (Web Serial in the browser keeps working, see
+flash-win.sh); we then run this very file under python.exe as a persistent bridge (--bridge) talking
+a line protocol over its stdin/stdout. The port is opened with DTR/RTS low so the ESP32-S3 USB-JTAG
+does not reset the board (both lines held high; pyserial's default clears DTR before RTS = reset). Port detection: $LW_PORT, /dev/ttyACM0 if present, else the first
+Espressif (VID 303A) COM port on Windows.
+"""
+import argparse, glob, json, os, subprocess, sys, time
+
+SENTINEL = '\x1e<<END>>\x1e'
+
+def is_wsl():
+    return os.path.exists('/proc/sys/fs/binfmt_misc/WSLInterop') or 'microsoft' in os.uname().release.lower()
+
+def find_port():
+    p = os.environ.get('LW_PORT')
+    if p: return p
+    acm = sorted(glob.glob('/dev/ttyACM*'))
+    if acm: return acm[0]
+    if is_wsl():
+        ps = ("(Get-PnpDevice -Class Ports -PresentOnly | Where-Object InstanceId -like 'USB\\VID_303A*' "
+              "| Select-Object -First 1).FriendlyName -replace '.*\\((COM\\d+)\\).*','$1'")
+        out = subprocess.run(['powershell.exe', '-NoProfile', '-c', ps], capture_output=True, text=True).stdout.strip()
+        if out.startswith('COM'): return out
+    raise SystemExit('no board found: attach it (usbipd) or set LW_PORT=COMx')
+
+def open_serial(port):
+    import serial
+    s = serial.Serial(None, 115200, timeout=0.1)
+    s.port = port; s.dtr = True; s.rts = True       # both high = no reset on open (DTR0/RTS1 is the ESP32-S3 reset combo)
+    s.open(); time.sleep(0.1); s.reset_input_buffer()
+    return s
+
+def serial_talk(s, cmd, end, timeout):
+    s.reset_input_buffer()
+    s.write((cmd + '\n').encode()); s.flush()
+    t0 = time.time(); out = b''; endb = end.encode()
+    echo = cmd.strip().encode() + b'\r\n'             # firmware echoes the command line first
+    while time.time() - t0 < timeout:
+        c = s.read(65536); out += c
+        body = out[len(echo):] if out.startswith(echo) else out
+        if endb and endb in body: break
+        if not endb and out and c == b'': break        # no terminator: stop at the first quiet gap
+    return out.decode(errors='replace')
+
+class Device:
+    def __init__(self, port=None):
+        self.port = port or find_port()
+        self.windows = self.port.upper().startswith('COM')
+        self._s = self._b = None
+        if self.windows:
+            me = subprocess.run(['wslpath', '-w', os.path.abspath(__file__)], capture_output=True, text=True).stdout.strip()
+            self._b = subprocess.Popen(['python.exe', me, '--bridge', self.port], stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, text=True, bufsize=1, encoding='utf-8')
+        else:
+            self._s = open_serial(self.port)
+
+    def raw(self, cmd, end='\n', timeout=10):
+        if self._s: return serial_talk(self._s, cmd, end, timeout)
+        self._b.stdin.write(json.dumps([cmd, end, timeout]) + '\n'); self._b.stdin.flush()
+        buf = []
+        while True:
+            line = self._b.stdout.readline()
+            if not line: raise RuntimeError('bridge died')
+            if line.rstrip('\n') == SENTINEL: break
+            buf.append(line)
+        return ''.join(buf)
+
+    def talk(self, cmd, end='\n', timeout=10):
+        """Send one command, return the reply with the firmware's echo line stripped."""
+        out = self.raw(cmd, end, timeout).replace('\r\n', '\n')
+        lines = out.split('\n')
+        for l in lines:                                   # boot banner in a reply = the board rebooted
+            if l.startswith('liquid-watch |'):
+                print(f'device.py: BOARD REBOOTED ({l.split("reset")[-1].strip() if "reset" in l else "old firmware"})', file=sys.stderr)
+        if lines and lines[0].strip() == cmd.strip(): lines = lines[1:]
+        return '\n'.join(lines).strip()
+
+    def close(self):
+        if self._s: self._s.close()
+        if self._b: self._b.stdin.close(); self._b.wait(5)
+    def __enter__(self): return self
+    def __exit__(self, *a): self.close()
+
+def _bridge(port):
+    s = open_serial(port)
+    for line in sys.stdin:
+        cmd, end, timeout = json.loads(line)
+        out = serial_talk(s, cmd, end, timeout)
+        sys.stdout.write(out if out.endswith('\n') or not out else out + '\n')
+        sys.stdout.write(SENTINEL + '\n'); sys.stdout.flush()
+
+if __name__ == '__main__':
+    if len(sys.argv) > 2 and sys.argv[1] == '--bridge':
+        _bridge(sys.argv[2]); sys.exit(0)
+    ap = argparse.ArgumentParser(); ap.add_argument('--port'); ap.add_argument('--end', default='\n')
+    ap.add_argument('--timeout', type=float, default=10); ap.add_argument('cmd', nargs='+')
+    a = ap.parse_args()
+    with Device(a.port) as d:
+        for c in a.cmd: print(d.talk(c, a.end, a.timeout))

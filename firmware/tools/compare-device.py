@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pixel-compare the board's rendered tube strips with the browser sim's renderer.
 
-  python3 firmware/tools/compare-device.py [--port /dev/ttyACM0] [--out DIR]
+  python3 firmware/tools/compare-device.py [--port /dev/ttyACM0|COM6] [--out DIR]   (port auto-detected, see device.py)
 
 Sends `x` to the firmware (dumps TubeState + both strips), renders the same state through
 sim/src/render.ts in node (tools/render-ref.ts) with the params currently in the firmware (`p?`),
@@ -9,8 +9,9 @@ and writes device.png / ref.png / diff.png plus a mismatch summary. Fizz is swit
 device for the dump (random positions) and restored afterwards.
 """
 import argparse, json, os, subprocess, sys, time
-import serial
 from PIL import Image
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from device import Device
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SIM = os.path.join(ROOT, 'sim')
@@ -22,12 +23,7 @@ SHEETS = [
 ]
 
 def talk(s, cmd, end=b'\n', timeout=10):
-    s.reset_input_buffer(); s.write((cmd + '\n').encode()); s.flush()
-    t0 = time.time(); out = b''
-    while time.time() - t0 < timeout:
-        c = s.read(65536); out += c
-        if end in out: break
-    return out.decode(errors='replace')
+    return s.talk(cmd, end.decode(), timeout)
 
 def to_img(px):  # list of (W*H) 565 ints -> RGB image, exact 565 expansion
     im = Image.new('RGB', (W, H)); d = []
@@ -37,9 +33,9 @@ def to_img(px):  # list of (W*H) 565 ints -> RGB image, exact 565 expansion
     im.putdata(d); return im
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--port', default='/dev/ttyACM0'); ap.add_argument('--out', default=os.path.join(ROOT, 'firmware', '.compare'))
+    ap = argparse.ArgumentParser(); ap.add_argument('--port', default=None); ap.add_argument('--out', default=os.path.join(ROOT, 'firmware', '.compare'))
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
-    s = serial.Serial(a.port, 115200, timeout=0.3); time.sleep(0.3)
+    s = Device(a.port)
     params = json.loads(talk(s, 'p?').strip().splitlines()[-1])
     TH = max(4, min(120, round(params['tubeHeight'])))
     Y0 = tuple(max(0, min(H - TH, round(params[k]))) for k in ('hoursY', 'minutesY'))
