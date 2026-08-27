@@ -19,3 +19,8 @@ void display_set_brightness(uint8_t v);   // 0..255 (cmd 0x51)
 // display_wait_all() before `buf` is modified again. Not to be mixed with display_push_rows in flight.
 void display_push_strip_async(const uint16_t *buf, int y0, int rows);
 void display_wait_all(void);
+// Number of DMA transfers a push of `rows` rows is split into.
+int display_bands(int rows);
+// Block until at most `n` transfers are still in flight. Transfers complete in queue order, so
+// after display_wait_pending(display_bands(rowsB)) a strip A pushed before strip B is free again.
+void display_wait_pending(int n);

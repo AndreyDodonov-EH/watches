@@ -139,3 +139,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   turns it on, the direct per-pixel path costs ~4 ms — a per-k `T` hoist (row-independent part) is cheap.
 - `free` preset edgeGlow = 40 > EFFECT_MAX 16 → direct path; either raise the table (10 KB internal per +16
   columns) or cap the param.
+- Dual-core render is core-0-bound: hours 14.7 ms vs minutes 10.6 ms (sum 25 > 22 sequential). Two levers:
+  (a) balance work, e.g. give core 1 the hours labels or split by rows instead of tubes; (b) find why core 0
+  is slower per tube — try a `-DNO_BLE` build and IRAM_ATTR on the hot mark path (BT controller interrupts
+  and shared flash cache are the suspects).
+- Hand-off 2 "not now" items still open: triple buffering, physics on core 0, a separate fizz task.
