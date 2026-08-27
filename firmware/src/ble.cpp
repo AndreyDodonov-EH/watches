@@ -1,4 +1,11 @@
 #include "ble.h"
+#ifdef NO_BLE   // perf-baseline build (see tools/e2e.sh --no-ble): USB serial only
+DualOut out;
+void ble_init(const char *) {}
+int ble_read() { return -1; }
+size_t DualOut::write(uint8_t c) { return Serial.write(c); }
+size_t DualOut::write(const uint8_t *buf, size_t n) { return Serial.write(buf, n); }
+#else
 #include <NimBLEDevice.h>
 
 #define NUS_UUID    "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -62,3 +69,4 @@ size_t DualOut::write(uint8_t c) {
   return 1;
 }
 size_t DualOut::write(const uint8_t *buf, size_t n) { for (size_t i = 0; i < n; i++) write(buf[i]); return n; }
+#endif  // NO_BLE

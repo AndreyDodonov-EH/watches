@@ -11,6 +11,15 @@
 - Sprite fonts have no emboss shadow (`digitShadow` is bitmap-only), so light sprite numerals over a
   light liquid rely on `markContrast` alone.
 
+## Tooling / firmware
+- `f` reports render+wait only; the remaining ~4 ms/frame (physics, IMU I2C, serial poll) is unaccounted —
+  add a loop-total figure to `f`.
+- `p!` resets to the compiled preset and 2 s later overwrites the NVS-tuned params; a `p!` that does not
+  persist (or a "revert to NVS") would be safer for scripts.
+- Board keeps flipping between Windows COM6 and WSL `/dev/ttyACM0` (usbipd auto-attach?); re-enumeration
+  looks like a reset from the firmware side. Decide one home for it.
+- Clock is lost on every esptool flash (no RTC battery) — `flash.sh` could re-send `T <epoch>` afterwards.
+
 ## Rendering: incrementality / optimisation — primarily for POWER (memory wins too)
 _Added 2026-08-20 after Phase 3 (liquid face live, 38–40 fps)._
 

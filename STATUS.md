@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-27 (gradient tube backs; decals removed)_
+_Last update: 2026-08-27 (firmware e2e test tooling + perf baseline)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -47,6 +47,34 @@ to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help. Same protocol over
 advertised as `liquid-watch`; NimBLE-Arduino, RX queued into `loop()`, replies notified in MTU-3 chunks).
 `TUBE_HEIGHT_MAX` = 80: the two internal-DMA strips (2 × 536 × 80 × 2 B) must leave room for the BT controller,
 else `display_init` fails at boot before `ble_init`.
+
+## Firmware e2e testing (from `firmware/`)
+- `tools/device.py [CMD ...]` — serial transport, auto-detects the board: `/dev/ttyACM*` when usbipd-attached
+  to WSL, otherwise the Espressif COMx on Windows through a `python.exe` bridge (`$LW_PORT` overrides).
+  Opens with DTR=RTS=1 — pyserial's default open sequence *resets the ESP32-S3* (DTR0/RTS1) on both OSes.
+- `tools/bench.py [--stages] [--stage name=v]` — fps in a pinned scene (`t 10:09:30`, `d0`, `inputGain=0`),
+  median of N 2-s windows; `--stages` toggles digits/ticks/fizz/glow/… off one at a time and prints each
+  stage's cost in ms. Touched params are restored from a `p?` snapshot (not `p!`, which would clobber NVS).
+- `tools/compare-device.py` — pixel parity of both strips vs the sim renderer (`x` dump); bar: mismatches
+  must not grow, none > 12/255.
+- `tools/flash.sh` — `pio upload` over `/dev/ttyACM*` or `flash-win.sh` when the board is on Windows.
+- `tools/e2e.sh [--stages] [--no-ble] [--no-flash] [--label X]` — build → flash → bench → parity, appends to
+  `firmware/.compare/e2e.log`. `--no-ble` builds with `-DNO_BLE` (stubs in ble.cpp).
+- Boot banner now ends with `reset <reason>` (`esp_reset_reason`: poweron/sw/panic/task-wdt/brownout/usb/…);
+  `device.py` prints `BOARD REBOOTED (<reason>)` whenever a banner shows up in a reply.
+- BLE disconnect does **not** reboot the board: 6 connect→subscribe→disconnect cycles from Windows
+  (`tools/ble-session.py`, bleak under `python.exe`; also does full command/notify round trips), serial shows `ble: connect` … `ble: disconnect 531`, no banner, clock intact.
+- Serial-open resets: explicitly clearing DTR/RTS at open reset the board 5/5 in one session and 0/2 later
+  (timing-dependent); DTR=RTS=1 never did. Keep device.py's open sequence.
+- Scene matters: fps varies 19–25 with fill level / tilt, so only compare pinned-scene numbers.
+
+## Perf baseline (2026-08-27, f0a3de7, `-Os`, BLE on, preset from NVS, sprite font 7 @ 3.5×3.25)
+- **20.6 fps, render 44.4 ms, push-wait 0.02 ms** — entirely render-bound; ~4 ms/frame of non-render loop
+  (physics, IMU, serial). No-BLE build: 20.0 fps / 46.1 ms → BLE costs nothing at render time.
+- Stage costs (render ms saved when off): **digits 20.7**, edgeGlow 4.0, ticksH 3.9, fizz 2.7, ticksM 2.3,
+  lens 0.8; digitShadow, meniscus, wetFilm, glass*, transparency ≤ 0.2 each.
+  → the sprite-digit compositing is half the frame: hand-off 3 (layer cache) is the big lever, not the math.
+- Parity: 163–221 of 77184 px differ by ≤ 1 LSB (digit glyph rounding), 0 px > 12/255.
 
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.
