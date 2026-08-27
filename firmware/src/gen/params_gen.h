@@ -14,9 +14,6 @@ struct Params {
   uint32_t tubeBack;
   uint32_t tubeBack2;
   float tubeBackGradient;
-  float tubeBackDecal;
-  uint32_t tubeBackDecalColor;
-  float tubeBackDecalOpacity;
   uint32_t glassHi;
   float glassBody;
   float glassHiBright;
@@ -153,8 +150,8 @@ struct Params {
   float digitBright;
 };
 
-#define PARAMS_NUM_FIELDS 147
-#define PARAMS_SCHEMA_CRC 0x74bee801u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 144
+#define PARAMS_SCHEMA_CRC 0xa93f43a2u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -169,9 +166,6 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"tubeBack", 'c', (uint16_t)offsetof(Params, tubeBack)},
   {"tubeBack2", 'c', (uint16_t)offsetof(Params, tubeBack2)},
   {"tubeBackGradient", 'f', (uint16_t)offsetof(Params, tubeBackGradient)},
-  {"tubeBackDecal", 'f', (uint16_t)offsetof(Params, tubeBackDecal)},
-  {"tubeBackDecalColor", 'c', (uint16_t)offsetof(Params, tubeBackDecalColor)},
-  {"tubeBackDecalOpacity", 'f', (uint16_t)offsetof(Params, tubeBackDecalOpacity)},
   {"glassHi", 'c', (uint16_t)offsetof(Params, glassHi)},
   {"glassBody", 'f', (uint16_t)offsetof(Params, glassBody)},
   {"glassHiBright", 'f', (uint16_t)offsetof(Params, glassHiBright)},
@@ -320,9 +314,6 @@ static const Params PRESET_1 = {
   0x090D10, // tubeBack
   0x253039, // tubeBack2
   2.0f, // tubeBackGradient
-  1.0f, // tubeBackDecal
-  0x9CABB3, // tubeBackDecalColor
-  0.32f, // tubeBackDecalOpacity
   0xA8C0C8, // glassHi
   0.1f, // glassBody
   0.55f, // glassHiBright

@@ -102,3 +102,14 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   column and the black dry side (mid-blue chosen). A per-side mark colour (wet/dry) would fix it.
 - Free slug + rear digits: at `readFaceUp` 1 the time is only true while the slug is home; presets inherit
   the user's read settings (turn 125 dps, hold 11 s) — revisit once the wrist-turn detector is tuned on the board.
+
+## Rear-wall decals removed (2026-08-27)
+- Procedural texture = free to generate, not free to composite: one `blend565` per textured pixel (~26k/frame
+  for a dense grain) is ~10 ms on the S3. A sparse-list + baked-dry-strip cache (PSRAM) was tried and FPS
+  was still poor even with decals off — suspect the extra PSRAM traffic / `memcpy` per row or heap pressure
+  rather than the blend count; not diagnosed. If revisited: measure with `f` first, keep the bake in internal
+  RAM at real H, and re-check that step 1 is still a plain `hspan` when no decal is active.
+- Baseline frame rate with decals removed is a steady ~18 fps on the device (`f`). Stable, so it does not
+  read as stutter, but it caps how much per-pixel work any future back texture can add. First split
+  `render` vs `push-wait` from `f`: if push-wait dominates, the strip DMA/SPI clock is the limit, not
+  rendering; if render dominates, profile per stage (palette, liquid spans, marks/digits, fizz, lens).

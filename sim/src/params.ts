@@ -10,9 +10,6 @@ export interface Params {
   tubeBack: string;      // colour behind the liquid and glass layers (very dark; 0 = AMOLED off)
   tubeBack2: string;     // second colour used by the tube-back gradient
   tubeBackGradient: number; // 0 solid, 1 top-to-bottom, 2 centre band, 3 edge bands
-  tubeBackDecal: number; // 0 none, 1 brushed metal, 2 worn/scratched metal
-  tubeBackDecalColor: string;
-  tubeBackDecalOpacity: number;
   // --- glass tube shading (empty part; specular also over the liquid) ---
   glassHi: string;       // specular colour of the glass wall
   glassBody: number;     // 0..1 ambient cylinder shade of the empty wall (0 = pure black, AMOLED off)
@@ -184,9 +181,6 @@ export const DEFAULT_PARAMS: Params = {
   tubeBack: '#090d10',
   tubeBack2: '#253039',
   tubeBackGradient: 2,
-  tubeBackDecal: 1,
-  tubeBackDecalColor: '#9cabb3',
-  tubeBackDecalOpacity: 0.32,
   glassHi: '#a8c0c8',
   glassBody: 0.1,
   glassHiBright: 0.55,
@@ -310,8 +304,7 @@ export const DEFAULT_PARAMS: Params = {
 
 /** Explicitly keep non-material presets plain when DEFAULT_PARAMS uses a textured backing. */
 const PLAIN_TUBE_BACK: Partial<Params> = {
-  tubeBack2: '#18212a', tubeBackGradient: 0, tubeBackDecal: 0,
-  tubeBackDecalColor: '#80909a', tubeBackDecalOpacity: 0.65,
+  tubeBack2: '#18212a', tubeBackGradient: 0,
 };
 
 // ---------------------------------------------------------------------------
@@ -338,7 +331,6 @@ export interface Material {
 const MODERN_BASE: Partial<Params> = {
   tubeHeight: 46, hoursY: 12, minutesY: 185,
   tubeBack: '#000000', tubeBack2: '#000000', tubeBackGradient: 1,
-  tubeBackDecal: 1, tubeBackDecalColor: '#36393a', tubeBackDecalOpacity: 0.35,
   glassHi: '#859093', glassBody: 0.04, glassHiBright: 0.34, glassReflect: 0.2, glassRim: 0.52, glassOverLiquid: 0.4,
   lens: -0.5, lensCurve: -0.05,
   highlightH: 17, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.68,
@@ -448,7 +440,6 @@ export const PRESET_MERCURY: Partial<Params> = {
   ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...METAL,
   liquid: '#8f9aa2', liquidHi: '#ffffff', liquidLo: '#232b31',
   tubeBack: '#3a444c', tubeBack2: '#6a7880', tubeBackGradient: 2,
-  tubeBackDecal: 2, tubeBackDecalColor: '#8a9aa4', tubeBackDecalOpacity: 0.52,
   bubbleRim: '#e8f0f5',
   glassHi: '#e2edf5', glassBody: 0.13, glassHiBright: 0.6, glassReflect: 0.35, glassRim: 0.78, glassOverLiquid: 0.5,
   highlightH: 7, highlightBright: 1.3, highlightSharp: 3.6, shadeDepth: 0.95,
@@ -557,7 +548,6 @@ export const PRESET_INK: Partial<Params> = {
 export const PRESET_GLOW: Partial<Params> = {
   ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...MEDIUM,
   liquid: '#5ad81e', liquidHi: '#e4ffc8', liquidLo: '#1f7a08', tubeBack: '#020602', tubeBack2: '#061006', bubbleRim: '#dfffc0',
-  tubeBackDecal: 0,
   glassHi: '#a8d8a0', glassBody: 0.06, glassHiBright: 0.35, glassReflect: 0.15, glassRim: 0.4, glassOverLiquid: 0.4,
   highlightH: 14, highlightBright: 0.6, highlightSharp: 1.2, shadeDepth: 0.55,
   meniscusDepth: 5, meniscusPow: 2.6,
@@ -576,7 +566,6 @@ export const PRESET_GLOW: Partial<Params> = {
 export const PRESET_XENON: Partial<Params> = {
   ...MODERN_BASE, ...LAYOUT_WIDE,
   liquid: '#5a30d8', liquidHi: '#d9c8ff', liquidLo: '#1a0570', tubeBack: '#05020c', tubeBack2: '#0a0418', bubbleRim: '#d8ccff',
-  tubeBackDecal: 0,
   glassHi: '#a394d8', glassBody: 0.1, glassHiBright: 0.5, glassReflect: 0.2, glassRim: 0.6, glassOverLiquid: 0.4,
   highlightH: 14, highlightBright: 0.7, highlightSharp: 1.5, shadeDepth: 0.42,
   meniscusDepth: -5, meniscusPow: 2, meniscusTiltGain: 0, meniscusAsym: 0,
@@ -735,13 +724,6 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
     group: 'Colour', label: 'tube back gradient', min: 0, max: 3, step: 1,
     options: ['Solid colour 1', 'Colour 1 → colour 2', 'Colour 2 centre band', 'Colour 2 edge bands'],
   },
-  tubeBackDecal: {
-    help: 'Procedural rear-wall material texture. It stays fixed to the backing and is filtered by liquid transparency.',
-    group: 'Colour', label: 'tube back decal', min: 0, max: 2, step: 1,
-    options: ['None', 'Brushed metal', 'Worn / scratched metal'],
-  },
-  tubeBackDecalColor: { help: 'Colour of the light scratches; darker strokes are derived from tube back colour 1.', group: 'Colour', label: 'decal colour' },
-  tubeBackDecalOpacity: { help: 'Texture strength. In the wet part it is also multiplied by liquid transparency.', group: 'Colour', label: 'decal opacity', min: 0, max: 1, step: 0.01 },
   bubbleRim: { help: 'Rim colour of the spirit-level bubble and fizz.', group: 'Colour' },
   glassHi: { help: 'Specular colour of the glass wall.', group: 'Glass', label: 'specular colour' },
   glassBody: { help: 'Ambient cylinder shade of the empty wall. 0 = pure black.', group: 'Glass', label: 'ambient body', min: 0, max: 0.5, step: 0.01 },

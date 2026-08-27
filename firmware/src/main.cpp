@@ -1,7 +1,7 @@
 // Liquid Watch firmware — liquid face (port of the sim) + Phase 1 bring-up faces.
 // Serial commands (115200, USB CDC; same protocol over BLE Nordic UART Service, name "liquid-watch"):
 //   l  liquid face (default)          c  calibration face        h  hello / orientation test
-//   f  fps benchmark                  i  toggle IMU stream (50 Hz CSV)
+//   f  live fps + frame timing        i  toggle IMU stream (50 Hz CSV)
 //   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze)
 //   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p meniscusDepth=-10)
 //   p?  dump params as JSON           p!  reset params to the built-in preset (and erase NVS copy)
@@ -96,6 +96,8 @@ static double clockNow() {
 }
 static uint32_t lastPhysUs = 0, frames = 0, fpsT0 = 0;
 static float fps = 0;
+static uint32_t renderUs = 0, waitUs = 0;          // accumulated over the current fps window
+static float renderMs = 0, waitMs = 0;             // per-frame averages of the last window
 // Tube strips (owned by display.cpp, internal DMA RAM): the panel DMA reads them directly while the
 // other tube renders.
 static uint16_t *strip[2] = {nullptr, nullptr};
@@ -103,6 +105,7 @@ static uint16_t *strip[2] = {nullptr, nullptr};
 static TubeLayout shownLayout = {0, 0, 0};
 
 static void renderBoth() {
+  uint32_t t0 = micros();
   TubeLayout lay = tubeLayout(params);
   if (lay != shownLayout) {                 // tubes moved: wipe the rows they used to cover
     display_wait_all();
@@ -110,11 +113,16 @@ static void renderBoth() {
     shownLayout = lay;
   }
   renderTube(0, tubeH, params, strip[0]);
+  uint32_t t1 = micros();
   display_wait_all();                       // previous frame's minutes strip must be done before hours goes out
+  uint32_t t2 = micros();
   display_push_strip_async(strip[0], lay.yH, lay.H);
   renderTube(1, tubeM, params, strip[1]);
+  uint32_t t3 = micros();
   display_wait_all();
+  uint32_t t4 = micros();
   display_push_strip_async(strip[1], lay.yM, lay.H);
+  renderUs += (t1 - t0) + (t3 - t2); waitUs += (t2 - t1) + (t4 - t3);
 }
 
 static void face_hello() {
@@ -145,32 +153,10 @@ static void face_calibration() {
   display_push_frame(fb.buf);
 }
 
-static void bench_fps() {
-  out.println("fps: full-frame 536x240 RGB565, 60 frames...");
-  uint32_t t0 = millis();
-  const int N = 60;
-  for (int i = 0; i < N; i++) {
-    fb.fillScreen(0);
-    int x = (i * 9) % (PANEL_W - 40);
-    fb.fillRect(x, HOURS_TUBE_Y, 40, TUBE_HEIGHT_PX, LIQUID_RGB565);
-    fb.fillRect(PANEL_W - 40 - x, MINUTES_TUBE_Y, 40, TUBE_HEIGHT_PX, LIQUID_RGB565);
-    display_push_frame(fb.buf);
-  }
-  uint32_t dt = millis() - t0;
-  out.printf("fps: %d frames in %lu ms = %.1f fps (render+push)\n", N, dt, N * 1000.0f / dt);
-  t0 = millis();
-  for (int i = 0; i < N; i++) display_push_frame(fb.buf);
-  dt = millis() - t0;
-  out.printf("fps: push-only %.1f fps\n", N * 1000.0f / dt);
-  t0 = millis();
-  for (int i = 0; i < N; i++) { renderTube(0, tubeH, params, strip[0]); renderTube(1, tubeM, params, strip[1]); }
-  dt = millis() - t0;
-  out.printf("fps: liquid render-only %.1f fps\n", N * 1000.0f / dt);
-  t0 = millis();
-  for (int i = 0; i < N; i++) renderBoth();
-  display_wait_all();
-  dt = millis() - t0;
-  out.printf("fps: liquid render+async push %.1f fps\n", N * 1000.0f / dt);
+// Live figures of whatever the loop is rendering (2 s rolling window, see liquid_tick).
+static void report_fps() {
+  out.printf("fps %.1f  render %.2f ms  push-wait %.2f ms  (mode %c, transp %.2f)\n",
+             fps, renderMs, waitMs, mode, params.liquidTransparency);
 }
 
 // ---- liquid face ----
@@ -199,7 +185,11 @@ static void liquid_tick() {
   }
   renderBoth();
   frames++;
-  if (millis() - fpsT0 >= 2000) { fps = frames * 1000.0f / (millis() - fpsT0); frames = 0; fpsT0 = millis(); }
+  if (millis() - fpsT0 >= 2000) {
+    fps = frames * 1000.0f / (millis() - fpsT0);
+    renderMs = renderUs / 1000.0f / frames; waitMs = waitUs / 1000.0f / frames;
+    frames = 0; renderUs = waitUs = 0; fpsT0 = millis();
+  }
 }
 
 static void imu_poll() {
@@ -257,7 +247,6 @@ static void show(char m) {
     case 'h': face_hello(); break;
     case 'c': face_calibration(); break;
     case 'l': liquid_start(); break;
-    case 'f': bench_fps(); liquid_start(); mode = 'l'; break;
   }
 }
 
@@ -265,7 +254,8 @@ static void handleLine(char *line) {
   while (*line == ' ') line++;
   char c = line[0]; char *arg = line + 1; while (*arg == ' ') arg++;
   switch (c) {
-    case 'h': case 'c': case 'f': case 'l': show(c); break;
+    case 'h': case 'c': case 'l': show(c); break;
+    case 'f': report_fps(); break;   // query only: does not change the face
     case 'i': imu_stream = !imu_stream; out.printf("imu stream %s\n", imu_stream ? "on (t_ms,ax,ay,az,gx,gy,gz)" : "off"); break;
     case 'b': { int v = atoi(arg); display_set_brightness(constrain(v, 0, 255)); out.printf("brightness %d\n", v); break; }
     case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { setClockLocal(CLOCK_EPOCH_MIN + hh * 3600 + mm * 60 + ss); out.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else out.println("usage: t HH:MM[:SS]"); break; }
