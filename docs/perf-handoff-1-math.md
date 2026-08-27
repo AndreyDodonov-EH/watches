@@ -33,3 +33,9 @@ Eyeball presets with free liquid, meniscus band, lens, sprite digits, `remaining
 
 ## Done when
 Merged, parity clean, before/after numbers recorded, generation counter in place.
+
+## Outcome (2026-08-27)
+Done — 20.6 → 38.6 fps (44.4 → 22.0 ms render), parity unchanged; numbers per step in STATUS.md and
+`firmware/.compare/e2e.log`. Deviations from the plan: caches key on exact `light` / `lightK` floats rather
+than a ½° quantisation (bit-exact, still hits at rest); glyphs stay in PSRAM (fixed pool from `render_init`)
+because internal RAM has only 37 KB left after BLE — see KAIZEN. Front-bright is uncached (0 in the preset).

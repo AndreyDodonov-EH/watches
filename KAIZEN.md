@@ -122,3 +122,20 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   read as stutter, but it caps how much per-pixel work any future back texture can add. First split
   `render` vs `push-wait` from `f`: if push-wait dominates, the strip DMA/SPI clock is the limit, not
   rendering; if render dominates, profile per stage (palette, liquid spans, marks/digits, fizz, lens).
+
+## Perf hand-off 1 (2026-08-27)
+- Internal RAM is the wall: 37 KB free after BLE init. TUBE_HEIGHT_MAX 80→72 would return 17 KB (strips are
+  2 × 536 × 80 × 2 B); with that, the sprite glyph pools (2 × 18 KB) could move from PSRAM to internal (~2 ms/frame).
+- Unexplained ~2 ms between two builds with identical hot loops (static internal glyph pool 38.3 fps vs heap
+  internal 42.0 fps). Suspect flash icache layout of render.cpp; try `IRAM_ATTR` on `drawSpriteGlyph` /
+  `Mark::operator()` / `throughLiquid` and measure — or accept the swing and always compare medians of ≥5.
+- Parity pre-existing (not from hand-off 1): `cryo` preset 132 px > 12/255 on the minutes sprite labels,
+  `free` 1 px, `free`+`remaining` 36–72 px (slug-state dependent). Diff pngs: run
+  `compare-device.py` after applying the preset; investigate sim `render.ts` vs `render.cpp` sprite rows for
+  digitFont 5 at that scale.
+- `compare-device.py` doesn't pin the scene (`inputGain`, `t`) so the mismatch count drifts 160–230 with the
+  live IMU; give it the same pin as bench.py so "must not grow" is a real bar.
+- Front-bright has no cached table (frontBright 21–23 in presets > EFFECT_MAX 16, memory-bound); if a preset
+  turns it on, the direct per-pixel path costs ~4 ms — a per-k `T` hoist (row-independent part) is cheap.
+- `free` preset edgeGlow = 40 > EFFECT_MAX 16 → direct path; either raise the table (10 KB internal per +16
+  columns) or cap the param.

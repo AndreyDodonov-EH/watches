@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-27 (firmware e2e test tooling + perf baseline)_
+_Last update: 2026-08-27 (perf hand-off 1: -O2, param-only caches, integer mark path)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -75,6 +75,27 @@ else `display_init` fails at boot before `ble_init`.
   lens 0.8; digitShadow, meniscus, wetFilm, glass*, transparency ≤ 0.2 each.
   → the sprite-digit compositing is half the frame: hand-off 3 (layer cache) is the big lever, not the math.
 - Parity: 163–221 of 77184 px differ by ≤ 1 LSB (digit glyph rounding), 0 px > 12/255.
+
+## Perf hand-off 1 (2026-08-27, docs/perf-handoff-1-math.md) — 20.6 → 38.6 fps, bit-exact
+| step | fps | render ms |
+|---|---|---|
+| baseline `-Os` | 20.6 | 44.4 |
+| `-O2` (`build_unflags = -Os`) | 25.1 | 35.9 |
+| + params generation counter, param-only caches, integer mark path, glyphs on internal heap (lazy) | 42.0 | 20.0 |
+| same, but deterministic memory: glyph pool in PSRAM (boot-time), glow tables static | 36.0–38.6 | 22.0–23.9 |
+- Stage costs after (ms, final run): digits 9.8 (was 20.7), edgeGlow 3.4, ticksH 2.1, fizz 1.4, ticksM 1.3, lens 0.4.
+- `paramsGen` (main.cpp) is bumped on every `p` write, `p!`, NVS restore and passed to `renderTube`;
+  every param-only table in render.cpp is keyed on (gen, H): tick/lens row warps, lens row map, fizz
+  magnification, corner mask, meniscus row terms, label layout (+ its two motion-derived ints), palette
+  (+ exact `light`), edge-glow 565 tables (+ exact `lightK`). Exact float keys instead of the ½° quantisation
+  the hand-off suggested: hits at rest, bit-exact in motion.
+- Mark path is integer: transparency/contrast hoisted into `Mark`, sprite alpha via a 256-entry LUT built
+  from the float formula, tick emboss via per-channel LUTs, tick warped ranges once per (wet/dry, minor/major).
+- Memory: internal heap after BLE init is **37 KB** free (59 KB static). Glyph pools (2 × 18 KB) therefore live in
+  PSRAM, allocated once in `render_init()`; putting them in internal RAM is worth ~2 ms but the BT controller
+  then fails to start (build with 100 KB static hung in `ble_init`). Rule: no lazy allocation (CLAUDE.md).
+- Parity unchanged: preset 1 / mercury / glow 0 px > 12/255; cryo (132 px) and free (1 px) deviate identically
+  on the pre-change firmware — pre-existing, see KAIZEN.
 
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.
