@@ -12,4 +12,8 @@ struct TubeLayout { int H, yH, yM; bool operator!=(const TubeLayout &o) const { 
 TubeLayout tubeLayout(const Params &p);
 // Draw one tube (0 = hours, 1 = minutes) into `strip`: H x PANEL_W RGB565, byte-swapped,
 // representing panel rows yH.. / yM.. . Everything else on the panel stays as is.
-void renderTube(int idx, const TubeState &s, const Params &p, uint16_t *strip);
+// Allocates the fixed render pools (once, at boot). False = PSRAM allocation failed.
+bool render_init();
+// gen: params generation counter (bumped by main on every param write / preset load / NVS restore);
+// all param-only tables inside the renderer are keyed on it.
+void renderTube(int idx, const TubeState &s, const Params &p, uint32_t gen, uint16_t *strip);

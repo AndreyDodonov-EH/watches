@@ -62,13 +62,14 @@ static bool have_imu = false;
 
 // ---- liquid face state ----
 static Params params = PRESET_DEFAULT;
+static uint32_t paramsGen = 1;   // bumped on every param change; renderer caches key on it
 // NVS autosave: namespace lw, blob cur. Written 2 s after the last change; ignored if the schema CRC differs.
 static Preferences prefs;
 static uint32_t paramsDirtyAt = 0;
 static void paramsLoad() {
   prefs.begin("lw", false);
   if (prefs.getUInt("crc") == PARAMS_SCHEMA_CRC && prefs.getBytesLength("cur") == sizeof(Params)) {
-    prefs.getBytes("cur", &params, sizeof(Params)); out.println("params: restored from nvs");
+    prefs.getBytes("cur", &params, sizeof(Params)); paramsGen++; out.println("params: restored from nvs");
   }
 }
 static void paramsTouch() { paramsDirtyAt = millis() | 1; }
@@ -112,12 +113,12 @@ static void renderBoth() {
     fb.fillScreen(0); display_push_frame(fb.buf);
     shownLayout = lay;
   }
-  renderTube(0, tubeH, params, strip[0]);
+  renderTube(0, tubeH, params, paramsGen, strip[0]);
   uint32_t t1 = micros();
   display_wait_all();                       // previous frame's minutes strip must be done before hours goes out
   uint32_t t2 = micros();
   display_push_strip_async(strip[0], lay.yH, lay.H);
-  renderTube(1, tubeM, params, strip[1]);
+  renderTube(1, tubeM, params, paramsGen, strip[1]);
   uint32_t t3 = micros();
   display_wait_all();
   uint32_t t4 = micros();
@@ -267,14 +268,14 @@ static void handleLine(char *line) {
     case 'd': demoSpeed = atof(arg); out.printf("demo speed x%g\n", demoSpeed); break;
     case 'p': {
       if (arg[0] == '?') dumpParams();
-      else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsErase(); out.println("params reset"); }
+      else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsGen++; paramsErase(); out.println("params reset"); }
       else { char *eq = strchr(arg, '='); if (!eq) { out.println("usage: p<name>=<value> | p? | p!"); break; }
-        *eq = 0; bool ok = setParam(arg, eq + 1); if (ok) paramsTouch();
+        *eq = 0; bool ok = setParam(arg, eq + 1); if (ok) { paramsGen++; paramsTouch(); }
         out.printf(ok ? "ok %s\n" : "unknown param %s\n", arg); }
       break; }
     case 'x': {  // dump state + both strips (hex) for offline comparison with the sim
       display_wait_all();
-      renderTube(0, tubeH, params, strip[0]); renderTube(1, tubeM, params, strip[1]);
+      renderTube(0, tubeH, params, paramsGen, strip[0]); renderTube(1, tubeM, params, paramsGen, strip[1]);
       auto dumpState = [&](const TubeState &t) {
         out.printf(" %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f",
                    t.fillTarget, t.fillPos, t.angle, t.light, t.edgeLight, t.agitation,
@@ -310,6 +311,7 @@ void setup() {
                 rr >= 0 && rr < 16 ? RST[rr] : "?");
   if (!fb.buf) { out.println("FATAL: framebuffer alloc failed"); }
   if (!display_init()) out.println("display init FAILED");
+  if (!render_init()) out.println("render init FAILED (glyph pools)");
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   have_imu = imu_init();
   paramsLoad();
