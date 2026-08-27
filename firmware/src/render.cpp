@@ -604,27 +604,54 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   }
 }
 
-// Dest rows per source row under rendered lens + glass (topLens), times center-weighted fizzSquash. See sim lensMagRows.
+// Magnification for a bubble of radius r at float row y: mean of the row table over the rows the
+// pre-squashed sprite covers, iterated once (see sim fizzMag). Single-row reads snap between rows.
+static float fizzMag(const float *mag, int H, float y, float r) {
+  float m = 1;
+  for (int it = 0; it < 2; it++) {
+    float ry = r / m;
+    int a = (int)fmaxf(0, floorf(y - ry)), b = (int)fminf(H - 1, ceilf(y + ry));
+    float s = 0; for (int i = a; i <= b; i++) s += mag[i];
+    m = s / (b - a + 1);
+  }
+  return m;
+}
+// Lens magnification per row: rendered lens (supersampled row map, per source row) x physical glass
+// (topLens, continuous) x center-weighted fizzSquash. See sim lensMagRows.
 inline float Tube::fizzSquashRow(const Params &p, int y) const {
   float d = (y + 0.5f - H / 2.0f) / (H / 2.0f);   // full fizzSquash at mid-height, ~1 at the edges
   return 1 + (p.fizzSquash - 1) * (1 - d * d);
 }
+static bool lensExponent(float lens, float curve, float &strength, float &e) {
+  float signedCurve = lens < 0 ? -curve : curve; strength = fabsf(lens);
+  if (strength == 0 || signedCurve == 0) return false;
+  e = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  return true;
+}
 void Tube::lensMagRows(const Params &p, float *rows) const {
-  for (int y = 0; y < H; y++) rows[y] = fizzSquashRow(p, y);
-  float lens = clampf(p.lens + p.topLens, -1, 1), curve = clampf(p.lensCurve, -3, 3);
-  float signedCurve = lens < 0 ? -curve : curve, strength = fabsf(lens);
-  if (strength == 0 || signedCurve == 0) return;
-  float e = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
-  for (int y = 0; y < H; y++) rows[y] = 0;
-  for (int yd = 0; yd < H; yd++) {
-    float d = (yd + 0.5f - H / 2.0f) / (H / 2.0f), u = fmaxf(1e-3f, fabsf(d));
-    float s = (d < 0 ? -1 : 1) * ((1 - strength) * u + strength * powf(u, e));
-    int src = (int)clampf(floorf(H / 2.0f + s * H / 2.0f), 0, H - 1);
-    rows[src] = clampf(1 / ((1 - strength) + strength * e * powf(u, e - 1)), 0.2f, 5);
+  for (int y = 0; y < H; y++) rows[y] = 1;
+  float curve = clampf(p.lensCurve, -3, 3), strength, e;
+  if (lensExponent(clampf(p.lens, -1, 1), curve, strength, e)) {
+    // Supersampled row map averaged per source row (see sim); dropped rows inherit the previous row.
+    const int N = 8;
+    float sum[TUBE_HEIGHT_MAX] = {0}, cnt[TUBE_HEIGHT_MAX] = {0};
+    for (int i = 0; i < H * N; i++) {
+      float d = ((i + 0.5f) / N - H / 2.0f) / (H / 2.0f), u = fabsf(d);
+      float s = (d < 0 ? -1 : 1) * ((1 - strength) * u + strength * powf(u, e));
+      int src = (int)clampf(floorf(H / 2.0f + s * H / 2.0f), 0, H - 1);
+      sum[src] += 1 / ((1 - strength) + strength * e * powf(u, e - 1)); cnt[src]++;
+    }
+    float last = 1;
+    for (int y = 0; y < H; y++) if (cnt[y] > 0) { last = sum[y] / cnt[y]; break; }
+    for (int y = 0; y < H; y++) rows[y] = cnt[y] > 0 ? (last = sum[y] / cnt[y]) : last;
   }
-  float last = 0;
-  for (int y = 0; y < H; y++) if (rows[y] > 0) { last = rows[y]; break; }
-  for (int y = 0; y < H; y++) { if (rows[y] > 0) last = rows[y]; else rows[y] = last; rows[y] *= fizzSquashRow(p, y); }
+  if (lensExponent(clampf(p.topLens, -1, 1), curve, strength, e)) {
+    for (int y = 0; y < H; y++) {
+      float u = fmaxf(1.0f / H, fabsf((y + 0.5f - H / 2.0f) / (H / 2.0f)));
+      rows[y] /= (1 - strength) + strength * e * powf(u, e - 1);
+    }
+  }
+  for (int y = 0; y < H; y++) rows[y] = clampf(rows[y] * fizzSquashRow(p, y), 0.2f, 5);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -898,7 +925,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       const Fizz &f = fizz[k];
       int fy = (int)clampf(jround(f.y), 0, H - 1);
       if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
-      const float m = mag[fy], ry = r / m;
+      const float m = fizzMag(mag, H, f.y, r), ry = r / m;
       for (int iy = (int)floorf(f.y - ry - 1); iy <= (int)ceilf(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
         for (int ix = (int)floorf(f.x - r - 1); ix <= (int)ceilf(f.x + r); ix++) {
