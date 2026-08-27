@@ -98,32 +98,63 @@ static double clockNow() {
 static uint32_t lastPhysUs = 0, frames = 0, fpsT0 = 0;
 static float fps = 0;
 static uint32_t renderUs = 0, waitUs = 0;          // accumulated over the current fps window
-static float renderMs = 0, waitMs = 0;             // per-frame averages of the last window
+static uint32_t hoursUs = 0, minutesUs = 0;        // per-core render time (hours on core 0, minutes here)
+static float renderMs = 0, waitMs = 0, hoursMs = 0, minutesMs = 0;   // per-frame averages of the last window
 // Tube strips (owned by display.cpp, internal DMA RAM): the panel DMA reads them directly while the
-// other tube renders.
+// next frame renders.
 static uint16_t *strip[2] = {nullptr, nullptr};
 
 static TubeLayout shownLayout = {0, 0, 0};
 
+// ---- hours-tube worker on core 0 (the Arduino loop runs on core 1) ----
+// The two tubes are independent, so each frame renders them at the same time: the worker draws hours
+// into strip[0] while loop() draws minutes into strip[1]. Hand-shake by task notification: loop()
+// gives the worker one notification per frame and blocks on its own until the worker is done, so at
+// any point outside renderBoth() the worker is idle and blocked (serial commands, param writes, the
+// physics step and `x` all run in that window — nothing they touch is being read on core 0).
+// Priority 1 = same as loop(); far below the BT controller (23) and NimBLE host on the same core, and
+// the worker blocks every frame so core 0's idle task (task-WDT) keeps running.
+#define WORKER_PRIO 1
+#define WORKER_STACK 4096   // measured use ~1.5 KB
+static TaskHandle_t workerTask = nullptr, loopTask = nullptr;
+static uint32_t workerUs = 0;              // last hours render time, written by the worker
+static uint32_t workerStackFree = 0;       // high-water mark (bytes on ESP-IDF), for `s`
+static void renderWorker(void *) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    uint32_t t0 = micros();
+    renderTube(0, tubeH, params, paramsGen, strip[0]);
+    workerUs = micros() - t0;
+    workerStackFree = uxTaskGetStackHighWaterMark(nullptr);
+    xTaskNotifyGive(loopTask);
+  }
+}
+static void workerStart() {
+  loopTask = xTaskGetCurrentTaskHandle();
+  xTaskCreatePinnedToCore(renderWorker, "render0", WORKER_STACK, nullptr, WORKER_PRIO, &workerTask, 0);
+}
+
 static void renderBoth() {
-  uint32_t t0 = micros();
   TubeLayout lay = tubeLayout(params);
   if (lay != shownLayout) {                 // tubes moved: wipe the rows they used to cover
     display_wait_all();
     fb.fillScreen(0); display_push_frame(fb.buf);
     shownLayout = lay;
   }
-  renderTube(0, tubeH, params, paramsGen, strip[0]);
+  uint32_t t0 = micros();
+  display_wait_pending(display_bands(lay.H));   // previous frame: hours strip pushed first → free once only minutes' bands remain
   uint32_t t1 = micros();
-  display_wait_all();                       // previous frame's minutes strip must be done before hours goes out
+  xTaskNotifyGive(workerTask);                  // hours → core 0
+  display_wait_all();                           // minutes strip free (overlaps the hours render)
   uint32_t t2 = micros();
-  display_push_strip_async(strip[0], lay.yH, lay.H);
   renderTube(1, tubeM, params, paramsGen, strip[1]);
   uint32_t t3 = micros();
-  display_wait_all();
+  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);      // hours done
   uint32_t t4 = micros();
+  display_push_strip_async(strip[0], lay.yH, lay.H);
   display_push_strip_async(strip[1], lay.yM, lay.H);
-  renderUs += (t1 - t0) + (t3 - t2); waitUs += (t2 - t1) + (t4 - t3);
+  renderUs += t4 - t1; waitUs += t1 - t0;       // render = wall time of the concurrent section
+  hoursUs += workerUs; minutesUs += t3 - t2;
 }
 
 static void face_hello() {
@@ -156,8 +187,8 @@ static void face_calibration() {
 
 // Live figures of whatever the loop is rendering (2 s rolling window, see liquid_tick).
 static void report_fps() {
-  out.printf("fps %.1f  render %.2f ms  push-wait %.2f ms  (mode %c, transp %.2f)\n",
-             fps, renderMs, waitMs, mode, params.liquidTransparency);
+  out.printf("fps %.1f  render %.2f ms  push-wait %.2f ms  cores h %.2f / m %.2f ms  (mode %c, transp %.2f)\n",
+             fps, renderMs, waitMs, hoursMs, minutesMs, mode, params.liquidTransparency);
 }
 
 // ---- liquid face ----
@@ -189,7 +220,8 @@ static void liquid_tick() {
   if (millis() - fpsT0 >= 2000) {
     fps = frames * 1000.0f / (millis() - fpsT0);
     renderMs = renderUs / 1000.0f / frames; waitMs = waitUs / 1000.0f / frames;
-    frames = 0; renderUs = waitUs = 0; fpsT0 = millis();
+    hoursMs = hoursUs / 1000.0f / frames; minutesMs = minutesUs / 1000.0f / frames;
+    frames = 0; renderUs = waitUs = hoursUs = minutesUs = 0; fpsT0 = millis();
   }
 }
 
@@ -290,9 +322,9 @@ static void handleLine(char *line) {
       }
       out.println("END");
       break; }
-    case 's': out.printf("mode %c fps %.1f clock %02d:%02d:%02d along %.3f across %.3f gyro %.1f fillH %.3f fillM %.3f heap %u\n",
+    case 's': out.printf("mode %c fps %.1f clock %02d:%02d:%02d along %.3f across %.3f gyro %.1f fillH %.3f fillM %.3f heap %u worker-stack-free %u\n",
                  mode, fps, (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60,
-                 rawTilt.along, rawTilt.across, rawTilt.gyroAcross, tubeH.fillTarget, tubeM.fillTarget, ESP.getFreeHeap()); break;
+                 rawTilt.along, rawTilt.across, rawTilt.gyroAcross, tubeH.fillTarget, tubeM.fillTarget, ESP.getFreeHeap(), (unsigned)workerStackFree); break;
     case 'r': ESP.restart(); break;
     case '?': out.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> p<name>=<v> p? p! r"); break;
     default: break;
@@ -313,6 +345,7 @@ void setup() {
   if (!display_init()) out.println("display init FAILED");
   if (!render_init()) out.println("render init FAILED (glyph pools)");
   strip[0] = display_strip(0); strip[1] = display_strip(1);
+  workerStart();
   have_imu = imu_init();
   paramsLoad();
   out.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");

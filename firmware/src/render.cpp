@@ -53,15 +53,12 @@ static inline float luma(RGB c) { return 0.299f * c.r + 0.587f * c.g + 0.114f * 
 // sprite alpha 0..255 -> blend fraction; tick emboss highlight / shadow of an expanded 565 channel.
 static uint16_t LUT_alphaT16[256];
 static uint8_t LUT_embHi[256], LUT_embLo[256];
-static bool lutsReady = false;
 static void buildLuts() {
-  if (lutsReady) return;
   for (int v = 0; v < 256; v++) {
     LUT_alphaT16[v] = (uint16_t)alphaT(v / 255.0f);
     LUT_embHi[v] = (uint8_t)jround(clampf((float)v + (255.0f - (float)v) * 0.7f, 0, 255));
     LUT_embLo[v] = (uint8_t)jround(clampf((float)v * 0.25f, 0, 255));
   }
-  lutsReady = true;
 }
 static inline uint16_t embossHi(uint16_t c) { int r, g, b; expand565(c, r, g, b); return rgb565(LUT_embHi[r], LUT_embHi[g], LUT_embHi[b]); }
 static inline uint16_t embossLo(uint16_t c) { int r, g, b; expand565(c, r, g, b); return rgb565(LUT_embLo[r], LUT_embLo[g], LUT_embLo[b]); }
@@ -72,37 +69,12 @@ TubeLayout tubeLayout(const Params &p) {
   return { H, y(p.hoursY), y(p.minutesY) };
 }
 
-// The current tube is drawn into an H x PANEL_W strip buffer (H ≤ TUBE_HEIGHT_MAX); panel-row y maps
-// to strip row y - baseY. Anything outside the strip is clipped (the sim never draws there either).
-static uint16_t *FB = nullptr;
-static int baseY = 0, H = TUBE_HEIGHT_PX;
+// Each tube is drawn into an H x PANEL_W strip buffer (H ≤ TUBE_HEIGHT_MAX); panel-row y maps to
+// strip row y - baseY. Anything outside the strip is clipped (the sim never draws there either).
+// All working state lives in a per-tube `Tube` context (below) so the two tubes can render on
+// different cores at the same time; nothing in this file is file-static and mutable per frame.
 static const int L = TUBE_LENGTH_PX;
-
-static inline bool inStrip(int x, int y) { return x >= 0 && x < PANEL_W && y >= baseY && y < baseY + H; }
-static inline uint16_t rd(int x, int y) { return __builtin_bswap16(FB[(y - baseY) * PANEL_W + x]); }
-static inline void wr(int x, int y, uint16_t c) { FB[(y - baseY) * PANEL_W + x] = __builtin_bswap16(c); }
-static void hspan(int y, int x0, int x1, uint16_t c) {
-  if (y < baseY || y >= baseY + H) return;
-  if (x0 < 0) x0 = 0; if (x1 > PANEL_W) x1 = PANEL_W;
-  if (x1 <= x0) return;
-  uint16_t s = __builtin_bswap16(c);
-  uint16_t *p = FB + (y - baseY) * PANEL_W + x0;
-  int n = x1 - x0;
-  if (((uintptr_t)p & 2) && n) { *p++ = s; n--; }
-  uint32_t ss = (uint32_t)s | ((uint32_t)s << 16);
-  uint32_t *p32 = (uint32_t *)p;
-  for (; n >= 2; n -= 2) *p32++ = ss;
-  if (n) *(uint16_t *)p32 = s;
-}
-static inline void px(int x, int y, uint16_t c) { if (inStrip(x, y)) wr(x, y, c); }
-static inline void pxa(int x, int y, uint16_t c, float t) {
-  if (!inStrip(x, y)) return;
-  wr(x, y, t >= 1 ? c : blend565(rd(x, y), c, t));
-}
-static inline void pxaT(int x, int y, uint16_t c, int T) {
-  if (!inStrip(x, y)) return;
-  wr(x, y, T >= 256 ? c : blend565T(rd(x, y), c, T));
-}
+struct Tube;
 
 // ---------------------------------------------------------------------------------------------
 // palette
@@ -114,9 +86,204 @@ struct Palette {
   uint32_t gen = 0; int H = 0; float light = 0; bool valid = false;   // cache key (light is exact: hit while the tube is at rest)
 };
 
+// ---------------------------------------------------------------------------------------------
+// bitmap fonts (digitFont 0..4)
+// ---------------------------------------------------------------------------------------------
+struct Font { uint8_t w, h; uint8_t g[10][8]; };
+static const Font FONTS[] = {
+  {3, 5, {{7,5,5,5,7},{2,6,2,2,7},{7,1,7,4,7},{7,1,7,1,7},{5,5,7,1,1},{7,4,7,1,7},{7,4,7,5,7},{7,1,1,1,1},{7,5,7,5,7},{7,5,7,1,7}}},
+  {4, 6, {{6,9,9,9,9,6},{2,6,2,2,2,7},{6,9,1,2,4,15},{14,1,6,1,9,6},{2,6,10,15,2,2},{15,8,14,1,9,6},{6,8,14,9,9,6},{15,1,2,4,4,4},{6,9,6,9,9,6},{6,9,9,7,1,6}}},
+  {5, 7, {{14,17,19,21,25,17,14},{4,12,4,4,4,4,14},{14,17,1,2,4,8,31},{31,2,4,2,1,17,14},{2,6,10,18,31,2,2},{31,16,30,1,1,17,14},{6,8,16,30,17,17,14},{31,1,2,4,8,8,8},{14,17,17,14,17,17,14},{14,17,17,15,1,2,12}}},
+  {5, 7, {{31,17,17,17,17,17,31},{1,1,1,1,1,1,1},{31,1,1,31,16,16,31},{31,1,1,31,1,1,31},{17,17,17,31,1,1,1},{31,16,16,31,1,1,31},{31,16,16,31,17,17,31},{31,1,1,1,1,1,1},{31,17,17,31,17,17,31},{31,17,17,31,1,1,31}}},
+  {6, 8, {{30,51,51,51,51,51,51,30},{12,28,12,12,12,12,12,63},{30,51,3,6,12,24,48,63},{62,3,3,30,3,3,51,30},{6,14,30,54,63,6,6,6},{63,48,48,62,3,3,51,30},{30,48,48,62,51,51,51,30},{63,3,6,12,24,24,24,24},{30,51,51,30,51,51,51,30},{30,51,51,31,3,3,3,30}}},
+};
+static const int NUM_FONTS = sizeof(FONTS) / sizeof(FONTS[0]);
+static const int SPRITE_FONT = NUM_FONTS;
+
+// ---------------------------------------------------------------------------------------------
+// sprite glyphs: box-filtered from the flash sheet into the device box, cached per tube
+// ---------------------------------------------------------------------------------------------
+// Fixed pool per tube (3 B/px), allocated once at boot (render_init) in PSRAM: deterministic footprint, no
+// heap traffic on param changes. Internal RAM cannot take it: the two DMA strips + BT controller leave
+// <60 KB there. GLYPH_POOL_PX covers the 10 glyphs of a set up to ~4.5x scale (18 KB per tube); a set
+// that does not fit drops the glyphs past the budget (visible, not silent).
+#define GLYPH_POOL_PX 6144
+struct ScaledGlyph { int w, h; uint16_t *c; uint8_t *a; };
+struct ScaledSet {
+  int sheet = -1, bw = 0, bh = 0; float brightness = -1, tintAmt = -1, tone = 0; uint32_t tint = 0;
+  ScaledGlyph g[10] = {};
+  uint16_t *poolC = nullptr; uint8_t *poolA = nullptr;
+};
+// ---------------------------------------------------------------------------------------------
+// marks (ticks + labels) seen through the liquid
+// ---------------------------------------------------------------------------------------------
+// Integer version of the sim's throughLiquid (luma in 1/1000 units, blend fractions in 1/256).
+// T = liquidTransparency in 1/256, C = contrast in 1/1000 (both hoisted into Mark).
+static uint16_t throughLiquid(uint16_t bg, uint16_t mark, int T, int C) {
+  int Br, Bg, Bb, Mr, Mg, Mb;
+  expand565(bg, Br, Bg, Bb); expand565(mark, Mr, Mg, Mb);
+  int cr = Br + (((Mr - Br) * T + 128) >> 8), cg = Bg + (((Mg - Bg) * T + 128) >> 8), cb = Bb + (((Mb - Bb) * T + 128) >> 8);
+  int lb = 299 * Br + 587 * Bg + 114 * Bb, lc = 299 * cr + 587 * cg + 114 * cb, d = lc - lb;
+  if (abs(d) >= C) return rgb565(cr, cg, cb);
+  int dir = d != 0 ? (d > 0 ? 1 : -1) : (lb > 110000 ? -1 : 1);
+  int target = lb + dir * C; if (target < 0) target = 0; if (target > 255000) target = 255000;
+  if (dir < 0) {
+    int den = lc < 1000 ? 1000 : lc;   // scale toward black
+    cr = (cr * target + den / 2) / den; cg = (cg * target + den / 2) / den; cb = (cb * target + den / 2) / den;
+  } else {
+    int den = 255000 - lc; if (den < 1000) den = 1000;   // mix toward white
+    int K = (target - lc) * 256 / den; if (K > 256) K = 256; if (K < 0) K = 0;
+    cr += ((255 - cr) * K + 128) >> 8; cg += ((255 - cg) * K + 128) >> 8; cb += ((255 - cb) * K + 128) >> 8;
+  }
+  if (cr > 255) cr = 255; if (cg > 255) cg = 255; if (cb > 255) cb = 255;
+  return rgb565(cr, cg, cb);
+}
+
+// rel = +1 / -1: emboss highlight / shadow of body colour c, derived after the liquid pass.
+// Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi.
+struct Edges { const float *lo, *hi; };
+struct Mark {
+  Tube &t; int y0; Edges edges; bool onTop; int T, C;   // T: transparency 1/256, C: contrast 1/1000
+  Mark(Tube &t_, int y0_, Edges e, const Params &p, bool onTop_, float contrast) : t(t_), y0(y0_), edges(e), onTop(onTop_) {
+    T = (int)(p.liquidTransparency * 256 + 0.5f); if (T < 0) T = 0; if (T > 256) T = 256;
+    C = (int)(contrast * 1000 + 0.5f);
+  }
+  // covT: coverage in 1/256 (256 = opaque)
+  inline void operator()(int x, int y, uint16_t c, int covT = 256, int rel = 0) const;
+};
+
+struct Label { int x0; char text[3]; int len; int adv[2]; };
+struct Labels {
+  Label list[12]; int n; int bw, bh, ry0, ry1, yTop; ScaledGlyph *sprite; const Font *font; int gap;
+  uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow;
+  int16_t drySourceRows[TUBE_HEIGHT_MAX]; int dryRy0, dryRy1;   // rear digits behind air (digitDryLens)
+  // cache key: everything above is a function of (params gen, H) plus these two motion-derived ints
+  uint32_t gen = 0; int H = 0, bottomOff = 0, first = -1; bool valid = false, have = false;
+};
+
+static void markSourceRows(int height, float lens, int16_t *out, float curve = 1) {
+  float strength = fabsf(clampf(lens, -1, 1));
+  float signedCurve = lens < 0 ? -clampf(curve, -3, 3) : clampf(curve, -3, 3);
+  float exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  for (int yd = 0; yd < height; yd++) {
+    float d = (yd + 0.5f - height / 2.0f) / (height / 2.0f), u = fabsf(d);
+    float warped = signedCurve == 0 ? u : (1 - strength) * u + strength * powf(u, exponent);
+    float s = (d < 0 ? -1 : 1) * warped;
+    out[yd] = (int16_t)clampf(floorf(height / 2.0f + s * height / 2.0f), 0, height - 1);
+  }
+}
+
+static void digitRowColors(const Params &p, int bh, uint16_t *out) {
+  int n = bh < 1 ? 1 : bh; if (n > 96) n = 96;
+  RGB a = hexToRgb(p.digitColor), b = hexToRgb(p.digitColor2);
+  for (int i = 0; i < n; i++) {
+    float t = n == 1 ? 0 : (float)i / (n - 1); float u = t < 0.8f ? t / 0.8f : 1 - (t - 0.8f) / 0.2f * 0.35f;
+    out[i] = q(scale(mix(a, b, u), p.brightness * p.digitBright));
+  }
+}
+
+// Which column is behind liquid; edges null (digits on top) = all wet.
+struct Wet {
+  bool all; float lo, hi;
+  Wet(const Edges *e, int H) : all(!e), lo(e ? e->lo[H >> 1] : 0), hi(e ? e->hi[H >> 1] : 0) {}
+  bool operator()(int x) const { return all || (x >= lo && x < hi); }
+};
+
+// ---------------------------------------------------------------------------------------------
+// per-tube render context
+// ---------------------------------------------------------------------------------------------
+#define MAX_FIZZ 64
+struct Fizz { float x, y, v; };   // px in the liquid frame
+
+// Everything that depends only on (params, H): rebuilt when the generation counter moves.
+struct RowCache {
+  uint32_t gen = 0; int H = 0; bool valid = false;
+  int16_t tickWet[TUBE_HEIGHT_MAX], tickDry[TUBE_HEIGHT_MAX];   // tick source-row warps
+  int16_t lensSrc[TUBE_HEIGHT_MAX]; bool lensOn; bool lensPos;   // applyLens row map
+  float mag[TUBE_HEIGHT_MAX];                                    // lensMagRows (fizz squash)
+  int16_t capX0[TUBE_HEIGHT_MAX];                                // rounded-corner mask
+  // edge profile terms (sim edgeCap): d = lensRow(row), climbPow = |d|^meniscusPow, bulge = 1 - sqrt(1 - d^2)
+  float rowD[TUBE_HEIGHT_MAX], rowClimbPow[TUBE_HEIGHT_MAX], rowBulge[TUBE_HEIGHT_MAX];
+  uint16_t hiC;                                                  // front-bright colour
+};
+// Edge-effect blend tables: (row, k) -> 565, a function of the palette and lightK only. Rebuilt when
+// lightK moves (exact compare: at rest it is constant, in motion it changes every frame anyway).
+#define EFFECT_MAX 16
+struct EffectTable { uint32_t gen = 0; int H = 0; float lightK = -1; bool valid = false; uint16_t c[TUBE_HEIGHT_MAX * EFFECT_MAX]; };
+
+// All mutable state of one tube's renderer (hours = tubes[0], minutes = tubes[1]). Two of these are
+// static (fixed footprint, ~9 KB each); the strip pointer / geometry are set per call by renderTube.
+// Nothing here is shared between the two, so the tubes can render concurrently on both cores.
+struct Tube {
+  uint16_t *FB = nullptr; int baseY = 0, H = TUBE_HEIGHT_PX;
+  Palette pal; RowCache rc; Labels labels; ScaledSet set;
+  EffectTable glowT[2];                                       // 0 = time edge, 1 = home edge
+  float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
+  float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds when `remaining`
+  Fizz fizz[MAX_FIZZ]; int fizzN = 0; float fizzLen = 0;      // liquid length px, set by drawTube
+
+  inline bool inStrip(int x, int y) const { return x >= 0 && x < PANEL_W && y >= baseY && y < baseY + H; }
+  inline uint16_t rd(int x, int y) const { return __builtin_bswap16(FB[(y - baseY) * PANEL_W + x]); }
+  inline void wr(int x, int y, uint16_t c) const { FB[(y - baseY) * PANEL_W + x] = __builtin_bswap16(c); }
+  void hspan(int y, int x0, int x1, uint16_t c) const {
+    if (y < baseY || y >= baseY + H) return;
+    if (x0 < 0) x0 = 0; if (x1 > PANEL_W) x1 = PANEL_W;
+    if (x1 <= x0) return;
+    uint16_t s = __builtin_bswap16(c);
+    uint16_t *p = FB + (y - baseY) * PANEL_W + x0;
+    int n = x1 - x0;
+    if (((uintptr_t)p & 2) && n) { *p++ = s; n--; }
+    uint32_t ss = (uint32_t)s | ((uint32_t)s << 16);
+    uint32_t *p32 = (uint32_t *)p;
+    for (; n >= 2; n -= 2) *p32++ = ss;
+    if (n) *(uint16_t *)p32 = s;
+  }
+  inline void px(int x, int y, uint16_t c) const { if (inStrip(x, y)) wr(x, y, c); }
+  inline void pxa(int x, int y, uint16_t c, float t) const {
+    if (!inStrip(x, y)) return;
+    wr(x, y, t >= 1 ? c : blend565(rd(x, y), c, t));
+  }
+  inline void pxaT(int x, int y, uint16_t c, int T) const {
+    if (!inStrip(x, y)) return;
+    wr(x, y, T >= 256 ? c : blend565T(rd(x, y), c, T));
+  }
+
+  float glassW(const Params &p, int y, int hiTop, float lam) const;
+  int highlightTop(const Params &p, float lightDeg) const;
+  void buildPalette(const Params &p, float lightDeg, Palette &pal) const;
+  ScaledGlyph *scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone);
+  bool layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float fill, Labels &lb);
+  void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
+  void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
+  void drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
+  void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
+                 const Edges *edges, const Mark &mark, float dxFull = 0, float dyFull = 0) const;
+  void ensureFizz(const Params &p, float len, float agitation);
+  inline float fizzSquashRow(const Params &p, int y) const;
+  void lensMagRows(const Params &p, float *rows) const;
+  inline float edgeCap(int ry, const Params &p, float tilt, float side, float cap) const;
+  inline float edgeX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
+  inline float edgeXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
+  void buildRowCache(const Params &p, uint32_t gen);
+  void applyLens(const Params &p);
+  const uint16_t *effectTable(EffectTable &T, const Params &p, const Palette &pal, uint32_t gen, float lightK, bool glow) const;
+  void drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, int ticksN);
+};
+static Tube tubes[2];
+
+inline void Mark::operator()(int x, int y, uint16_t c, int covT, int rel) const {
+  if (!t.inStrip(x, y)) return;
+  int ry = y - y0;
+  if (!onTop && x >= edges.lo[ry] && x < edges.hi[ry])
+    c = throughLiquid(t.rd(x, y), c, T, C);
+  if (rel > 0) c = embossHi(c);
+  else if (rel < 0) c = embossLo(c);
+  t.wr(x, y, covT >= 256 ? c : blend565T(t.rd(x, y), c, covT));
+}
+
 // Glass wall shading weight 0..1 per row (sim: glassW): ambient cylinder shade, specular tent on the
 // top wall, faint band on the lower wall, brighter outermost rows.
-static float glassW(const Params &p, int y, int hiTop, float lam) {
+float Tube::glassW(const Params &p, int y, int hiTop, float lam) const {
   float t = (float)y / (H - 1);
   float amb = 0.5f + 0.5f * cosf((t - 0.3f) * (float)M_PI * 1.6f);
   float w = p.glassBody * (amb + (lam - amb) * p.lightPhys);
@@ -130,13 +297,13 @@ static float glassW(const Params &p, int y, int hiTop, float lam) {
 }
 
 // Top row of the highlight band for highlight angle lightDeg (sim highlightTop).
-static int highlightTop(const Params &p, float lightDeg) {
+int Tube::highlightTop(const Params &p, float lightDeg) const {
   float yc = (H - 1) / 2.0f;
   return (int)jround(yc - yc * sinf(lightDeg * (float)M_PI / 180) - (p.highlightH - 1) / 2);
 }
 
 // Style top light blended (lightPhys) with a Lambert cylinder lit from 2*light (sim buildPalette).
-static void buildPalette(const Params &p, float lightDeg, Palette &pal) {
+void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   RGB body = hexToRgb(p.liquid), hi = hexToRgb(p.liquidHi), lo = hexToRgb(p.liquidLo);
   RGB tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
   float br = p.brightness * p.liquidBright;
@@ -177,49 +344,10 @@ static void buildPalette(const Params &p, float lightDeg, Palette &pal) {
   for (int y = 0; y < H; y++) pal.rowK[y] /= lmax;
 }
 
-// ---------------------------------------------------------------------------------------------
-// bitmap fonts (digitFont 0..4)
-// ---------------------------------------------------------------------------------------------
-struct Font { uint8_t w, h; uint8_t g[10][8]; };
-static const Font FONTS[] = {
-  {3, 5, {{7,5,5,5,7},{2,6,2,2,7},{7,1,7,4,7},{7,1,7,1,7},{5,5,7,1,1},{7,4,7,1,7},{7,4,7,5,7},{7,1,1,1,1},{7,5,7,5,7},{7,5,7,1,7}}},
-  {4, 6, {{6,9,9,9,9,6},{2,6,2,2,2,7},{6,9,1,2,4,15},{14,1,6,1,9,6},{2,6,10,15,2,2},{15,8,14,1,9,6},{6,8,14,9,9,6},{15,1,2,4,4,4},{6,9,6,9,9,6},{6,9,9,7,1,6}}},
-  {5, 7, {{14,17,19,21,25,17,14},{4,12,4,4,4,4,14},{14,17,1,2,4,8,31},{31,2,4,2,1,17,14},{2,6,10,18,31,2,2},{31,16,30,1,1,17,14},{6,8,16,30,17,17,14},{31,1,2,4,8,8,8},{14,17,17,14,17,17,14},{14,17,17,15,1,2,12}}},
-  {5, 7, {{31,17,17,17,17,17,31},{1,1,1,1,1,1,1},{31,1,1,31,16,16,31},{31,1,1,31,1,1,31},{17,17,17,31,1,1,1},{31,16,16,31,1,1,31},{31,16,16,31,17,17,31},{31,1,1,1,1,1,1},{31,17,17,31,17,17,31},{31,17,17,31,1,1,31}}},
-  {6, 8, {{30,51,51,51,51,51,51,30},{12,28,12,12,12,12,12,63},{30,51,3,6,12,24,48,63},{62,3,3,30,3,3,51,30},{6,14,30,54,63,6,6,6},{63,48,48,62,3,3,51,30},{30,48,48,62,51,51,51,30},{63,3,6,12,24,24,24,24},{30,51,51,30,51,51,51,30},{30,51,51,31,3,3,3,30}}},
-};
-static const int NUM_FONTS = sizeof(FONTS) / sizeof(FONTS[0]);
-static const int SPRITE_FONT = NUM_FONTS;
 
-// ---------------------------------------------------------------------------------------------
-// sprite glyphs: box-filtered from the flash sheet into the device box, cached per tube
-// ---------------------------------------------------------------------------------------------
-// Fixed pool per tube (3 B/px), allocated once at boot (render_init) in PSRAM: deterministic footprint, no
-// heap traffic on param changes. Internal RAM cannot take it: the two DMA strips + BT controller leave
-// <60 KB there. GLYPH_POOL_PX covers the 10 glyphs of a set up to ~4.5x scale (18 KB per tube); a set
-// that does not fit drops the glyphs past the budget (visible, not silent).
-#define GLYPH_POOL_PX 6144
-struct ScaledGlyph { int w, h; uint16_t *c; uint8_t *a; };
-struct ScaledSet {
-  int sheet = -1, bw = 0, bh = 0; float brightness = -1, tintAmt = -1, tone = 0; uint32_t tint = 0;
-  ScaledGlyph g[10] = {};
-  uint16_t *poolC = nullptr; uint8_t *poolA = nullptr;
-};
-static ScaledSet scaledSets[2];   // 0 = hours, 1 = minutes
-
-bool render_init() {
-  bool ok = true;
-  for (int i = 0; i < 2; i++) {
-    scaledSets[i].poolC = (uint16_t *)heap_caps_malloc(GLYPH_POOL_PX * 2, MALLOC_CAP_SPIRAM);
-    scaledSets[i].poolA = (uint8_t *)heap_caps_malloc(GLYPH_POOL_PX, MALLOC_CAP_SPIRAM);
-    ok = ok && scaledSets[i].poolC && scaledSets[i].poolA;
-  }
-  return ok;
-}
-
-static ScaledGlyph *scaledGlyphs(int slot, int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone) {
+ScaledGlyph *Tube::scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone) {
   if (sheetIdx < 0 || sheetIdx >= NUM_SPRITE_SHEETS) return nullptr;
-  ScaledSet &S = scaledSets[slot];
+  ScaledSet &S = set;
   if (!S.poolC || !S.poolA) return nullptr;
   if (S.sheet == sheetIdx && S.bw == bw && S.bh == bh && S.brightness == brightness && S.tint == tintHex && S.tintAmt == tintAmt && S.tone == tone) return S.g;
   const SpriteSheet &sp = *SPRITE_SHEETS[sheetIdx];
@@ -256,83 +384,8 @@ static ScaledGlyph *scaledGlyphs(int slot, int sheetIdx, int bw, int bh, float b
   return S.g;
 }
 
-// ---------------------------------------------------------------------------------------------
-// marks (ticks + labels) seen through the liquid
-// ---------------------------------------------------------------------------------------------
-// Integer version of the sim's throughLiquid (luma in 1/1000 units, blend fractions in 1/256).
-// T = liquidTransparency in 1/256, C = contrast in 1/1000 (both hoisted into Mark).
-static uint16_t throughLiquid(uint16_t bg, uint16_t mark, int T, int C) {
-  int Br, Bg, Bb, Mr, Mg, Mb;
-  expand565(bg, Br, Bg, Bb); expand565(mark, Mr, Mg, Mb);
-  int cr = Br + (((Mr - Br) * T + 128) >> 8), cg = Bg + (((Mg - Bg) * T + 128) >> 8), cb = Bb + (((Mb - Bb) * T + 128) >> 8);
-  int lb = 299 * Br + 587 * Bg + 114 * Bb, lc = 299 * cr + 587 * cg + 114 * cb, d = lc - lb;
-  if (abs(d) >= C) return rgb565(cr, cg, cb);
-  int dir = d != 0 ? (d > 0 ? 1 : -1) : (lb > 110000 ? -1 : 1);
-  int target = lb + dir * C; if (target < 0) target = 0; if (target > 255000) target = 255000;
-  if (dir < 0) {
-    int den = lc < 1000 ? 1000 : lc;   // scale toward black
-    cr = (cr * target + den / 2) / den; cg = (cg * target + den / 2) / den; cb = (cb * target + den / 2) / den;
-  } else {
-    int den = 255000 - lc; if (den < 1000) den = 1000;   // mix toward white
-    int K = (target - lc) * 256 / den; if (K > 256) K = 256; if (K < 0) K = 0;
-    cr += ((255 - cr) * K + 128) >> 8; cg += ((255 - cg) * K + 128) >> 8; cb += ((255 - cb) * K + 128) >> 8;
-  }
-  if (cr > 255) cr = 255; if (cg > 255) cg = 255; if (cb > 255) cb = 255;
-  return rgb565(cr, cg, cb);
-}
 
-// rel = +1 / -1: emboss highlight / shadow of body colour c, derived after the liquid pass.
-// Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi.
-struct Edges { const float *lo, *hi; };
-struct Mark {
-  int y0; Edges edges; bool onTop; int T, C;   // T: transparency 1/256, C: contrast 1/1000
-  Mark(int y0_, Edges e, const Params &p, bool onTop_, float contrast) : y0(y0_), edges(e), onTop(onTop_) {
-    T = (int)(p.liquidTransparency * 256 + 0.5f); if (T < 0) T = 0; if (T > 256) T = 256;
-    C = (int)(contrast * 1000 + 0.5f);
-  }
-  // covT: coverage in 1/256 (256 = opaque)
-  void operator()(int x, int y, uint16_t c, int covT = 256, int rel = 0) const {
-    if (!inStrip(x, y)) return;
-    int ry = y - y0;
-    if (!onTop && x >= edges.lo[ry] && x < edges.hi[ry])
-      c = throughLiquid(rd(x, y), c, T, C);
-    if (rel > 0) c = embossHi(c);
-    else if (rel < 0) c = embossLo(c);
-    wr(x, y, covT >= 256 ? c : blend565T(rd(x, y), c, covT));
-  }
-};
-
-struct Label { int x0; char text[3]; int len; int adv[2]; };
-struct Labels {
-  Label list[12]; int n; int bw, bh, ry0, ry1, yTop; ScaledGlyph *sprite; const Font *font; int gap;
-  uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow;
-  int16_t drySourceRows[TUBE_HEIGHT_MAX]; int dryRy0, dryRy1;   // rear digits behind air (digitDryLens)
-  // cache key: everything above is a function of (params gen, H) plus these two motion-derived ints
-  uint32_t gen = 0; int H = 0, bottomOff = 0, first = -1; bool valid = false, have = false;
-};
-
-static void markSourceRows(int height, float lens, int16_t *out, float curve = 1) {
-  float strength = fabsf(clampf(lens, -1, 1));
-  float signedCurve = lens < 0 ? -clampf(curve, -3, 3) : clampf(curve, -3, 3);
-  float exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
-  for (int yd = 0; yd < height; yd++) {
-    float d = (yd + 0.5f - height / 2.0f) / (height / 2.0f), u = fabsf(d);
-    float warped = signedCurve == 0 ? u : (1 - strength) * u + strength * powf(u, exponent);
-    float s = (d < 0 ? -1 : 1) * warped;
-    out[yd] = (int16_t)clampf(floorf(height / 2.0f + s * height / 2.0f), 0, height - 1);
-  }
-}
-
-static void digitRowColors(const Params &p, int bh, uint16_t *out) {
-  int n = bh < 1 ? 1 : bh; if (n > 96) n = 96;
-  RGB a = hexToRgb(p.digitColor), b = hexToRgb(p.digitColor2);
-  for (int i = 0; i < n; i++) {
-    float t = n == 1 ? 0 : (float)i / (n - 1); float u = t < 0.8f ? t / 0.8f : 1 - (t - 0.8f) / 0.2f * 0.35f;
-    out[i] = q(scale(mix(a, b, u), p.brightness * p.digitBright));
-  }
-}
-
-static bool layoutLabels(int slot, int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float fill, Labels &lb) {
+bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float fill, Labels &lb) {
   bool minutes = ticksN == 60;
   int every = (int)fmaxf(1, jround(minutes ? p.digitMinuteStep : p.digitHourStep));
   // Motion-dependent parts of the layout, folded into the cache key.
@@ -354,7 +407,7 @@ static bool layoutLabels(int slot, int y0, const Params &p, uint32_t gen, int ti
   int bw = (int)fmaxf(1, jround((useSprite ? 5 : font->w) * kx));
   int bh = (int)fmaxf(1, jround((useSprite ? 7 : font->h) * ky));
   if (bh > 96) bh = 96;
-  ScaledGlyph *sprite = useSprite ? scaledGlyphs(slot, idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, p.digitTint, p.digitTintAmount, p.digitTone) : nullptr;
+  ScaledGlyph *sprite = useSprite ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, p.digitTint, p.digitTintAmount, p.digitTone) : nullptr;
   int gap = sprite ? (int)fmaxf(1, jround(bw / 5.0f)) : (int)fmaxf(1, jround(kx));
   int shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   int yBase = y0 + H - 1 - (int)bottom, yTop = yBase - bh + 1;
@@ -392,16 +445,10 @@ static bool layoutLabels(int slot, int y0, const Params &p, uint32_t gen, int ti
   return true;
 }
 
-// Which column is behind liquid; edges null (digits on top) = all wet.
-struct Wet {
-  bool all; float lo, hi;
-  Wet(const Edges *e, int H) : all(!e), lo(e ? e->lo[H >> 1] : 0), hi(e ? e->hi[H >> 1] : 0) {}
-  bool operator()(int x) const { return all || (x >= lo && x < hi); }
-};
 // Column by column so each column can take the wet or dry warp.
 // Rows outer (glyph memory is row-major); each column still takes its own wet/dry warp. Every pixel is
 // written at most once so the order is invisible in the output.
-static void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) {
+void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   int sourceTop = lb.yTop - y0;
   bool wcol[128]; int gw = g.w > 128 ? 128 : g.w;
   bool anyWet = false, anyDry = false;
@@ -423,7 +470,7 @@ static void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &l
     }
   }
 }
-static void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) {
+void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   const uint8_t *g = f.g[d];
   int msb = 1 << (f.w - 1);
   for (int pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
@@ -442,7 +489,7 @@ static void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &l
     }
   }
 }
-static void drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) {
+void Tube::drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   for (int i = 0; i < lb.n; i++) {
     const Label &l = lb.list[i]; int x = l.x0;
     for (int k = 0; k < l.len; k++) {
@@ -455,8 +502,8 @@ static void drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mar
 }
 
 // wetRows/dryRows: source-row tables behind liquid vs behind air; edges null = all wet. Parallax is liquid-only.
-static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
-                      const Edges *edges, const Mark &mark, float dxFull = 0, float dyFull = 0) {
+void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
+                     const Edges *edges, const Mark &mark, float dxFull, float dyFull) const {
   bool minutes = ticksN == 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   int step = (int)fmaxf(1, jround(minutes ? p.tickStepM : p.tickStepH));
@@ -530,17 +577,12 @@ static void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRow
 // ---------------------------------------------------------------------------------------------
 // fizz
 // ---------------------------------------------------------------------------------------------
-#define MAX_FIZZ 64
-struct Fizz { float x, y, v; };   // px in the liquid frame
-static Fizz fizz[2][MAX_FIZZ];
-static int fizzN[2] = {0, 0};
-static float fizzLen[2] = {0, 0};   // liquid length px, set by drawTube
 static inline float frand() { return (esp_random() >> 8) / 16777216.0f; }
-static void ensureFizz(int i, const Params &p, float len, float agitation) {
-  fizzLen[i] = len;
+void Tube::ensureFizz(const Params &p, float len, float agitation) {
+  fizzLen = len;
   int want = (int)floorf(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want > MAX_FIZZ) want = MAX_FIZZ; if (want < 0) want = 0;
-  while (fizzN[i] < want) { fizz[i][fizzN[i]++] = { frand() * len, frand() * H, 0.5f + frand() }; }
-  fizzN[i] = want;
+  while (fizzN < want) { fizz[fizzN++] = { frand() * len, frand() * H, 0.5f + frand() }; }
+  fizzN = want;
 }
 // Rises against in-plane gravity at fizzSpeed px/s on both axes; face up = slow screen-up rise. See sim stepFizz.
 void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
@@ -551,9 +593,9 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   const float vy = -speed * ((1 - fabsf(a)) * up * p.fizzFlatRise + a);
   const float vx = -speed * clampf(along * p.fizzDriftGain, -1, 1);
   for (int i = 0; i < 2; i++) {
-    const float len = fizzLen[i];
-    for (int k = 0; k < fizzN[i]; k++) {
-      Fizz &f = fizz[i][k];
+    Tube &t = tubes[i]; const float len = t.fizzLen; const int H = t.H;
+    for (int k = 0; k < t.fizzN; k++) {
+      Fizz &f = t.fizz[k];
       f.y += vy * f.v * dt;
       f.x += vx * f.v * dt;
       if (f.y < 3 || f.y >= H) { f.y = vy <= 0 ? H - 3 : 3; f.x = frand() * len; f.v = 0.5f + frand(); }
@@ -563,11 +605,11 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
 }
 
 // Dest rows per source row under rendered lens + glass (topLens), times center-weighted fizzSquash. See sim lensMagRows.
-static inline float fizzSquashRow(const Params &p, int y) {
+inline float Tube::fizzSquashRow(const Params &p, int y) const {
   float d = (y + 0.5f - H / 2.0f) / (H / 2.0f);   // full fizzSquash at mid-height, ~1 at the edges
   return 1 + (p.fizzSquash - 1) * (1 - d * d);
 }
-static void lensMagRows(const Params &p, float *rows) {
+void Tube::lensMagRows(const Params &p, float *rows) const {
   for (int y = 0; y < H; y++) rows[y] = fizzSquashRow(p, y);
   float lens = clampf(p.lens + p.topLens, -1, 1), curve = clampf(p.lensCurve, -3, 3);
   float signedCurve = lens < 0 ? -curve : curve, strength = fabsf(lens);
@@ -601,20 +643,8 @@ static float lensRow(float d, const Params &p) {
 // centre lead in the edge's own +x sense. tilt = along follower (edgeLight), side = across follower.
 // Capillary wall climb (|d|^meniscusPow) plus a circular pressure/inertia bulge (tilt, cap); see sim edgeCap.
 // Everything that depends only on (params, H): rebuilt when the generation counter moves.
-struct RowCache {
-  uint32_t gen = 0; int H = 0; bool valid = false;
-  int16_t tickWet[TUBE_HEIGHT_MAX], tickDry[TUBE_HEIGHT_MAX];   // tick source-row warps
-  int16_t lensSrc[TUBE_HEIGHT_MAX]; bool lensOn; bool lensPos;   // applyLens row map
-  float mag[TUBE_HEIGHT_MAX];                                    // lensMagRows (fizz squash)
-  int16_t capX0[TUBE_HEIGHT_MAX];                                // rounded-corner mask
-  // edge profile terms (sim edgeCap): d = lensRow(row), climbPow = |d|^meniscusPow, bulge = 1 - sqrt(1 - d^2)
-  float rowD[TUBE_HEIGHT_MAX], rowClimbPow[TUBE_HEIGHT_MAX], rowBulge[TUBE_HEIGHT_MAX];
-  uint16_t hiC;                                                  // front-bright colour
-};
-static RowCache rc;
-
 // Per-row terms come from RowCache (param-only); the scalars are per tube per frame.
-static inline float edgeCap(int ry, const Params &p, float tilt, float side, float cap) {
+inline float Tube::edgeCap(int ry, const Params &p, float tilt, float side, float cap) const {
   float d = rc.rowD[ry];
   float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f) * (p.meniscusDepth < 0 ? -1 : 1);
   float climb = p.meniscusDepth * (1 - asymEff * d) * rc.rowClimbPow[ry];
@@ -627,20 +657,20 @@ static float capScale(float len, const Params &p, float tilt, float cap) {
   return fminf(1, fmaxf(0, len) / 2 / fmaxf(1, feat));
 }
 // tanA = tan(angle) hoisted per tube (was recomputed per row).
-static inline float edgeX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) {
+inline float Tube::edgeX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
   const float yc = (H - 1) / 2.0f;
   float skew = tanA * (ry - yc);
   return xe + skew + k * edgeCap(ry, p, tilt, side, cap);
 }
 // Home-end edge of a free slug centred at xs: mirror image of edgeX, flattening onto the end cap.
-static inline float edgeXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) {
+inline float Tube::edgeXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
   const float yc = (H - 1) / 2.0f;
   float skew = tanA * (ry - yc);
   return xs + fminf(1, xs / 8) * (skew - k * edgeCap(ry, p, -tilt, side, -cap));
 }
 
 
-static void buildRowCache(const Params &p, uint32_t gen) {
+void Tube::buildRowCache(const Params &p, uint32_t gen) {
   if (rc.valid && rc.gen == gen && rc.H == H) return;
   rc.valid = true; rc.gen = gen; rc.H = H;
   markSourceRows(H, p.tickLens, rc.tickWet);
@@ -671,7 +701,7 @@ static void buildRowCache(const Params &p, uint32_t gen) {
   rc.hiC = q(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright));
 }
 
-static void applyLens(const Params &p) {
+void Tube::applyLens(const Params &p) {
   if (!rc.lensOn) return;
   auto copyRow = [&](int yd) {
     int sy = rc.lensSrc[yd];
@@ -690,13 +720,10 @@ static void applyLens(const Params &p) {
 // flipped before panel-coordinate marks and bubbles are composited.
 // Edge-effect blend tables: (row, k) -> 565, a function of the palette and lightK only. Rebuilt when
 // lightK moves (exact compare: at rest it is constant, in motion it changes every frame anyway).
-#define EFFECT_MAX 16
-struct EffectTable { uint32_t gen = 0; int H = 0; float lightK = -1; bool valid = false; uint16_t c[TUBE_HEIGHT_MAX * EFFECT_MAX]; };
-static EffectTable glowT[2][2];   // [slot][0 = time edge, 1 = home edge]; 4 x 2.5 KB static (no lazy allocation: fixed footprint)
 // Front brightening has no table (frontBright is wider than EFFECT_MAX in practice); it takes the direct path below.
 // glow: blend(tubeBack, row, min(1, t*t*glowStrength*lightK)) as 565; front: alphaT(min(1, t*t*0.85*lightK*rowK)).
 // Index [ry * EFFECT_MAX + k]. Returns nullptr when the effect is wider than the table (caller computes directly).
-static const uint16_t *effectTable(EffectTable &T, const Params &p, const Palette &pal, uint32_t gen, float lightK, bool glow) {
+const uint16_t *Tube::effectTable(EffectTable &T, const Params &p, const Palette &pal, uint32_t gen, float lightK, bool glow) const {
   int n = glow ? (int)ceilf(p.edgeGlow) : (int)p.frontBright;
   if (n > EFFECT_MAX) return nullptr;
   if (T.valid && T.gen == gen && T.H == H && T.lightK == lightK) return T.c;
@@ -709,7 +736,7 @@ static const uint16_t *effectTable(EffectTable &T, const Params &p, const Palett
   return T.c;
 }
 
-static void drawTube(int idx, int y0, const TubeState &st, const Params &p, const Palette &pal, uint32_t gen, int ticksN) {
+void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, int ticksN) {
   TubeState s = st;
   if (p.remaining) { s.fillPos = -st.fillPos; s.edgeLight = -st.edgeLight; s.cap = -st.cap; }
   float angle = s.angle;
@@ -722,10 +749,9 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   float capK = capScale(len, p, s.edgeLight, s.cap);
   float tanA = tanf(angle * (float)M_PI / 180);
   const bool hasLiquid = xe - xs >= 0.5f;   // an empty column draws nothing, not even an AA sliver
-  ensureFizz(idx, p, clampf(xe - xs - 6, 0, L), s.agitation);
+  ensureFizz(p, clampf(xe - xs - 6, 0, L), s.agitation);
 
   // 1 + 3: tube back and liquid column between the two edges (home edge on the end cap unless free)
-  static float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];
   const int16_t *capX0 = rc.capX0;
   for (int ry = 0; ry < H; ry++) {
     float ex = edgeX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK);
@@ -778,8 +804,8 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   // 3b: edge glow
   int softW = p.edgeSoft > 0 ? (int)jround(p.edgeSoft) : 0;
   if (hasLiquid && p.edgeGlow > 0 && p.glowStrength > 0) {
-    const uint16_t *gT = effectTable(glowT[idx][0], p, pal, gen, lightK, true);
-    const uint16_t *gTL = p.freeLiquid ? effectTable(glowT[idx][1], p, pal, gen, lightKL, true) : nullptr;
+    const uint16_t *gT = effectTable(glowT[0], p, pal, gen, lightK, true);
+    const uint16_t *gTL = p.freeLiquid ? effectTable(glowT[1], p, pal, gen, lightKL, true) : nullptr;
     const bool tab = gT && (!p.freeLiquid || gTL);
     for (int ry = 0; ry < H; ry++) {
       int xg = (int)ceilf(edges[ry] + softW), xgL = (int)floorf(edgesL[ry]) - softW;
@@ -831,7 +857,6 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   }
 
   // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi).
-  static float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];
   Edges bounds = p.remaining ? Edges{boundLo, boundHi} : Edges{edgesL, edges};
   if (p.remaining) {
     for (int ry = 0; ry < H; ry++) {
@@ -842,12 +867,10 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   }
 
   // Scale marks, all before bubbles.
-  static Labels labelsBySlot[2];
-  Labels &labels = labelsBySlot[idx];
-  bool haveLabels = layoutLabels(idx, y0, p, gen, ticksN, st.acrossTilt, st.fillTarget, labels);
+  bool haveLabels = layoutLabels(y0, p, gen, ticksN, st.acrossTilt, st.fillTarget, labels);
   auto drawTickLayer = [&](bool onTop) {
     if (p.ticksOnTop == onTop) {
-      Mark tickMark(y0, bounds, p, onTop, p.markContrast * p.tickBright);
+      Mark tickMark(*this, y0, bounds, p, onTop, p.markContrast * p.tickBright);
       float dx = onTop ? 0 : -st.edgeLight * p.tickParallax;
       float dy = onTop ? 0 : st.acrossTilt * p.tickParallax;
       drawTicks(y0, p, ticksN, rc.tickWet, onTop ? rc.tickWet : rc.tickDry, onTop ? nullptr : &bounds, tickMark, dx, dy);
@@ -855,7 +878,7 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   };
   auto drawDigitLayer = [&](bool onTop) {
     if (haveLabels && p.digitsOnTop == onTop) {
-      Mark digitMark(y0, bounds, p, onTop, p.markContrast * p.digitBright);
+      Mark digitMark(*this, y0, bounds, p, onTop, p.markContrast * p.digitBright);
       drawLabels(y0, labels, Wet(onTop ? nullptr : &bounds, H), digitMark);
     }
   };
@@ -871,8 +894,8 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
   if (p.fizz) {
     const float *mag = rc.mag;
     const float r = p.fizzSize / 2;
-    for (int k = 0; k < fizzN[idx]; k++) {
-      const Fizz &f = fizz[idx][k];
+    for (int k = 0; k < fizzN; k++) {
+      const Fizz &f = fizz[k];
       int fy = (int)clampf(jround(f.y), 0, H - 1);
       if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
       const float m = mag[fy], ry = r / m;
@@ -913,16 +936,28 @@ static void drawTube(int idx, int y0, const TubeState &st, const Params &p, cons
 }
 
 
-void renderTube(int idx, const TubeState &s, const Params &p, uint32_t gen, uint16_t *strip) {
-  static Palette pals[2];
-  Palette &pal = pals[idx];
+bool render_init() {
   buildLuts();
-  TubeLayout lay = tubeLayout(p);
-  FB = strip; H = lay.H; baseY = idx == 0 ? lay.yH : lay.yM;
-  buildRowCache(p, gen);
-  if (!(pal.valid && pal.gen == gen && pal.H == H && pal.light == s.light)) {
-    buildPalette(p, s.light, pal);
-    pal.valid = true; pal.gen = gen; pal.H = H; pal.light = s.light;
+  bool ok = true;
+  for (int i = 0; i < 2; i++) {
+    tubes[i].set.poolC = (uint16_t *)heap_caps_malloc(GLYPH_POOL_PX * 2, MALLOC_CAP_SPIRAM);
+    tubes[i].set.poolA = (uint8_t *)heap_caps_malloc(GLYPH_POOL_PX, MALLOC_CAP_SPIRAM);
+    ok = ok && tubes[i].set.poolC && tubes[i].set.poolA;
   }
-  drawTube(idx, baseY, s, p, pal, gen, idx == 0 ? 12 : 60);
+  return ok;
+}
+
+// Safe to call for idx 0 and 1 concurrently from different tasks: each touches only tubes[idx] and its
+// own strip; params / state are read-only for the duration of the call.
+void renderTube(int idx, const TubeState &s, const Params &p, uint32_t gen, uint16_t *strip) {
+  Tube &t = tubes[idx & 1];
+  TubeLayout lay = tubeLayout(p);
+  t.FB = strip; t.H = lay.H; t.baseY = idx == 0 ? lay.yH : lay.yM;
+  t.buildRowCache(p, gen);
+  Palette &pal = t.pal;
+  if (!(pal.valid && pal.gen == gen && pal.H == t.H && pal.light == s.light)) {
+    t.buildPalette(p, s.light, pal);
+    pal.valid = true; pal.gen = gen; pal.H = t.H; pal.light = s.light;
+  }
+  t.drawTube(t.baseY, s, p, gen, idx == 0 ? 12 : 60);
 }

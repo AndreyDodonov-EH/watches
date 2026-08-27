@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-27 (perf hand-off 1: -O2, param-only caches, integer mark path)_
+_Last update: 2026-08-27 (perf hand-off 2: hours tube on core 0, minutes on core 1)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -96,6 +96,28 @@ else `display_init` fails at boot before `ble_init`.
   then fails to start (build with 100 KB static hung in `ble_init`). Rule: no lazy allocation (CLAUDE.md).
 - Parity unchanged: preset 1 / mercury / glow 0 px > 12/255; cryo (132 px) and free (1 px) deviate identically
   on the pre-change firmware — pre-existing, see KAIZEN.
+
+## Perf hand-off 2 (2026-08-27, docs/perf-handoff-2-dualcore.md) — 38.6 → 45.5 fps, bit-exact
+| build | fps | render ms (wall) | cores h / m ms |
+|---|---|---|---|
+| hand-off 1 final (sequential) | 38.6 | 22.0 | — |
+| one tube per core (worker stack 8 KB) | 45.5 (spread 43.5–46.0) | 13.9 | 14.7 / 10.6 |
+| final: worker stack 4 KB (~1.5 KB used) | 44.1 (spread 42.1–44.6) | 14.6 | 14.7 / 10.6 |
+- `render.cpp`: all per-frame mutable state (strip pointer/geometry, row cache, edge and bound arrays, palette,
+  labels, glow tables, glyph pool, fizz) lives in a static per-tube `Tube` context (`tubes[2]`, ~9 KB each,
+  fixed footprint); `Mark` carries a reference to its tube; LUTs are built once in `render_init()`. Only the
+  read-only LUTs and `tubes[2]` remain file-static, so `renderTube(0)` and `renderTube(1)` may run concurrently.
+- `main.cpp`: pinned core-0 task `render0` (prio 1, 4 KB stack, ~1.5 KB used) draws hours into `strip[0]` while
+  `loop()` (core 1) draws minutes into `strip[1]`; task-notification hand-shake both ways. Outside `renderBoth()`
+  the worker is blocked, so serial/BLE commands, param writes, physics and `x` need no snapshot. Both strips are
+  pushed after the join; `display_wait_pending(display_bands(H))` frees the hours strip as soon as its own DMA
+  bands finish while minutes' are still in flight (push-wait stays 0.01 ms).
+- `f` prints `cores h / m` (per-core render ms); `s` prints `worker-stack-free` (bytes).
+- Stage costs (ms of the wall time): digits 7.1, edgeGlow 2.2, ticksH 2.0, fizz 1.2, ticksM 0.5.
+- Soak: `d60` for 60 s — no watchdog / reboot, heap and worker stack unchanged; worst frame 36 fps with both
+  tubes filling (cores 19.1 / 17.8). BLE central connected: 41.0 fps vs 41.2 unconnected, NimBLE left on core 0.
+- Parity: 191–209 px (bench) / 140 px (after soak) ≤ 1 LSB, 0 > 12/255. The 45.5 vs 44.1 gap is within the
+  medians' spread (see KAIZEN from hand-off 1: always compare medians of ≥5).
 
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.

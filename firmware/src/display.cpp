@@ -97,9 +97,11 @@ void display_push_strip_async(const uint16_t *buf, int y0, int rows) {
     pending++;
   }
 }
-void display_wait_all(void) {
-  while (pending > 0) { xSemaphoreTake(done_sem, portMAX_DELAY); pending--; }
+int display_bands(int rows) { return (rows + BAND_ROWS - 1) / BAND_ROWS; }
+void display_wait_pending(int n) {
+  while (pending > n) { xSemaphoreTake(done_sem, portMAX_DELAY); pending--; }
 }
+void display_wait_all(void) { display_wait_pending(0); }
 
 // Stage rows of a PSRAM framebuffer through the strips, alternating, up to STRIP_ROWS per chunk.
 void display_push_rows(const uint16_t *fb, int y0, int y1) {
