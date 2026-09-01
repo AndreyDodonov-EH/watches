@@ -612,13 +612,30 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     const xiL = Math.floor(exL), fracL = exL - xiL;
     const xa = Math.max(x0, xiL + 1);
     hspan(y0 + ry, xa, xi, pal.rows[ry]);
-    if (p.edgeSoft > 0) {  // anti-aliased edge pixel(s), both edges
-      const w = Math.max(1, Math.round(p.edgeSoft));
-      for (let k = 0; k < w; k++) {
-        const t = Math.max(0, Math.min(1, (frac - k) / 1 + (w > 1 ? 0.5 : 0)));
-        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], t));
-        const tL = Math.max(0, Math.min(1, (1 - fracL - k) + (w > 1 ? 0.5 : 0)));
-        if (xiL - k >= x0 && xiL - k < xi) px(xiL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], tL));
+    if (p.edgeSoft > 0) {  // soft edge: a coverage ramp `w` px wide centred on the geometric edge.
+      // The glow (if any) folds into the same per-pixel alpha min(1, cov + g), anchored to the
+      // sub-pixel edge: no integer snapping, so no seam before the glow and no 1-px stepping
+      // while the edge moves. alpha is monotone in x by construction (cov and g both decline).
+      const w = Math.max(1, Math.round(p.edgeSoft)), hw = w / 2;
+      const glow = p.edgeGlow > 0 && p.glowStrength > 0;
+      const a0 = Math.floor(ex - hw - 0.5) + 1;
+      const aEnd = glow ? Math.ceil(ex + hw - 0.5 + p.edgeGlow) : Math.ceil(ex + hw - 0.5) - 1;
+      for (let x = a0; x <= aEnd; x++) {
+        const t = glow ? Math.max(0, 1 - (x + 0.5 - ex) / p.edgeGlow) : 0;
+        const a = Math.min(1, Math.max(0, (ex + hw - x - 0.5) / w) + t * t * p.glowStrength * lightK);
+        if (a <= 0) break;
+        if (a >= 1 && x < xi) continue;   // the span already drew it full
+        if (x >= x0) px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
+      }
+      const b0 = Math.floor(exL - hw - 0.5) + 1;
+      const bEnd = glow ? Math.floor(exL - hw - 0.5 - p.edgeGlow) : b0;  // home edge: glow to the left
+      for (let x = Math.ceil(exL + hw - 0.5) - 1; x >= bEnd; x--) {
+        const t = glow ? Math.max(0, 1 - (exL - (x + 0.5)) / p.edgeGlow) : 0;
+        const a = Math.min(1, Math.max(0, (x + 0.5 - exL + hw) / w) + t * t * p.glowStrength * lightKL);
+        if (a <= 0) break;
+        if (x < x0 || x >= xi) continue;
+        if (a >= 1 && x >= xa) continue;
+        px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
       }
     } else {
       if (frac >= 0.5) px(xi, y0 + ry, pal.rows[ry]);
@@ -651,11 +668,14 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     }
   }
 
-  // Step 3b: edge glow — a few px past the edge fade from liquid to the tube back.
-  const softW = p.edgeSoft > 0 ? Math.round(p.edgeSoft) : 0;
-  if (hasLiquid && p.edgeGlow > 0 && p.glowStrength > 0) {
+  // Step 3b: edge glow — a few px past the edge fade from liquid to the tube back. Hard-edge path
+  // only (edgeSoft = 0); with a soft edge the glow is folded into the step-3 per-pixel alpha.
+  const softW = p.edgeSoft > 0 ? Math.max(1, Math.round(p.edgeSoft)) : 0;
+  if (hasLiquid && p.edgeSoft <= 0 && p.edgeGlow > 0 && p.glowStrength > 0) {
     for (let ry = 0; ry < H; ry++) {
-      const xg = Math.ceil(edges[ry] + softW), xgL = Math.floor(edgesL[ry]) - softW;
+      // glow starts at the first px past the RENDERED hard edge (round(ex)), never leaving a
+      // 1-px tube-back gap that flickers as frac crosses 0.5
+      const xg = Math.round(edges[ry]), xgL = Math.round(edgesL[ry]) - 1;
       for (let k = 0; k < p.edgeGlow; k++) {
         const t = (1 - k / p.edgeGlow), xr = xg + k, xl = xgL - k;
         if (xr < L) px(xr, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], Math.min(1, t * t * p.glowStrength * lightK)));
@@ -671,7 +691,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     for (let ry = 0; ry < H; ry++) {
       const d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d;
       const nR = Math.round(p.wetFilm * s.filmFree), nL = p.freeLiquid ? Math.round(p.wetFilm * s.filmHome) : 0;
-      const xg = Math.ceil(edges[ry] + softW), xgL = Math.floor(edgesL[ry]) - softW;
+      const xg = softW > 0 ? Math.ceil(edges[ry] + softW / 2 - 0.5) : Math.ceil(edges[ry]);
+      const xgL = softW > 0 ? Math.floor(edgesL[ry] - softW / 2 - 0.5) : Math.floor(edgesL[ry]);
       for (let k = 0; k < nR; k++) if (xg + k < L) pxa(xg + k, y0 + ry, pal.rows[ry], 0.35 * s.filmFree * rowW * (1 - k / nR));
       for (let k = 0; k < nL; k++) if (xgL - k >= capX0[ry]) pxa(xgL - k, y0 + ry, pal.rows[ry], 0.35 * s.filmHome * rowW * (1 - k / nL));
     }

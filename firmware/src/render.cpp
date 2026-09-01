@@ -791,13 +791,30 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     int xiL = (int)floorf(exL); float fracL = exL - xiL;
     int xa = x0 > xiL + 1 ? x0 : xiL + 1;
     hspan(y0 + ry, xa, xi, pal.rows[ry]);
-    if (p.edgeSoft > 0) {
-      int w = (int)fmaxf(1, jround(p.edgeSoft));
-      for (int k = 0; k < w; k++) {
-        float t = clampf((frac - k) + (w > 1 ? 0.5f : 0), 0, 1);
-        if (xi + k >= x0) px(xi + k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], t));
-        float tL = clampf((1 - fracL - k) + (w > 1 ? 0.5f : 0), 0, 1);
-        if (xiL - k >= x0 && xiL - k < xi) px(xiL - k, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], tL));
+    if (p.edgeSoft > 0) {  // soft edge: a coverage ramp `w` px wide centred on the geometric edge.
+      // The glow (if any) folds into the same per-pixel alpha min(1, cov + g), anchored to the
+      // sub-pixel edge: no integer snapping, so no seam before the glow and no 1-px stepping
+      // while the edge moves. alpha is monotone in x by construction (cov and g both decline).
+      int w = (int)fmaxf(1, jround(p.edgeSoft)); float hw = w * 0.5f;
+      bool glow = p.edgeGlow > 0 && p.glowStrength > 0;
+      int a0 = (int)floorf(ex - hw - 0.5f) + 1;
+      int aEnd = glow ? (int)ceilf(ex + hw - 0.5f + p.edgeGlow) : (int)ceilf(ex + hw - 0.5f) - 1;
+      for (int x = a0; x <= aEnd; x++) {
+        float t = glow ? fmaxf(0, 1 - (x + 0.5f - ex) / p.edgeGlow) : 0;
+        float a = fminf(1, clampf((ex + hw - x - 0.5f) / w, 0, 1) + t * t * p.glowStrength * lightK);
+        if (a <= 0) break;
+        if (a >= 1 && x < xi) continue;   // the span already drew it full
+        if (x >= x0) px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
+      }
+      int b0 = (int)floorf(exL - hw - 0.5f) + 1;
+      int bEnd = glow ? (int)floorf(exL - hw - 0.5f - p.edgeGlow) : b0;  // home edge: glow to the left
+      for (int x = (int)ceilf(exL + hw - 0.5f) - 1; x >= bEnd; x--) {
+        float t = glow ? fmaxf(0, 1 - (exL - (x + 0.5f)) / p.edgeGlow) : 0;
+        float a = fminf(1, clampf((x + 0.5f - exL + hw) / w, 0, 1) + t * t * p.glowStrength * lightKL);
+        if (a <= 0) break;
+        if (x < x0 || x >= xi) continue;
+        if (a >= 1 && x >= xa) continue;
+        px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
       }
     } else {
       if (frac >= 0.5f) px(xi, y0 + ry, pal.rows[ry]);
@@ -828,14 +845,17 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     }
   }
 
-  // 3b: edge glow
-  int softW = p.edgeSoft > 0 ? (int)jround(p.edgeSoft) : 0;
-  if (hasLiquid && p.edgeGlow > 0 && p.glowStrength > 0) {
+  // 3b: edge glow — a few px past the edge. Hard-edge path only (edgeSoft = 0); with a soft
+  // edge the glow is folded into the step-3 per-pixel alpha.
+  int softW = p.edgeSoft > 0 ? (int)fmaxf(1, jround(p.edgeSoft)) : 0;
+  if (hasLiquid && p.edgeSoft <= 0 && p.edgeGlow > 0 && p.glowStrength > 0) {
     const uint16_t *gT = effectTable(glowT[0], p, pal, gen, lightK, true);
     const uint16_t *gTL = p.freeLiquid ? effectTable(glowT[1], p, pal, gen, lightKL, true) : nullptr;
     const bool tab = gT && (!p.freeLiquid || gTL);
     for (int ry = 0; ry < H; ry++) {
-      int xg = (int)ceilf(edges[ry] + softW), xgL = (int)floorf(edgesL[ry]) - softW;
+      // glow starts at the first px past the RENDERED hard edge (round(ex)), never leaving a
+      // 1-px tube-back gap that flickers as frac crosses 0.5
+      int xg = (int)jround(edges[ry]), xgL = (int)jround(edgesL[ry]) - 1;
       for (int k = 0; k < p.edgeGlow; k++) {
         int xr = xg + k, xl = xgL - k;
         if (xr < L) {
@@ -856,7 +876,8 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     for (int ry = 0; ry < H; ry++) {
       float d = (ry - yc) / yc, rowW = 0.4f + 0.6f * d * d;
       int nR = (int)jround(p.wetFilm * s.filmFree), nL = p.freeLiquid ? (int)jround(p.wetFilm * s.filmHome) : 0;
-      int xg = (int)ceilf(edges[ry] + softW), xgL = (int)floorf(edgesL[ry]) - softW;
+      int xg = softW > 0 ? (int)ceilf(edges[ry] + softW * 0.5f - 0.5f) : (int)ceilf(edges[ry]);
+      int xgL = softW > 0 ? (int)floorf(edgesL[ry] - softW * 0.5f - 0.5f) : (int)floorf(edgesL[ry]);
       for (int k = 0; k < nR; k++) if (xg + k < L) pxa(xg + k, y0 + ry, pal.rows[ry], 0.35f * s.filmFree * rowW * (1 - (float)k / nR));
       for (int k = 0; k < nL; k++) if (xgL - k >= capX0[ry]) pxa(xgL - k, y0 + ry, pal.rows[ry], 0.35f * s.filmHome * rowW * (1 - (float)k / nL));
     }

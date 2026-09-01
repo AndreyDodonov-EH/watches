@@ -754,7 +754,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   meniscusInertia: { help: 'How much the forcing on the edge (flick kick, free-slug acceleration) bulges the surface centre ahead of the contact lines: a flick makes the cap bulge, then ring at the surface spring. Hard-capped at 12 px.', group: 'Meniscus dynamics', label: 'bulge per edge forcing', min: 0, max: 10, step: 0.1 },
   contactLag: { help: 'Contact-angle hysteresis: an advancing edge drags its contact lines behind the centre, a receding one leaves them clinging. px per 10 px/s of edge speed.', group: 'Meniscus dynamics', label: 'contact-line lag', min: 0, max: 3, step: 0.05 },
   wetFilm: { help: 'Trailing wet film a receding edge leaves on the glass, px at full speed (25 px/s); brightest at the walls, drains in ~0.5 s.', group: 'Meniscus dynamics', label: 'wet film px', min: 0, max: 30, step: 1 },
-  edgeSoft: { help: 'Anti-aliased edge width, px. 0 = hard pixel edge.', group: 'Shape', min: 0, max: 4, step: 0.1 },
+  edgeSoft: { help: 'Soft edge: anti-aliased ramp width in px, centred on the edge (0 = hard pixel edge, 1 = classic 1-px AA).', group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { help: 'Band just behind the fill edge blended toward liquidHi (bright convex cap), px.', group: 'Shape', min: 0, max: 40, step: 1 },
   edgeGlow: { help: 'Dim glow fading out past the fill edge, px. 0 = off.', group: 'Shape', min: 0, max: 40, step: 1 },
   glowStrength: { help: 'Brightness of the glow at the edge.', group: 'Shape', min: 0, max: 1, step: 0.01 },
