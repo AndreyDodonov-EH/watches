@@ -61,8 +61,9 @@ Opacity (`liquidTransparency`):
 - clear ≥ 0.7 (colourless liquids only — a tinted liquid mixed 70 % toward the dark back turns khaki, so tinted ones are translucent): shadeDepth 0.3–0.55; liquidHi is a white surface reflection (saturation < 0.2); glassOverLiquid ≥ 0.5; rear marks need markContrast ≥ 16.
 
 Light:
-- emissive: glowStrength 0.4–0.8, edgeGlow 18–34, lightPhys 0 (it is its own light), edgeSoft ≤ 1 (KAIZEN: soft edge + glow leaves a dark seam), glassOverLiquid ≤ 0.4, liquidBright 1.15–1.35, tube back luma < 16.
-- not emissive: glowStrength ≤ 0.25 (a caustic at most); a visible glow (> 0.1) needs edgeSoft ≥ 1.5 (seam), a faint one may keep the hard edge; lightPhys ≥ 0.2.
+- emissive: glowStrength 0.4–0.8, edgeGlow 18–34, lightPhys 0 (it is its own light), glassOverLiquid ≤ 0.4, liquidBright 1.15–1.35, tube back luma < 16.
+- not emissive: glowStrength ≤ 0.25 (a caustic at most); lightPhys ≥ 0.2.
+- edgeSoft is a coverage ramp centred on the edge (0 = hard edge, 1 = classic 1-px AA, ≥ 2 a visibly soft meniscus); with a soft edge the glow folds into the same per-pixel alpha (min(1, cov + glow)) — seamless at any width, and the edge moves sub-pixel smooth.
 
 Wetting:
 - wetting: meniscusDepth > 0 (concave), wetFilm per class.

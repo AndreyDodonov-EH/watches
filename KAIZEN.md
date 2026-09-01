@@ -4,10 +4,12 @@
 - Rear-mark compositors index row bounds before checking that the row is in range; clip `ry` first in sim and firmware.
 - Even if hour has passed, edge might be before it, example is 06:01
 - Empty space at the top and bottom of the real screen? Move tubes further away from one another?
-- Fill edge with `edgeSoft` > 0 leaves a 1 px tube-back gap before the glow: the AA loop writes
-  `t = 0` at its last pixel and `edgeGlow` starts at `ceil(ex + round(edgeSoft))`, one px further.
-  Invisible at low `glowStrength`, a black outline on emissive looks (xenon, molten — both set
-  `edgeSoft` 0/1 to dodge it). Fix in `render.ts` step 3b + `render.cpp` together, they must stay 1:1.
+- Now that edgeSoft is a real ramp (glow folded into its alpha), emissive presets (xenon, molten —
+  both edgeSoft 0) could revisit edgeSoft 1–2 for a genuinely soft self-lit edge.
+- `markContrast 0` does not hide marks (it only zeroes rear-mark throughLiquid blending); ticks/digits
+  draw their own colours regardless. To suppress marks in a test harness, pass `ticksN = 0`.
+- Firmware glow effectTable now serves only the edgeSoft 0 path; soft-edge glow is per-pixel float
+  (same cost as the existing direct path — presets with edgeGlow > EFFECT_MAX already bypassed the table).
 - Sprite fonts have no emboss shadow (`digitShadow` is bitmap-only), so light sprite numerals over a
   light liquid rely on `markContrast` alone.
 

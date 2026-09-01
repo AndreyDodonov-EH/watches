@@ -61,13 +61,11 @@ function check(id: string, p: Params, m: Material): string[] {
     want(p.glowStrength >= 0.4 && p.glowStrength <= 0.8, `emissive: glowStrength ${p.glowStrength} not in [0.4, 0.8]`);
     want(p.edgeGlow >= 18 && p.edgeGlow <= 34, `emissive: edgeGlow ${p.edgeGlow} not in [18, 34]`);
     want(p.lightPhys === 0, 'emissive: lightPhys must be 0 (it is its own light)');
-    want(p.edgeSoft <= 1, `emissive: edgeSoft ${p.edgeSoft} > 1 leaves a dark seam before the glow (KAIZEN)`);
     want(p.glassOverLiquid <= 0.4, `emissive: glassOverLiquid ${p.glassOverLiquid} > 0.4`);
     want(p.liquidBright >= 1.15 && p.liquidBright <= 1.5, `emissive: liquidBright ${p.liquidBright} not in [1.15, 1.5]`);
     want(luma(p.tubeBack) < 16, `emissive: tube back luma ${luma(p.tubeBack).toFixed(0)} ≥ 16`);
   } else {
     want(p.glowStrength <= 0.25, `not emissive: glowStrength ${p.glowStrength} > 0.25`);
-    want(p.edgeGlow === 0 || p.glowStrength <= 0.1 || p.edgeSoft >= 1.5, `not emissive with a visible glow (> 0.1): edgeSoft ${p.edgeSoft} < 1.5 leaves a dark seam`);
     want(p.lightPhys >= 0.2, `not emissive: lightPhys ${p.lightPhys} < 0.2`);
   }
 
