@@ -77,6 +77,21 @@ function check(id: string, p: Params, m: Material): string[] {
     want(p.contactLag <= 0.3, `non-wetting: contactLag ${p.contactLag} > 0.3`);
   }
 
+  // traces: a residue smeared on the wall needs a wetting liquid; a non-wetting bead or a
+  // plasma leaves none. Wetting presets that stay clean simply leave it off.
+  if (!m.wetting || m.viscosity === 'plasma')
+    want(!p.traces, 'traces need a wetting liquid: non-wetting / plasma must have them off');
+  else if (p.traces) {
+    want(p.traceAmount >= 0.2 && p.traceAmount <= 2, `traceAmount ${p.traceAmount} not in [0.2, 2]`);
+    want(p.traceDry >= 0.1 && p.traceDry <= 2, `traceDry ${p.traceDry} not in [0.1, 2]`);
+    want(p.traceFollow >= 0 && p.traceFollow <= 1, `traceFollow ${p.traceFollow} not in [0, 1]`);
+    want(p.traceStain >= 0.05 && p.traceStain <= 0.7, `traceStain ${p.traceStain} not in [0.05, 0.7]`);
+    want(p.traceThin >= 0 && p.traceThin <= 3, `traceThin ${p.traceThin} not in [0, 3]`);
+    // drain-back tracks viscosity: thin liquids snap back, syrup barely crawls
+    if (m.viscosity === 'viscous') want(p.traceFollow <= 0.15, `viscous: traceFollow ${p.traceFollow} > 0.15`);
+    if (m.viscosity === 'watery') want(p.traceFollow >= 0.2, `watery: traceFollow ${p.traceFollow} < 0.2`);
+  }
+
   // gas
   if (m.gas === 'none') want(!p.fizz, 'no gas: fizz must be off');
   else {

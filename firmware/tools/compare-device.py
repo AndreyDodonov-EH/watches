@@ -55,6 +55,11 @@ def main():
     f = list(map(float, st))
     key = ['fillTarget', 'fillPos', 'angle', 'light', 'edgeLight', 'agitation', 'acrossTilt', 'cap', 'filmFree', 'filmHome', 'slugPos', 'reading']
     n = len(key); hours = dict(zip(key, f[:n])); minutes = dict(zip(key, f[n:2 * n]))  # render-ref fills the rest from newTube()
+    tr = [l for l in lines if l.startswith('TRACE')]  # dried-trace residue, hex per tube (see render-ref.ts)
+    if tr:
+        parts = tr[0].split()[1:]
+        if len(parts) == 2:
+            hours['trace'] = parts[0]; minutes['trace'] = parts[1]
     job = {'params': params, 'hours': hours, 'minutes': minutes}
     font = int(round(params['digitFont']))
     if font >= 5:

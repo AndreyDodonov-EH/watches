@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-08-27 (perf hand-off 2: hours tube on core 0, minutes on core 1)_
+_Last update: 2026-09-01 (traces on glass: dried residue smears, sim + firmware)_
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -69,6 +69,7 @@ else `display_init` fails at boot before `ble_init`.
 - Scene matters: fps varies 19–25 with fill level / tilt, so only compare pinned-scene numbers.
 
 ## Perf baseline (2026-08-27, f0a3de7, `-Os`, BLE on, preset from NVS, sprite font 7 @ 3.5×3.25)
+
 - **20.6 fps, render 44.4 ms, push-wait 0.02 ms** — entirely render-bound; ~4 ms/frame of non-render loop
   (physics, IMU, serial). No-BLE build: 20.0 fps / 46.1 ms → BLE costs nothing at render time.
 - Stage costs (render ms saved when off): **digits 20.7**, edgeGlow 4.0, ticksH 3.9, fizz 2.7, ticksM 2.3,
@@ -118,6 +119,84 @@ else `display_init` fails at boot before `ble_init`.
   tubes filling (cores 19.1 / 17.8). BLE central connected: 41.0 fps vs 41.2 unconnected, NimBLE left on core 0.
 - Parity: 191–209 px (bench) / 140 px (after soak) ≤ 1 LSB, 0 > 12/255. The 45.5 vs 44.1 gap is within the
   medians' spread (see KAIZEN from hand-off 1: always compare medians of ≥5).
+
+## Push "crash" (2026-09-01, fixed) — DualOut blocked on a full CDC ring
+- Symptom: pushing a preset (BLE push, or any push while the CDC host was gone with DTR still
+  asserted) froze the board: replies stopped after ~7 `ok`s, fps collapsed to ~1.2 (render 13 ms —
+  loop() itself crawled at ~10 bytes/s), minutes-long self-recovery; user-visible as a dead/black
+  screen. Traces themselves were exonerated: traces=1 + d3600 sweep + full serial blood push were all clean.
+- Root cause: `DualOut::write` wrote every reply byte to `Serial` unconditionally; with the CDC host
+  absent (or a stale asserted DTR with no reader) the 256-byte HWCDC ring filled and each further
+  byte cost `tx_timeout_ms` (default 100 ms) in `xRingbufferSend` — 5 KB of echo+replies per preset
+  push = minutes of grind inside `loop()` (NimBLE host on core 0 compounded the render starvation).
+- Fix: `Serial.setTxTimeoutMs(10)`, DualOut stages per line and flushes in one bulk
+  `Serial.write(sBuf, n)` gated on `Serial.isConnected()`. (First attempt used timeout 0: a momentary
+  host read-gap then dropped bytes mid-line — the `p?` JSON arrived truncated; per-byte writes are
+  either wedge-prone or lossy, per-line bulk is neither.) Verified: serial push 150 params in 15 s @
+  47 fps. BLE-push re-verification pending (Windows radio was off).
+
+## Traces on glass (2026-09-01, sim + firmware, bit-exact pipeline)
+- A receding edge leaves a **residue** on the glass where the liquid has been (blood smear, syrup
+  coating, legs); the wet part **drains back after the liquid**, the stain dries: `traces` (bool),
+  `traceAmount` 0..2 (>1 boosts through the attenuation, clamped per pixel), `traceDry` 0.1–2 s
+  when flat — tilting along the tube dries up to 5× faster (`TRACE_TILT_DRY`), `traceThin` 0–3
+  (edge speed thins the deposit; at 1, 100 px/s halves it — `TRACE_THIN_REF_PX_S`),
+  `traceFollow` 1/s (drain-back rate at 25 px from the liquid),
+  `traceStain` 0..1 (fraction of a fresh deposit the drain-back leaves behind; on-screen stain
+  opacity ≈ traceStain × traceAmount).
+  Params v15 unchanged (additive keys; NVS CRC changes → stored params fall back to the preset).
+- Physics (sim `stepTube` / fw `stepTube`, identical): per-tube residue `Uint16Array(536)` (8.8
+  fixed point, high byte renders) in **panel-frame columns**; an edge that receded saturates
+  (`TRACE_FULL` 0xff00) the columns it uncovered — mid-row edges only (`xt = slugPos + fillPos`
+  mirrored / `xh + len + fillPos`, home edge for a free slug), deposit capped at 32 px/tick
+  (`TRACE_DEPOSIT_MAX_PX`) and **thinned by the edge's speed** (÷(1 + traceThin·v/100 px/s)): a
+  fast sweep stretches the film, so a slosh smear comes out faint at its far end and dense toward
+  where the edge slowed — toward the liquid. Decay, per column ×tick (linearised, floor-rounded),
+  **two-phase** so traceStain visibly matters at second-scale drying: the wet excess above the
+  **stain floor** (traceStain·full × hash 0.7–1) settles ONTO the floor at
+  `traceFollow · dist/25px + 1/traceDry` per second — dist from the current liquid span, so the far
+  tail of a smear collapses first and the band visibly follows a receded edge — and only residue
+  at/below the floor dries toward zero ×(1 − u·(1 + 4·|along|)·dt/traceDry), making the stain the
+  plateau the fade pauses at; a second hash channel `u` 0.75–1.25 scatters the rates (`traceUneven`, same
+  integer hash both sides, salted differently from the render's `traceStreak`). < 2·256 → 0; off →
+  buffer zeroed on transition. **Why 16-bit + floor**: the v1 `Uint8` round-to-nearest stalled — at
+  50 Hz any traceDry > ~10 s decrements < 0.5 LSB and 255 rounds back to 255, so blood never dried;
+  floor is monotone (worst case 1 LSB/tick) and the faintest stain always clears. Buffers: sim
+  `newTube()`, fw static `g_trace[2][536]` (uint16) assigned to `TubeState.trace` in `setup`.
+- Render (sim step 3d / fw "3d", drawn after the glow + wet film, mirrored index for `remaining`):
+  per column: residue → ±4 px triangular blur (tapers the smear's outer end — the dense turnaround
+  deposit next to bare glass — into a tide mark instead of a 1-px cliff) → ^0.65 (`TRACE_GAMMA`
+  value→alpha lift — a dried stain at ~0.2–0.5 of full
+  would otherwise drown in the opacity stack) × `traceStreak(x + idx·6151)` (same integer hash both
+  sides — static vertical texture, 0.82–1: subtle, not stripes) × wall weight `0.4 + 0.6·d²`, colour = liquid row
+  × 0.85 (dried). Drawn late
+  because the glow/wet-film passes paint the dry side with plain overwrite — drawn earlier they
+  wiped the smear off the band next to the edge (`edgeGlow` px gap); pixels under the column are
+  skipped so an edge that advanced back over residue covers it again. Cost bound: per-column alpha
+  precomputed, rows skip a=0; fw uses the integer `pxaT` path; the gamma is a lerped 256-entry LUT
+  (fw `LUT_traceGamma` built in `buildLuts`, sim mirrors) — no powf per column.
+- Perf: `TubeState.traceLo/traceHi` track the occupied column range (deposits widen it, the decay
+  pass re-tightens it every tick; lo ≥ hi = empty). The physics decay iterates only that range and
+  the whole render layer is skipped when it's empty — copy/blur/alpha/draw loops run over the range
+  ±4 px (blur reach) instead of all 536×H pixels, so no residue ⇒ ~zero cost (was ~3 ms/frame flat).
+  On-device (interleaved A/B bench): traces-on-empty = traces-off to ±0.02 ms (was +3.02 ms); heavy
+  residue (~585 columns) costs ~14 ms of pure `pxaT` blending — same as before, see KAIZEN. Parity
+  with residue: all trace-attributable deltas are exactly 1 RGB565 LSB (the gamma-LUT lerp).
+  `render-ref.ts` recovers the bounds by scanning the dumped buffer. NOTE: anything poking
+  `trace[x]` directly (test scripts) must also widen `traceLo/traceHi` or the residue is ignored.
+- Presets (amount / dry s / follow / stain / thin): blood (1.1 / 1.5 / 0.25 / 0.35 / 0.8), honey
+  (0.7 / 2 / 0.08 / 0.45 / 0.3 — syrup barely crawls, coats thickly whatever the speed), ink (0.5 /
+  1.2 / 0.5 / 0.4 / 1.5 — thin, snaps back to a stain), malt (0.45 / 0.6 / 0.35 / 0.2 / 1.2).
+  `check:presets` rule: non-wetting/plasma must be off; on ⇒ amount 0.2–2, dry 0.1–2 s, follow 0–1
+  (viscous ≤ 0.15, watery ≥ 0.2), stain 0.05–0.7, thin 0–3.
+  Presets re-dumped, `params_gen.h` regenerated, `presets/1.json` patched (traces off).
+- Parity: the `x` dump gained a `TRACE ` line (space-separated, **4 hex chars per column** — keep
+  the separator, compare-device counts the tokens); `compare-device.py` passes it to
+  `render-ref.ts` (decoded into `TubeState.trace`). Bench: `--stages` measures `traces` off.
+  Parity with v1 residue live: 54 px mismatched, 0 > 12/255 (better than the pre-trace ~200 px
+  baseline); re-verify after the 16-bit drain-back rework. Drain-back verified in sim (blood,
+  seeded 160-px smear: far tail collapsed to its uneven stain floors in ~5 s while the band at the
+  edge stayed wet, then slow fade; buffer values sampled at 0/6/18 s).
 
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.

@@ -34,6 +34,12 @@
   "meniscusInertia": 4,
   "contactLag": 0.2,
   "wetFilm": 0,
+  "traces": false,
+  "traceAmount": 0.6,
+  "traceDry": 1,
+  "traceFollow": 0.25,
+  "traceStain": 0.3,
+  "traceThin": 1,
   "edgeSoft": 0,
   "frontBright": 16,
   "edgeGlow": 26,
@@ -146,5 +152,6 @@
   "brightness": 1,
   "liquidBright": 1.3,
   "tickBright": 1,
-  "digitBright": 1.1
+  "digitBright": 1.1,
+  "ambientLight": 0
 }

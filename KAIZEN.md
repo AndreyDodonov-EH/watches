@@ -146,3 +146,35 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   is slower per tube — try a `-DNO_BLE` build and IRAM_ATTR on the hot mark path (BT controller interrupts
   and shared flash cache are the suspects).
 - Hand-off 2 "not now" items still open: triple buffering, physics on core 0, a separate fizz task.
+- ~~Trace decay scans all 536 columns per tube every tick even with an empty buffer~~ — done:
+  `TubeState.traceLo/traceHi` occupied range, physics + render both skip/range-restrict (2026-09-01).
+- Heavy residue (~585 live columns) still costs ~14 ms/frame: pure per-pixel `pxaT` blend (~42 k px).
+  If that matters, next wins: skip rows where `traceA·rowW` rounds to 0, or blend row-batched spans.
+- `digitFont 5` + `tubeHeight 72` has a traces-unrelated parity gap: ~1715 px mismatched, 169 px
+  >12/255, all in the digit rows (25–70 / 204–239). Sprite-font/mark path, worth a separate look.
+- `bench.py` median-of-5 has ~±0.5 ms noise on-device — enough to fake a cost for a free stage;
+  an interleaved A/B min-of-samples mode would make small deltas trustworthy.
+
+## Verification pass on the traces uint16 rework (2026-09-01)
+- **Render task hangs (task-wdt reset) when `tubeHeight` shrinks while `fizz` is on.** Reproduced on the
+  board: `ptubeHeight=72` → `ptubeHeight=55` with `pfizz=1` resets ~2/6 tries (fizz=0: 0/6); it also fires
+  ~3/5 times when a preset push crosses the same transition (any green→blood style switch). Verbatim:
+  `task_wdt: - IDLE0 (CPU 0) … CPU 0: render0` , backtrace `0x42025ee9` →
+  `Tube::drawTube … render.cpp:984`, i.e. the fizz particle loop
+  `for (int iy = floorf(f.y - ry - 1); iy <= ceilf(f.y + ry); iy++)` with `ry = r / fizzMag(...)`.
+  Fizz positions still carry the *old* H when the layout changes, so `m` can go ~0/negative and `ry`
+  explodes → the loop runs to INT_MAX. Not caused by the traces work (`p.traces` is false at the crash
+  instant). Fix: clamp `ry` (and `m`) and/or reseed `fizz[]` on a geometry change.
+- Trace render layer is ~3.0 ms/frame (46.9 → 40.9 fps on the pinned scene); the physics decay loop is
+  ~0.07 ms, i.e. free. If traces need to be cheaper, the win is in `drawTube` step 3d (full L×H scan with
+  a `pxaT` per non-liquid pixel), not in the decay loop.
+- Trace layer is the dominant source of ≤1-LSB sim parity drift (41 px without it, ~600–645 px with heavy
+  residue, all ≤9/255). Suspect the `traceA[x] = (uint8_t)(a + 0.5f)` + `(traceA[x] * rowW) >> 8` integer
+  path vs the sim's float alpha; worth a bit-exact LUT if the parity bar tightens.
+- `tools/device.py` cannot recover when the board re-enumerates: the Windows COM bridge dies
+  (`RuntimeError: bridge died`) and every later call fails. A reconnect/retry in `Device.raw` would make
+  crash hunting far less painful.
+- `ambientLight` desaturates only what is brighter than the diffuse body, so over-driven emissive
+  presets (glow/xenon: body luma already ≥ display max) are untouched. If those should also go
+  "ambient", the knob would need a second stage that compresses the body toward an ambient level —
+  overlaps with brightness/liquidBright, left out.

@@ -142,5 +142,12 @@
   "readFaceUp": 0.7,
   "readAlongMax": 0.3,
   "readTurn": 80,
-  "readHold": 5
+  "readHold": 5,
+  "traces": false,
+  "traceAmount": 0.6,
+  "traceDry": 1,
+  "traceFollow": 0.25,
+  "traceStain": 0.3,
+  "traceThin": 1,
+  "ambientLight": 0
 }

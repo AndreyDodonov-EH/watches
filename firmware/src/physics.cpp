@@ -1,9 +1,23 @@
 #include "physics.h"
 #include "layout.h"
 #include <math.h>
+#include <string.h>
 
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static inline float dz(float v, float d) { return fabsf(v) < d ? 0 : v - (v > 0 ? d : -d); }
+static inline float jroundf(float x) { return floorf(x + 0.5f); }   // JS Math.round
+
+// One static residue buffer per tube (deterministic footprint, filled by stepTube)
+static uint16_t g_trace[2][TUBE_LENGTH_PX];
+uint16_t *traceBuf(int i) { return g_trace[i & 1]; }
+
+// Per-column unevenness of the dried traces: high 16 bits scatter the decay rates, low 16 the
+// stain floor. Same integer hash as the sim's traceUneven (salted differently from traceStreak).
+static inline uint32_t traceUneven(uint32_t n) {
+  uint32_t h = (n ^ 0x27D4EB2Fu) * 2654435761u + 0x9E3779B9u;
+  h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+  return h;
+}
 
 // Highlight rest angle: world-up in the tube cross-section, halved (specular seen along the
 // normal), blended with the fixed style angle by lightPhys. See sim lightRest.
@@ -74,6 +88,59 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   auto follow = [dt](float cur, float target) { return cur + (target - cur) * fminf(1, (target > cur ? 15 : 2) * dt); };
   s.filmFree = follow(s.filmFree, filmT(recede * edgeVel));
   s.filmHome = follow(s.filmHome, p.freeLiquid ? filmT(-recede * s.slugVel) : 0);
+
+  // Dried traces: the mid-row edges the renderer draws, in the panel frame. An edge that receded
+  // deposits saturated residue on the columns it uncovered; the wet part (above the per-column
+  // stain floor) drains back toward the liquid — rate grows with distance, so the tail collapses
+  // first and the residue follows a receded edge — while the stain dries over traceDry. See sim.
+  if (p.traces && s.trace) {
+    const float len = columnLen(s.fillTarget, p);
+    const float fp = clampf(s.fillPos, -len, len);
+    const float xt = p.remaining ? s.slugPos + fp : (p.freeLiquid ? s.slugPos : 0.0f) + len + fp;
+    const float xh = p.remaining ? len + s.slugPos : (p.freeLiquid ? s.slugPos : 0.0f);
+    if (!s.traceInit) s.traceInit = true;
+    else {
+      // deposit thins with edge speed (traceThin): a fast sweep stretches the film, so the residue
+      // densifies toward where the edge slowed down — i.e. toward the liquid (see sim)
+      auto dep = [&](float a, float b) {
+        if (b <= a) return;
+        uint16_t v = (uint16_t)fmaxf(TRACE_MIN + 1, jroundf(TRACE_FULL / (1.0f + p.traceThin * ((b - a) / dt) / TRACE_THIN_REF_PX_S)));
+        int lo = (int)fmaxf(0, jroundf(a)), hi = (int)fminf((float)TUBE_LENGTH_PX, jroundf(a + fminf(b - a, TRACE_DEPOSIT_MAX_PX)));
+        for (int x = lo; x < hi; x++) s.trace[x] = v;
+        if (hi > lo) { if (lo < s.traceLo) s.traceLo = (int16_t)lo; if (hi > s.traceHi) s.traceHi = (int16_t)hi; }
+      };
+      if (p.remaining) dep(s.xtPrev, xt); else dep(xt, s.xtPrev);
+      if (p.freeLiquid) { if (p.remaining) dep(xh, s.xhPrev); else dep(s.xhPrev, xh); }
+    }
+    s.xtPrev = xt; s.xhPrev = xh;
+    // Linearised rates (dt·rate ≪ 1: caps below). floorf, not round-to-nearest — with a slow
+    // traceDry the per-tick decrement is under half an LSB and rounding would stall forever;
+    // floor keeps the decay monotone (worst case 1 LSB/tick ⇒ even the faintest stain clears).
+    const float lo = fminf(xt, xh), hi = fmaxf(xt, xh);
+    const float dryTilt = 1.0f + TRACE_TILT_DRY * fabsf(along);   // a tilted tube drains its film faster
+    const float dryK = fminf(0.5f, dt * dryTilt / fmaxf(0.05f, p.traceDry)), folK = p.traceFollow * dt / TRACE_FOLLOW_REF_PX;
+    int nLo = TUBE_LENGTH_PX, nHi = 0;   // the occupied range re-tightens as columns dry out
+    for (int x = s.traceLo; x < s.traceHi; x++) {
+      float v = s.trace[x];
+      if (v == 0) continue;
+      const uint32_t h = traceUneven(x);
+      const float u = 0.75f + 0.5f * ((h >> 16) * (1.0f / 65535.0f));
+      const float stain = TRACE_FULL * p.traceStain * (0.7f + 0.3f * ((h & 0xffff) * (1.0f / 65535.0f)));
+      const float dist = x < lo ? lo - x : x > hi ? x - hi : 0.0f;
+      // two phases: the wet excess settles ONTO the stain (drain-back + drying), and only the
+      // stain itself dries toward zero — so traceStain is the plateau the fade visibly pauses at
+      if (v > stain) v = stain + (v - stain) * fmaxf(0.0f, 1.0f - u * (folK * dist + dryK));
+      else v *= 1.0f - u * dryK;
+      if (v < TRACE_MIN) { s.trace[x] = 0; continue; }
+      s.trace[x] = (uint16_t)floorf(v);
+      if (x < nLo) nLo = x;
+      nHi = x + 1;
+    }
+    s.traceLo = (int16_t)nLo; s.traceHi = (int16_t)nHi;
+  } else if (s.traceInit && s.trace) {
+    s.traceInit = false; memset(s.trace, 0, TUBE_LENGTH_PX * sizeof(uint16_t));
+    s.traceLo = TUBE_LENGTH_PX; s.traceHi = 0;
+  }
 
   const float aMax = fminf(p.angleMax, ANGLE_HARD_MAX_DEG);
   const float angleRest = clampf(across * p.angleTiltGain, -aMax, aMax);   // in-plane gravity only (see sim physics.ts)

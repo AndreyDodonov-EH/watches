@@ -39,6 +39,12 @@ struct Params {
   float meniscusInertia;
   float contactLag;
   float wetFilm;
+  bool traces;
+  float traceAmount;
+  float traceDry;
+  float traceFollow;
+  float traceStain;
+  float traceThin;
   float edgeSoft;
   float frontBright;
   float edgeGlow;
@@ -148,10 +154,11 @@ struct Params {
   float liquidBright;
   float tickBright;
   float digitBright;
+  float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 144
-#define PARAMS_SCHEMA_CRC 0xa93f43a2u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 151
+#define PARAMS_SCHEMA_CRC 0x73016811u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -191,6 +198,12 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"meniscusInertia", 'f', (uint16_t)offsetof(Params, meniscusInertia)},
   {"contactLag", 'f', (uint16_t)offsetof(Params, contactLag)},
   {"wetFilm", 'f', (uint16_t)offsetof(Params, wetFilm)},
+  {"traces", 'b', (uint16_t)offsetof(Params, traces)},
+  {"traceAmount", 'f', (uint16_t)offsetof(Params, traceAmount)},
+  {"traceDry", 'f', (uint16_t)offsetof(Params, traceDry)},
+  {"traceFollow", 'f', (uint16_t)offsetof(Params, traceFollow)},
+  {"traceStain", 'f', (uint16_t)offsetof(Params, traceStain)},
+  {"traceThin", 'f', (uint16_t)offsetof(Params, traceThin)},
   {"edgeSoft", 'f', (uint16_t)offsetof(Params, edgeSoft)},
   {"frontBright", 'f', (uint16_t)offsetof(Params, frontBright)},
   {"edgeGlow", 'f', (uint16_t)offsetof(Params, edgeGlow)},
@@ -300,6 +313,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"liquidBright", 'f', (uint16_t)offsetof(Params, liquidBright)},
   {"tickBright", 'f', (uint16_t)offsetof(Params, tickBright)},
   {"digitBright", 'f', (uint16_t)offsetof(Params, digitBright)},
+  {"ambientLight", 'f', (uint16_t)offsetof(Params, ambientLight)},
 };
 
 // from presets/1.json
@@ -339,6 +353,12 @@ static const Params PRESET_1 = {
   6.0f, // meniscusInertia
   0.5f, // contactLag
   6.0f, // wetFilm
+  false, // traces
+  0.6f, // traceAmount
+  1.0f, // traceDry
+  0.25f, // traceFollow
+  0.3f, // traceStain
+  1.0f, // traceThin
   2.6f, // edgeSoft
   21.0f, // frontBright
   15.0f, // edgeGlow
@@ -448,6 +468,7 @@ static const Params PRESET_1 = {
   1.29f, // liquidBright
   1.2f, // tickBright
   0.82f, // digitBright
+  0.0f, // ambientLight
 };
 
 #define PRESET_DEFAULT PRESET_1
