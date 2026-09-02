@@ -6,7 +6,7 @@ import {
   rgb565, rgb565to888,
 } from '@spec/layout';
 import type { Params } from './params';
-import { columnLen, type TubeState } from './physics';
+import { columnLen, TRACE_FULL, type TubeState } from './physics';
 
 export const fb = new Uint16Array(PANEL_W * PANEL_H);
 const lensScratch = new Uint16Array(PANEL_W * TUBE_HEIGHT_MAX);
@@ -45,6 +45,27 @@ export interface Palette {
   body: number; tubeBack: number; bubbleRim: number; bubbleIn: Uint16Array;
 }
 
+/** Ambient-light desaturation (params.ambientLight): a colour brighter than the diffuse body luma
+ *  `bodyL` reads as a reflection of the (neutral) room light, so it loses the liquid's chroma —
+ *  grey of the same luma — instead of the liquid glowing brighter in its own colour. Ramps from no
+ *  change at the body luma to full desaturation at twice it. Callers scale `amt` by the liquid's
+ *  opacity: bright areas of a transparent liquid are mostly light transmitted through it (tinted),
+ *  so full desaturation would leave it colourless. */
+function ambientize(c: [number, number, number], bodyL: number, amt: number): [number, number, number] {
+  if (amt <= 0) return c;
+  const l = luma(c);
+  const k = amt * Math.min(1, Math.max(0, (l - bodyL) / bodyL));
+  return k > 0 ? mix(c, [l, l, l], k) : c;
+}
+/** Diffuse body luma: the ambientize reference. */
+function ambientBodyL(p: Params): number {
+  return Math.max(1, luma(scale(hexToRgb(p.liquid), p.brightness * p.liquidBright)));
+}
+/** Effective ambientize amount: the knob, scaled down by transparency (see ambientize). */
+function ambientAmt(p: Params): number {
+  return p.ambientLight * (1 - Math.max(0, Math.min(1, p.liquidTransparency)));
+}
+
 /** Top row of the highlight band for highlight angle `lightDeg` (TubeState.light):
  *  the cylinder surface point whose normal makes that angle with the screen normal. */
 export function highlightTop(p: Params, H: number, lightDeg: number): number {
@@ -68,6 +89,7 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   const tubeBackRows = new Uint16Array(H);
   const tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
   const liquidHiScaled = scale(hi, br), glassHiScaled = scale(ghi, p.brightness);
+  const bodyL = ambientBodyL(p), ambAmt = ambientAmt(p);
   /** Glass wall shading weight 0..1 for a row: specular tent on the top wall, a faint band on the
    *  lower wall, brighter outermost rows. */
   const glassW = (y: number): number => {
@@ -110,13 +132,13 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     // Glass shading over the liquid: `glassOverLiquid` of the dry-side weight for an opaque liquid,
     // rising to the full dry-side weight as the liquid turns transparent (the lower reflection
     // band must run continuously across the meniscus of a clear liquid).
-    c = mix(c, glassHiScaled, glassWet);
+    c = ambientize(mix(c, glassHiScaled, glassWet), bodyL, ambAmt);
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
   }
   return {
     rows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)),
-    bubbleRim: q(scale(hexToRgb(p.bubbleRim), br)), bubbleIn,
+    bubbleRim: q(ambientize(scale(hexToRgb(p.bubbleRim), br), bodyL, ambAmt)), bubbleIn,
   };
 }
 
@@ -569,6 +591,29 @@ export function edgeXL(ry: number, xs: number, angleDeg: number, p: Params, tilt
   return xs + Math.min(1, xs / 8) * (skew - k * edgeCap(ry, p, -tilt, side, -cap));
 }
 
+/** Stable per-column streak factor 0.82..1 for the dried traces — a subtle texture, not stripes.
+ *  The integer hash must match firmware/src/render.cpp exactly, so the two smears show the same
+ *  striations. */
+function traceStreak(n: number): number {
+  let h = (Math.imul(n, 2654435761) + 0x9e3779b9) | 0;
+  h ^= h >>> 15; h = Math.imul(h, 2246822519); h ^= h >>> 13;
+  return 0.82 + 0.18 * ((h >>> 16) / 65535);
+}
+// Value→alpha gamma for the traces (must match firmware/src/render.cpp): lifts the mid values so a
+// dried stain (~0.2–0.5 of full) stays clearly visible instead of drowning in the opacity stack.
+// Applied through a lerped 256-entry LUT — pow() per column per frame is too hot for the MCU, and
+// the firmware indexes the same table, so the two smears stay bit-close.
+const TRACE_GAMMA = 0.65;
+const traceGammaLut = new Float32Array(256);
+for (let i = 0; i < 256; i++) traceGammaLut[i] = Math.pow(i / 255, TRACE_GAMMA);
+function traceGamma(t: number): number {   // t in 0..1
+  const sc = t * 255, i = Math.min(254, sc | 0), f = sc - i;
+  return traceGammaLut[i] + f * (traceGammaLut[i + 1] - traceGammaLut[i]);
+}
+const traceCol = new Uint16Array(TUBE_HEIGHT_MAX);   // per-row dried (slightly darkened) liquid colour
+const traceA = new Float32Array(TUBE_LENGTH_PX);    // per-column residue alpha before the wall weight
+const traceRaw = new Uint16Array(TUBE_LENGTH_PX);   // render-frame copy of the residue, input to the taper blur
+
 /** Draw one tube. y0 = top of tube in panel coords.
  *  `remaining` mode: the liquid sits at the right end and drains as time passes. The liquid layer is
  *  rendered in a mirrored frame (edge from the right, along-axis signs flipped), then flipped before
@@ -645,7 +690,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
 
   // Step 3a: front brightening — last `frontBright` px before the edge lerp toward the highlight colour (per row).
   if (hasLiquid && p.frontBright > 0) {
-    const hiC = q(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright));
+    const hiC = q(ambientize(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright), ambientBodyL(p), ambientAmt(p)));
     // Brighten RELATIVE to each row's shade (weight = row luma / max luma): the flat highlight
     // colour would light up the dark bottom wall near the cap and read as the drop bulging
     // along the bottom. Firmware: the weights fold into the per-row LUT.
@@ -695,6 +740,42 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const xgL = softW > 0 ? Math.floor(edgesL[ry] - softW / 2 - 0.5) : Math.floor(edgesL[ry]);
       for (let k = 0; k < nR; k++) if (xg + k < L) pxa(xg + k, y0 + ry, pal.rows[ry], 0.35 * s.filmFree * rowW * (1 - k / nR));
       for (let k = 0; k < nL; k++) if (xgL - k >= capX0[ry]) pxa(xgL - k, y0 + ry, pal.rows[ry], 0.35 * s.filmHome * rowW * (1 - k / nL));
+    }
+  }
+
+  // Step 3d: dried traces — the residue the physics left on the glass where an edge receded
+  // (blood smear, syrup coating, legs): per-column residue × streak hash × wall weight, drawn a
+  // touch darker than the live liquid. Drawn AFTER the glow / wet film — they paint the dry side
+  // with plain overwrite and would wipe the smear off the band next to the edge — and only on the
+  // dry side: an edge that advanced back over residue covers it again. The residue buffer is
+  // panel-frame; this render runs mirrored for `remaining`, so the column index flips with it.
+  if (p.traces && p.traceAmount > 0 && state.trace && state.traceHi > state.traceLo) {
+    const yc = (H - 1) / 2;
+    for (let ry = 0; ry < H; ry++) traceCol[ry] = q(scale(rgb565to888(pal.rows[ry]), 0.85));
+    // All loops run only over the occupied residue range (physics keeps [traceLo, traceHi) tight):
+    // panel range mirrored into the render frame, widened ±4 for the blur reach (and 4 more for the
+    // columns the blur reads); columns outside the range are guaranteed zero and never touched.
+    const r0 = p.remaining ? L - state.traceHi : state.traceLo, r1 = p.remaining ? L - state.traceLo : state.traceHi;
+    const a0 = Math.max(0, r0 - 4), a1 = Math.min(L, r1 + 4);
+    const c0 = Math.max(0, a0 - 4), c1 = Math.min(L, a1 + 4);
+    for (let x = c0; x < c1; x++) traceRaw[x] = state.trace[p.remaining ? L - 1 - x : x];
+    // ±4 px triangular blur before the streak texture: the smear's outer end starts where the edge
+    // turned around at ~zero speed (dense deposit next to bare glass) — blurred it tapers like a
+    // tide mark instead of a 1-px cliff. Liquid-covered columns are skipped at draw time anyway.
+    for (let x = a0; x < a1; x++) {
+      let v = 5 * traceRaw[x];
+      for (let d = 1; d <= 4; d++) v += (5 - d) * (traceRaw[Math.max(0, x - d)] + traceRaw[Math.min(L - 1, x + d)]);
+      v *= 1 / 25;
+      traceA[x] = v ? traceGamma(v / TRACE_FULL) * p.traceAmount * traceStreak(x + idx * 6151) : 0;
+    }
+    for (let ry = 0; ry < H; ry++) {
+      const d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d, y = y0 + ry;
+      const xi = Math.ceil(edges[ry]), xiL = Math.floor(edgesL[ry]);   // liquid where xiL < x < xi
+      for (let x = a0; x < a1; x++) {
+        if (x > xiL && x < xi) continue;
+        const a = traceA[x] * rowW;
+        if (a >= 1 / 255) pxa(x, y, traceCol[ry], Math.min(1, a));
+      }
     }
   }
 

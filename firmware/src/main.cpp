@@ -314,6 +314,13 @@ static void handleLine(char *line) {
                    t.acrossTilt, t.cap, t.filmFree, t.filmHome, t.slugPos, t.reading);
       };
       out.print("STATE"); dumpState(tubeH); dumpState(tubeM); out.println();
+      static char thex[TUBE_LENGTH_PX * 4 + 1];   // dried-trace residue, hex per tube (see compare-device.py)
+      auto dumpTrace = [&](const TubeState &t) {
+        if (t.trace) for (int x = 0; x < TUBE_LENGTH_PX; x++) sprintf(thex + x * 4, "%04x", t.trace[x]);
+        else thex[0] = 0;
+        out.print(thex); out.print(' ');
+      };
+      out.print("TRACE "); dumpTrace(tubeH); dumpTrace(tubeM); out.println();
       static char hex[PANEL_W * 4 + 2];
       for (int t = 0; t < 2; t++) for (int y = 0; y < tubeLayout(params).H; y++) {
         const uint16_t *row = strip[t] + y * PANEL_W; char *o = hex;
@@ -333,6 +340,7 @@ static void handleLine(char *line) {
 
 void setup() {
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(10);  // bulk CDC writes never wedge loop() (see DualOut::write in ble.cpp)
   uint32_t t = millis();
   while (!Serial && millis() - t < 2500) delay(10);
   static const char *const RST[] = {"unknown", "poweron", "ext", "sw", "panic", "int-wdt", "task-wdt", "wdt",
@@ -344,6 +352,7 @@ void setup() {
   if (!fb.buf) { out.println("FATAL: framebuffer alloc failed"); }
   if (!display_init()) out.println("display init FAILED");
   if (!render_init()) out.println("render init FAILED (glyph pools)");
+  tubeH.trace = traceBuf(0); tubeM.trace = traceBuf(1);   // static dried-trace buffers (see physics.h)
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   workerStart();
   have_imu = imu_init();

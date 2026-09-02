@@ -1,0 +1,23 @@
+Use your image generation tool to create an industrial-design technical concept board, landscape 4:3, photorealistic render, clean catalogue style, warm neutral grey backdrop, soft diffused light, thin dark-grey sans-serif labels.
+
+Subject: "DAYFALL — DISK BRACELET", a wristwatch built as a bracelet of eleven IDENTICAL round disks — all 28 mm diameter, 5 mm thick, matte brushed titanium, thin polished chamfer — linked edge-to-edge by hinges. From outside the disks are indistinguishable; the electronics are DISTRIBUTED inside them, one function per disk, and connected disk-to-disk through the hinges. The display disk is the same size as every other disk; only its interior differs.
+
+Main image (upper two-thirds): the bracelet opened and laid flat as a chain in a gentle arc, rendered as an X-RAY / ghosted cutaway — the titanium shells semi-transparent so each disk's interior is visible, a short label under each disk:
+1. "DISPLAY" — a matte e-ink panel under a dot mask with TWO complete concentric rings. Outer hour ring: exactly 12 evenly spaced dots with numerals 1-12. Inner five-minute ring: exactly 12 evenly spaced dots, one per 5-minute interval from 5 through 60. Dark or white dots only, with every position visible. At 10:35, exactly 10 consecutive hour dots are black and two are white; exactly 7 consecutive five-minute dots (5 through 35) are black and five are white.
+2. "MCU + RADIO" — a tiny wireless microcontroller module on a small round PCB, with a narrow ceramic antenna window let into the disk rim.
+3. "CELL" — a thin round lithium pouch cell.
+4. "CELL" — another thin round cell.
+5. "CELL" — another thin round cell.
+6. "CHARGING" — a flat round wireless charging coil.
+7. "SENSORS" — a small board with an accelerometer and a haptic motor.
+8. "DISPLAY DRIVER" — a small round PCB carrying the e-ink driver IC and display interface electronics. The driver is deliberately separate from the display disk.
+9. "SPARE" — solid metal, empty, for sizing.
+10. "SPARE" — empty.
+11. "SPARE" — empty.
+Each hinge shows four tiny gold spring-loaded contact pins meeting four gold pads on the neighbouring disk: power and a serial bus pass from disk to disk, no flex cables.
+
+Lower strip (bottom third), two insets. Left: a dimensioned cross-section of the display disk stack — mask plate, e-ink panel, thin passive support/contact layer, back cover — labelled "5 mm". The display disk contains no driver PCB or driver IC; those are in the separate "DISPLAY DRIVER" disk. Right: a dimensioned cross-section of one hinge showing the pogo pins bridging two disks.
+
+Title "DAYFALL — DISK BRACELET" top-left, subtitle "eleven identical disks · one function per disk · pogo-pin hinges · e-ink" beneath it. No other text.
+
+Save the result as bracelet_xray.png in the current directory.

@@ -22,7 +22,7 @@ FIELDS = [
  ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('tubeBack','rgb'),('tubeBack2','rgb'),('tubeBackGradient','float'),('glassHi','rgb'),('glassBody','float'),('glassHiBright','float'),('glassReflect','float'),('glassRim','float'),('glassOverLiquid','float'),('lens','float'),('lensCurve','float'),('bubbleRim','rgb'),
  ('remaining','bool'),('highlightH','float'),('highlightInset','float'),('highlightBright','float'),('highlightSharp','float'),('shadeDepth','float'),('meniscusDepth','float'),
  ('meniscusPow','float'),('meniscusTiltGain','float'),('meniscusAsym','float'),('meniscusLens','float'),
- ('meniscusK','float'),('meniscusDamp','float'),('meniscusInertia','float'),('contactLag','float'),('wetFilm','float'),('edgeSoft','float'),
+  ('meniscusK','float'),('meniscusDamp','float'),('meniscusInertia','float'),('contactLag','float'),('wetFilm','float'),('traces','bool'),('traceAmount','float'),('traceDry','float'),('traceFollow','float'),('traceStain','float'),('traceThin','float'),('edgeSoft','float'),
  ('frontBright','float'),('edgeGlow','float'),('glowStrength','float'),('cornerR','float'),('edgeLightGain','float'),
  ('bubble','bool'),('bubbleW','float'),('bubbleH','float'),('bubbleGap','float'),('bubbleY','float'),('bubbleDark','float'),('bubbleRollGain','float'),('bubbleTiltGain','float'),
  ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSpeed','float'),('fizzDriftGain','float'),('fizzAcrossGain','float'),('fizzFlatRise','float'),('fizzSquash','float'),
@@ -42,7 +42,7 @@ FIELDS = [
  ('fillK','float'),('fillDamp','float'),('fillSloshGain','float'),('angleK','float'),('angleDamp','float'),
  ('angleTiltGain','float'),('angleGyroGain','float'),('angleMax','float'),('lightPhys','float'),('lightAngle','float'),('acrossK','float'),('acrossDamp','float'),('acrossGyroGain','float'),('shakeGain','float'),('deadzone','float'),
  ('accelLpHz','float'),('gyroHpHz','float'),('gyroDeadzone','float'),('gyroMax','float'),('inputGain','float'),
- ('brightness','float'),('liquidBright','float'),('tickBright','float'),('digitBright','float'),
+ ('brightness','float'),('liquidBright','float'),('tickBright','float'),('digitBright','float'),('ambientLight','float'),
 ]
 CTYPE = {'int': 'int', 'float': 'float', 'bool': 'bool', 'rgb': 'uint32_t'}
 

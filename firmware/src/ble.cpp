@@ -63,8 +63,18 @@ void ble_init(const char *name) {
 int ble_read() { if (rxHead == rxTail) return -1; uint8_t c = rxBuf[rxTail]; rxTail = (rxTail + 1) % sizeof(rxBuf); return c; }
 
 DualOut out;
+static uint8_t sBuf[256];   // CDC staging: replies go to the host per line, never per byte
+static size_t sLen = 0;
+static void sFlush() {
+  // Only a CDC host that asserted DTR/RTS sees serial output. Bulk write + setTxTimeoutMs(10):
+  // a reading host never waits, a host gone with stale DTR costs at most ~200 ms per line instead
+  // of stalling loop() per byte (a BLE param push froze the board at ~1 fps that way), and a brief
+  // read hiccup rides through instead of dropping bytes mid-line.
+  if (sLen && Serial.isConnected()) Serial.write(sBuf, sLen);
+  sLen = 0;
+}
 size_t DualOut::write(uint8_t c) {
-  Serial.write(c);
+  sBuf[sLen++] = c; if (c == '\n' || sLen >= sizeof(sBuf)) sFlush();
   if (connected) { txBuf[txLen++] = c; if (c == '\n' || txLen >= txMax()) txFlush(); }
   return 1;
 }

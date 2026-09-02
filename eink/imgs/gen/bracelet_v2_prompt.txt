@@ -1,0 +1,11 @@
+Use your image generation tool to create a high-end product concept render, landscape 4:3, photorealistic studio photography, warm neutral grey backdrop, soft diffused light, shallow depth of field.
+
+Subject: "DAYFALL — DISK BRACELET", a minimalist wristwatch that is simply a bracelet of eleven IDENTICAL round disks linked edge-to-edge by tiny hidden hinges, like a loop of coins around the wrist. Every disk is exactly the same: 28 mm diameter, 5 mm thick, matte brushed titanium, thin polished chamfer, no markings. This sameness is the whole idea — nothing distinguishes the watch from the bracelet except that the one disk sitting on top of the wrist has a dot mask cut into its surface with an e-ink panel behind it. Same size, same thickness, same metal as all the others.
+
+Critical visual test: the display disk's outside silhouette must be interchangeable with either neighbouring plain disk. Keep it centred and sharp through focus and placement only; never enlarge it or give it a wider bezel, thicker case, or elevated watch-face treatment.
+
+The display disk has TWO complete concentric rings of dots. Outer hour ring: exactly 12 evenly spaced round dots, with thin sans-serif numerals 1 to 12 just outside them and 12 at the top. Inner five-minute ring: exactly 12 evenly spaced round dots, one for each 5-minute interval (5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60), with the 60-minute position at the top. Every position is always visible as either a black passed dot or a white not-yet-passed dot; nothing else — no hands, no crown, no ringed or highlighted dot. Time shown is 10:35: hour ring has exactly 10 consecutive black dots from hour 1 through hour 10 and two white dots at 11 and 12; five-minute ring has exactly 7 consecutive black dots for 5 through 35 minutes and five white dots for 40 through 60 minutes.
+
+Composition: bracelet worn on a wrist, three-quarter view, display disk sharp and centred, neighbouring disks visibly identical to it, far disks softly out of focus. Small inset bottom-left: the bracelet lying flat in a circle, top-down, all eleven identical disks, one with the dot mask. Caption "DAYFALL — DISK BRACELET" in small thin sans-serif top-left. No other text.
+
+Save the result as bracelet_v2.png in the current directory.

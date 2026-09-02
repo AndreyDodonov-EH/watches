@@ -15,7 +15,7 @@ from device import Device
 
 DEFAULT_STAGES = [  # name -> "off" value; the measured delta is that stage's cost
     ('digits', 0), ('digitShadow', 0), ('ticksH', 0), ('ticksM', 0), ('fizz', 0),
-    ('edgeGlow', 0), ('frontBright', 0), ('meniscusDepth', 0), ('lens', 0), ('wetFilm', 0),
+    ('edgeGlow', 0), ('frontBright', 0), ('meniscusDepth', 0), ('lens', 0), ('wetFilm', 0), ('traces', 0),
     ('glassBody', 0), ('glassRim', 0), ('liquidTransparency', 1),
 ]
 

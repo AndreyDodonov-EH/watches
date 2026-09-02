@@ -49,6 +49,46 @@ static inline uint16_t blend565T(uint16_t a, uint16_t b, int T) {
 static inline int alphaT(float t) { return (int)(t * 256 + 0.5f); }
 static inline float luma(RGB c) { return 0.299f * c.r + 0.587f * c.g + 0.114f * c.b; }
 
+// Ambient-light desaturation (params.ambientLight, sim ambientize): a colour brighter than the
+// diffuse body luma reads as a reflection of the neutral room light — grey of the same luma —
+// instead of the liquid glowing brighter in its own colour. Full desaturation at twice the body luma.
+// Callers scale amt by the liquid's opacity (ambientAmt): bright areas of a transparent liquid are
+// mostly light transmitted through it (tinted), so full desaturation would leave it colourless.
+static inline RGB ambientize(RGB c, float bodyL, float amt) {
+  if (amt <= 0) return c;
+  float l = luma(c);
+  float k = amt * fminf(1, fmaxf(0, (l - bodyL) / bodyL));
+  return k > 0 ? mix(c, RGB{l, l, l}, k) : c;
+}
+// Diffuse body luma: the ambientize reference (sim ambientBodyL).
+static inline float ambientBodyL(const Params &p) {
+  return fmaxf(1, luma(scale(hexToRgb(p.liquid), p.brightness * p.liquidBright)));
+}
+// Effective ambientize amount: the knob, scaled down by transparency (sim ambientAmt).
+static inline float ambientAmt(const Params &p) {
+  return p.ambientLight * (1 - clampf(p.liquidTransparency, 0, 1));
+}
+
+// Per-column streak factor 0.82..1 for the dried traces (subtle texture, not stripes) — the same
+// integer hash as the sim's traceStreak, so both smears show identical striations (no shimmer).
+static inline float traceStreak(uint32_t n) {
+  uint32_t h = n * 2654435761u + 0x9E3779B9u;
+  h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+  return 0.82f + 0.18f * ((h >> 16) * (1.0f / 65535.0f));
+}
+// Value→alpha gamma for the traces (must match sim render.ts): lifts the mid values so a dried
+// stain (~0.2–0.5 of full) stays clearly visible instead of drowning in the opacity stack.
+// Applied through a lerped 256-entry LUT (built in buildLuts) — powf per column per frame is too
+// hot, and the sim indexes the same table, so the two smears stay bit-close.
+#define TRACE_GAMMA 0.65f
+static float LUT_traceGamma[256];
+static inline float traceGamma(float t) {   // t in 0..1
+  const float sc = t * 255.0f;
+  const int i = sc >= 254.0f ? 254 : (int)sc;
+  const float f = sc - i;
+  return LUT_traceGamma[i] + f * (LUT_traceGamma[i + 1] - LUT_traceGamma[i]);
+}
+
 // Per-channel LUTs built once with the exact float formulas they replace (bit-exact with the sim):
 // sprite alpha 0..255 -> blend fraction; tick emboss highlight / shadow of an expanded 565 channel.
 static uint16_t LUT_alphaT16[256];
@@ -58,6 +98,7 @@ static void buildLuts() {
     LUT_alphaT16[v] = (uint16_t)alphaT(v / 255.0f);
     LUT_embHi[v] = (uint8_t)jround(clampf((float)v + (255.0f - (float)v) * 0.7f, 0, 255));
     LUT_embLo[v] = (uint8_t)jround(clampf((float)v * 0.25f, 0, 255));
+    LUT_traceGamma[v] = powf(v * (1.0f / 255.0f), TRACE_GAMMA);
   }
 }
 static inline uint16_t embossHi(uint16_t c) { int r, g, b; expand565(c, r, g, b); return rgb565(LUT_embHi[r], LUT_embHi[g], LUT_embHi[b]); }
@@ -215,12 +256,14 @@ struct EffectTable { uint32_t gen = 0; int H = 0; float lightK = -1; bool valid 
 // static (fixed footprint, ~9 KB each); the strip pointer / geometry are set per call by renderTube.
 // Nothing here is shared between the two, so the tubes can render concurrently on both cores.
 struct Tube {
-  uint16_t *FB = nullptr; int baseY = 0, H = TUBE_HEIGHT_PX;
+  uint16_t *FB = nullptr; int baseY = 0, H = TUBE_HEIGHT_PX; int idx = 0;
   Palette pal; RowCache rc; Labels labels; ScaledSet set;
   EffectTable glowT[2];                                       // 0 = time edge, 1 = home edge
   float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
   float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds when `remaining`
   Fizz fizz[MAX_FIZZ]; int fizzN = 0; float fizzLen = 0;      // liquid length px, set by drawTube
+  uint8_t traceA[TUBE_LENGTH_PX];                             // dried-trace residue alpha per column (0..255)
+  uint16_t traceRaw[TUBE_LENGTH_PX];                          // render-frame residue copy, input to the taper blur
 
   inline bool inStrip(int x, int y) const { return x >= 0 && x < PANEL_W && y >= baseY && y < baseY + H; }
   inline uint16_t rd(int x, int y) const { return __builtin_bswap16(FB[(y - baseY) * PANEL_W + x]); }
@@ -308,6 +351,7 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   RGB tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
   float br = p.brightness * p.liquidBright;
   RGB liquidHiScaled = scale(hi, br), glassHiScaled = scale(ghi, p.brightness);
+  float bodyL = ambientBodyL(p), ambAmt = ambientAmt(p);
   float yc = (H - 1) / 2.0f, lightRad = 2 * lightDeg * (float)M_PI / 180;
   int hiTop = highlightTop(p, lightDeg);
   for (int y = 0; y < H; y++) {
@@ -332,13 +376,13 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     float gw = glassW(p, y, hiTop, lam);
     float glassWet = gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency);
     pal.tubeBackRows[y] = q(scale(mix(back, ghi, gw), p.brightness));
-    c = mix(c, glassHiScaled, glassWet);   // glass weight rises to the dry-side one with transparency
+    c = ambientize(mix(c, glassHiScaled, glassWet), bodyL, ambAmt);   // glass weight rises to the dry-side one with transparency
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
   }
   pal.body = q(scale(body, br));
   pal.tubeBack = q(scale(tubeBack, p.brightness));
-  pal.bubbleRim = q(scale(hexToRgb(p.bubbleRim), br));
+  pal.bubbleRim = q(ambientize(scale(hexToRgb(p.bubbleRim), br), bodyL, ambAmt));
   float lmax = 1;
   for (int y = 0; y < H; y++) { pal.rowK[y] = luma(to888(pal.rows[y])); lmax = fmaxf(lmax, pal.rowK[y]); }
   for (int y = 0; y < H; y++) pal.rowK[y] /= lmax;
@@ -725,7 +769,7 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
     float d = lensRow((ry - yc) / yc, p), u = fabsf(d);
     rc.rowD[ry] = d; rc.rowClimbPow[ry] = powf(u, p.meniscusPow); rc.rowBulge[ry] = 1 - sqrtf(fmaxf(0, 1 - u * u));
   }
-  rc.hiC = q(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright));
+  rc.hiC = q(ambientize(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright), ambientBodyL(p), ambientAmt(p)));
 }
 
 void Tube::applyLens(const Params &p) {
@@ -883,6 +927,47 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     }
   }
 
+  // 3d: dried traces — residue on the glass where an edge receded (blood smear, syrup coating,
+  // legs); see sim step 3d. Drawn AFTER the glow / wet film — they paint the dry side with plain
+  // overwrite and would wipe the smear off the band next to the edge — and only on the dry side:
+  // an edge that advanced back over residue covers it again. Residue buffer is panel-frame; the
+  // mirrored render flips the index.
+  if (p.traces && p.traceAmount > 0 && st.trace && st.traceHi > st.traceLo) {
+    const float yc = (H - 1) / 2.0f;
+    // All loops run only over the occupied residue range (physics keeps [traceLo, traceHi) tight):
+    // panel range mirrored into the render frame, widened ±4 for the blur reach (and 4 more for
+    // the columns the blur reads); columns outside the range are guaranteed zero, never touched.
+    const int r0 = p.remaining ? L - st.traceHi : st.traceLo, r1 = p.remaining ? L - st.traceLo : st.traceHi;
+    const int a0 = r0 - 4 < 0 ? 0 : r0 - 4, a1 = r1 + 4 > L ? L : r1 + 4;
+    const int c0 = a0 - 4 < 0 ? 0 : a0 - 4, c1 = a1 + 4 > L ? L : a1 + 4;
+    for (int x = c0; x < c1; x++) traceRaw[x] = st.trace[p.remaining ? L - 1 - x : x];
+    // +-4 px triangular blur before the streak texture (see sim): tapers the smear's outer end
+    // (dense turnaround deposit next to bare glass) into a tide mark instead of a 1-px cliff
+    for (int x = a0; x < a1; x++) {
+      uint32_t acc = 5u * traceRaw[x];
+      for (int d = 1; d <= 4; d++) {
+        const int m = x < d ? 0 : x - d, q2 = x > L - 1 - d ? L - 1 : x + d;
+        acc += (uint32_t)(5 - d) * (traceRaw[m] + traceRaw[q2]);
+      }
+      const float v = acc * (1.0f / 25.0f);
+      // traceAmount may exceed 1 (opacity boost): clamp before the uint8 cast
+      float a = v > 0 ? traceGamma(v * (1.0f / TRACE_FULL)) * 255.0f * p.traceAmount * traceStreak(x + (uint32_t)idx * 6151u) : 0.0f;
+      traceA[x] = (uint8_t)(fminf(255.0f, a) + 0.5f);
+    }
+    uint16_t traceCol[TUBE_HEIGHT_MAX];
+    for (int ry = 0; ry < H; ry++) traceCol[ry] = q(scale(to888(pal.rows[ry]), 0.85f));
+    for (int ry = 0; ry < H; ry++) {
+      float d = (ry - yc) / yc;
+      int rowW = (int)((0.4f + 0.6f * d * d) * 256.0f + 0.5f), y = y0 + ry;
+      int xi = (int)ceilf(edges[ry]), xiL = (int)floorf(edgesL[ry]);   // liquid where xiL < x < xi
+      for (int x = a0; x < a1; x++) {
+        if (x > xiL && x < xi) continue;
+        int a = (traceA[x] * rowW) >> 8;
+        if (a) pxaT(x, y, traceCol[ry], a);
+      }
+    }
+  }
+
   // 4: highlight inset
   if (hasLiquid && p.highlightInset > 0) {
     int hiTop = highlightTop(p, s.light);
@@ -1000,7 +1085,7 @@ bool render_init() {
 void renderTube(int idx, const TubeState &s, const Params &p, uint32_t gen, uint16_t *strip) {
   Tube &t = tubes[idx & 1];
   TubeLayout lay = tubeLayout(p);
-  t.FB = strip; t.H = lay.H; t.baseY = idx == 0 ? lay.yH : lay.yM;
+  t.FB = strip; t.H = lay.H; t.baseY = idx == 0 ? lay.yH : lay.yM; t.idx = idx & 1;
   t.buildRowCache(p, gen);
   Palette &pal = t.pal;
   if (!(pal.valid && pal.gen == gen && pal.H == t.H && pal.light == s.light)) {
