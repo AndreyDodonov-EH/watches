@@ -6,7 +6,8 @@
 //   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p meniscusDepth=-10)
 //   p?  dump params as JSON           p!  reset params to the built-in preset (and erase NVS copy)
 //   params persist in NVS (autosave 2 s after last p write)
-//   b<n> brightness 0..255            r  reboot
+//   b<n> brightness 0..255            H<0|1>  panel HBM experiment (RM67162 B0h; unusable, see KAIZEN)
+//   r  reboot
 #include <Arduino.h>
 #include <Preferences.h>
 #include <Adafruit_GFX.h>
@@ -291,6 +292,7 @@ static void handleLine(char *line) {
     case 'f': report_fps(); break;   // query only: does not change the face
     case 'i': imu_stream = !imu_stream; out.printf("imu stream %s\n", imu_stream ? "on (t_ms,ax,ay,az,gx,gy,gz)" : "off"); break;
     case 'b': { int v = atoi(arg); display_set_brightness(constrain(v, 0, 255)); out.printf("brightness %d\n", v); break; }
+    case 'H': { bool on = atoi(arg) != 0; display_set_hbm(on); out.printf("hbm %s\n", on ? "on" : "off"); break; }   // experiment only: tints cyan, browns out the board
     case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { setClockLocal(CLOCK_EPOCH_MIN + hh * 3600 + mm * 60 + ss); out.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else out.println("usage: t HH:MM[:SS]"); break; }
     case 'T': {  // T <epoch_s> <tz_offset_min>: local time = epoch + tz
       long long ep = 0; int tz = 0;

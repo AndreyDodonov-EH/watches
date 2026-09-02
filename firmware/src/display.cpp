@@ -26,7 +26,7 @@
 #endif
 #define MADCTL_VAL (USB_LEFT ? 0x30 : 0xF0)
 
-// Verbatim from Waveshare 03_LVGL_V8_Test.ino (except MADCTL value)
+// Verbatim from Waveshare 03_LVGL_V8_Test.ino (except MADCTL value and the explicit HBM off)
 static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
   {0x11, (uint8_t []){0x00}, 0, 120},
   {0x36, (uint8_t []){MADCTL_VAL}, 1, 0},   // orientation, see USB_LEFT
@@ -34,6 +34,7 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
   {0x2A, (uint8_t []){0x00,0x00,0x02,0x17}, 4, 0},
   {0x2B, (uint8_t []){0x00,0x00,0x00,0xEF}, 4, 0},
   {0x51, (uint8_t []){0x00}, 1, 10},
+  {0xB0, (uint8_t []){0x04}, 1, 0},  // HBM off: the bit survives RESX, only a power cycle or this clears it
   {0x29, (uint8_t []){0x00}, 0, 10},
   {0x51, (uint8_t []){0xFF}, 1, 0},
 };
@@ -120,5 +121,10 @@ void display_push_frame(const uint16_t *fb) { display_push_rows(fb, 0, PANEL_H);
 
 void display_set_brightness(uint8_t v) {
   esp_lcd_panel_io_tx_param(io_handle, 0x02000000 | (0x51 << 8), &v, 1);
+}
+
+void display_set_hbm(bool on) {
+  uint8_t v = on ? 0x06 : 0x04;   // bit2 is a fixed '1' in the datasheet, bit1 = HBM_EN
+  esp_lcd_panel_io_tx_param(io_handle, 0x02000000 | (0xB0 << 8), &v, 1);
 }
 
