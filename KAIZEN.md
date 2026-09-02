@@ -178,3 +178,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   presets (glow/xenon: body luma already ≥ display max) are untouched. If those should also go
   "ambient", the knob would need a second stage that compresses the body toward an ambient level —
   overlaps with brightness/liquidBright, left out.
+- Panel HBM (RM67162 B0h bit1): enabling it turns the liquid face bright cyan and a lit face trips the
+  ESP32-S3 brownout detector (USB supply sags). Not a usable brightness step; 0x51=0xFF is the ceiling.
+  The HBM bit survives the RESX line and a reflash; init now writes B0h=0x04 explicitly.
+  `H1` serial command left in for experiments only. QSPI register readback (opcode 0x03) returns 0x00
+  for everything with the sh8601 panel_io; needs dummy-cycle config if ever wanted.
