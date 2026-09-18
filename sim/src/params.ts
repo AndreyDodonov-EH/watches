@@ -42,7 +42,7 @@ export interface Params {
   contactLag: number;    // 0..3 contact-angle hysteresis: px the contact lines trail the centre per 10 px/s of edge speed
   wetFilm: number;       // px trailing wet film a receding edge leaves on the glass
   traces: boolean;       // a receding edge leaves a residue on the glass (blood smear, syrup coating, legs)
-  traceAmount: number;   // 0..1 opacity of that residue at the wall rows
+  traceAmount: number;   // 0..2 residue opacity boost at the wall rows, independent of liquidTransparency
   traceDry: number;      // s, drying time constant of the residue's stain when flat (tilting dries up to 5× faster)
   traceFollow: number;   // 1/s, drain-back rate of the wet smear toward the liquid at 25 px away (0 = residue stays put)
   traceStain: number;    // 0..1 fraction of a fresh deposit the drain-back leaves behind as stain (0 = drains away completely)
@@ -643,6 +643,44 @@ const PRESET_FREE: Partial<Params> = {
   fillK: 756, fillDamp: 40, lightPhys: 1, brightness: 1, liquidBright: 2, digitBright: 1.53,
 };
 
+/** User-tuned olive oil (2026-09-18), preserved independently of the material-class ranges. */
+const PRESET_OLIVE_OIL: Partial<Params> = {
+  v: 17, tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: false,
+  liquid: '#5e5b08', liquidHi: '#8a8619', liquidLo: '#89861f',
+  tubeBack: '#110b03', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#322d2a',
+  glassBody: 0.32, glassHiBright: 0.77, glassReflect: 0.35, glassRim: 0.69, glassOverLiquid: 0.64,
+  lens: -0.2, lensCurve: 0.2, bubbleRim: '#2d3319',
+  highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
+  meniscusDepth: 4, meniscusPow: 4, meniscusTiltGain: 3, meniscusAsym: 2, meniscusLens: 0,
+  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, contactLag: 1.9, wetFilm: 15,
+  traces: true, traceAmount: 2, traceDry: 2, traceFollow: 0.66, traceStain: 1, traceThin: 1.9,
+  edgeSoft: 3.7, frontBright: 0, edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55,
+  bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
+  bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.12,
+  fizz: false, fizzCount: 59, fizzSize: 4.5, fizzSizeVar: 1, fizzShadeOff: 0.5,
+  fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2, fizzSpeed: 40,
+  ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25, tickMajorHeightH: 22,
+  tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b', tickMajorColorH: '#4d4d4d', tickPosH: 2,
+  ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 25, tickMajorHeightM: 28,
+  tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b', tickMajorColorM: '#4d4d4d', tickPosM: 2,
+  ticksOnTop: false, tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4,
+  digits: true, digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadow: true,
+  digitShadowColor: '#101010', digitShadowStrength: 1, digitShadowOffset: 1, digitFont: 6,
+  digitTint: '#2a1c09', digitTintAmount: 0, digitTone: 0.05,
+  digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75,
+  digitBottomMin: 21, digitBottom: 22, digitsOnTop: false,
+  bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
+  liquidTransparency: 0.39, markContrast: 0, digitsLeadingZero: false,
+  digitMinuteStep: 5, digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0,
+  digitsLastOnlyH: false, digitsLastOnlyM: false,
+  freeLiquid: true, freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 150,
+  readTiltStart: 20, readTiltEnd: 50, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5,
+  angleK: 207, angleDamp: 17.6, angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6,
+  lightPhys: 1, lightAngle: 73, acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0,
+  deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31, gyroMax: 470, inputGain: 1,
+  brightness: 1, liquidBright: 0.98, tickBright: 1.2, digitBright: 2, ambientLight: 1,
+};
+
 export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; mat?: Material; legacy?: boolean; big?: boolean }
 
 /** Big-lens twin of a preset (examples/urine_big.json, 2026-08-27): the second physical rod is wider and
@@ -677,6 +715,7 @@ export const PRESETS: PresetEntry[] = [
   { id: 'milk', name: 'Milk', note: 'opaque white colloid, soft highlight, printed scale', p: PRESET_MILK, mat: M('medium', 'opaque', false, true, 'none') },
   { id: 'mercury', name: 'Mercury', note: 'convex bead, mirror specular, etched scale', p: PRESET_MERCURY, mat: M('metal', 'opaque', false, false, 'none') },
   { id: 'honey', name: 'Honey', note: 'amber syrup, overdamped, clings, trapped air', p: PRESET_HONEY, mat: M('viscous', 'translucent', false, true, 'trapped') },
+  { id: 'olive-oil', name: 'Olive oil', note: 'user-tuned olive green, viscous slug, lingering residue', p: PRESET_OLIVE_OIL },
   { id: 'cola', name: 'Cola', note: 'dark translucent, lively bead, enamel numerals', p: PRESET_COLA, mat: M('watery', 'translucent', false, true, 'carbonated') },
   { id: 'malt', name: 'Single malt', note: 'amber, legs on the wall, brass numerals', p: PRESET_MALT, mat: M('medium', 'translucent', false, true, 'none') },
   { id: 'champagne', name: 'Champagne', note: 'pale gold, dense bead, amber resin numerals', p: PRESET_CHAMPAGNE, mat: M('watery', 'translucent', false, true, 'carbonated') },
@@ -783,7 +822,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   contactLag: { help: 'Contact-angle hysteresis: an advancing edge drags its contact lines behind the centre, a receding one leaves them clinging. px per 10 px/s of edge speed.', group: 'Meniscus dynamics', label: 'contact-line lag', min: 0, max: 3, step: 0.05 },
   wetFilm: { help: 'Trailing wet film a receding edge leaves on the glass, px at full speed (25 px/s); brightest at the walls, drains in ~0.5 s.', group: 'Meniscus dynamics', label: 'wet film px', min: 0, max: 30, step: 1 },
   traces: { help: 'A receding edge leaves a residue on the glass where the liquid has been (blood smear, syrup coating, legs); the wet part drains back after the liquid, the stain dries out slowly.', group: 'Meniscus dynamics' },
-  traceAmount: { help: 'Opacity of the dried residue at the wall rows (weaker at mid-height). Values over 1 boost through the streak/height attenuation toward fully opaque (clamped per pixel).', group: 'Meniscus dynamics', label: 'residue amount', min: 0, max: 2, step: 0.05 },
+  traceAmount: { help: 'Opacity of the dried residue at the wall rows (weaker at mid-height), independent of liquid transparency. Values over 1 boost through the streak/height attenuation toward fully opaque (clamped per pixel).', group: 'Meniscus dynamics', label: 'residue amount', min: 0, max: 2, step: 0.05 },
   traceDry: { help: 'Drying time constant of the residue\'s stain, s: it fades to 37% in this many seconds when the watch is flat; tilting the tube along its axis drains the film up to 5× faster.', group: 'Meniscus dynamics', label: 'drying time s', min: 0.1, max: 2, step: 0.05 },
   traceFollow: { help: 'Drain-back: the wet part of the smear is pulled back toward the liquid at this rate (1/s at 25 px away, faster further out), so the residue follows a receded edge before its stain dries in place. 0 = residue stays where deposited. Thin liquids drain fast, syrup barely.', group: 'Meniscus dynamics', label: 'drain-back rate', min: 0, max: 1, step: 0.02 },
   traceStain: { help: 'How intense the leftover stain is: the fraction of a fresh deposit the drain-back leaves behind (scattered 0.7–1 per column), which then dries over traceDry. 0 = the smear drains away completely, 1 = it never thins. On-screen stain opacity ≈ traceStain × traceAmount.', group: 'Meniscus dynamics', label: 'stain intensity', min: 0, max: 1, step: 0.05 },

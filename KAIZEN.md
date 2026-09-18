@@ -110,6 +110,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Image lanes (see pigeon_drop skills): cursor `agent -p -f --model cursor-grok-4.5-high-fast "<prompt + output path>"`; cursor `agent -p` hangs headlessly (even text-only). agy: `agy --mode accept-edits --print="Use your generate_image tool… Do not run shell commands. Reply with the full saved path."`; file lands in ~/.gemini/antigravity-cli/brain/<id>/, copy it out. Gemini image quota exhausts after ~10 parallel renders.
 
 ## Presets / materials (2026-08-27)
+- Residue opacity parity: firmware clamps `traceAmount` before wall attenuation; sim clamps after it,
+  so amounts above 1 (including olive oil) can render stronger at mid-height in the sim.
 - `liquidTransparency` conflates tint and clarity: it mixes the body toward the tube back, so a coloured
   *clear* liquid (urine, champagne) turns khaki above ~0.6. A separate tint/absorption term (multiply the
   back by the body colour, then add the lit body) would let tinted liquids stay clear.

@@ -14,6 +14,7 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | milk | Milk | opaque white colloid, medium-thin, wetting | printed scale on the glass |
 | mercury | Mercury | opaque liquid metal, non-wetting, stiff surface | thermometer, etched glass scale |
 | honey | Honey | translucent amber, viscous, wetting, trapped air | brass numerals behind the liquid |
+| olive-oil | Olive oil | user-tuned olive green (2026-09-18), exempt from material ranges | pale numerals behind the liquid, lingering residue |
 | cola | Cola | translucent dark, watery, carbonated | enamel numerals behind the liquid |
 | malt | Single malt | translucent amber, medium-thin, clings (legs) | brass numerals behind the liquid |
 | champagne | Champagne | tinted pale gold (translucent), watery, fine bead | amber-resin numerals behind the liquid |
@@ -59,6 +60,7 @@ Non-wetting liquids (mercury, molten, xenon) take the metal-like surface rule (m
 Traces (residue on the glass where an edge receded — blood smear, syrup coating, legs — whose wet part drains back after the liquid before its stain dries): need a wetting liquid — non-wetting and plasma presets must have `traces` off. A wetting preset that leaves it on keeps `traceAmount` 0.2–2 (>1 boosts opacity through the streak/height attenuation, blood 1.1), `traceDry` 0.1–2 s — the flat-watch drying time constant; tilting along the tube dries up to 5× faster (blood 1.5, honey 2, ink 1.2, malt 0.6) — `traceFollow` 0–1 tracking viscosity — watery liquids snap back (≥ 0.2, ink 0.5), viscous ones barely crawl (≤ 0.15, honey 0.08) — and `traceStain` 0.05–0.7 for how intense the leftover stain is (thick coatings high: honey 0.45; thin legs low: malt 0.2). `traceThin` 0–3 thins the deposit with edge speed (fast smears come out faint, dense near the liquid): thin liquids high (ink 1.5), syrup low (honey 0.3).
 
 Opacity (`liquidTransparency`):
+- Dried residue retains its shaded pigment colour independently of bulk transparency; `traceAmount`, `traceStain`, and drying control its visibility.
 - opaque ≤ 0.12: ticks and digits printed on top (rear marks would be invisible or faked by `markContrast`); shadeDepth 0.5–0.95.
 - translucent 0.25–0.55: rear marks allowed (bright sprite digits need no markContrast floor); shadeDepth 0.5–0.85.
 - clear ≥ 0.7 (colourless liquids only — a tinted liquid mixed 70 % toward the dark back turns khaki, so tinted ones are translucent): shadeDepth 0.3–0.55; liquidHi is a white surface reflection (saturation < 0.2); glassOverLiquid ≥ 0.5; rear marks need markContrast ≥ 16.
