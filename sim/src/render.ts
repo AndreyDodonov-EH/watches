@@ -41,6 +41,7 @@ export function tubeLayout(p: Params): TubeLayout {
 
 export interface Palette {
   rows: Uint16Array;     // H colours: body shade per row incl. highlight band
+  traceRows: Uint16Array; // dried deposit colour, independent of bulk liquid transparency
   tubeBackRows: Uint16Array; // tube-back colour with glass shading per row
   body: number; tubeBack: number; bubbleRim: number; bubbleIn: Uint16Array;
 }
@@ -85,6 +86,7 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   /** Lambert weight 0..1 of row y under the physical light. */
   const lambert = (y: number): number => Math.max(0, Math.cos(Math.asin(Math.max(-1, Math.min(1, (yc - y) / yc))) - lightRad));
   const rows = new Uint16Array(H);
+  const traceRows = new Uint16Array(H);
   const bubbleIn = new Uint16Array(H);
   const tubeBackRows = new Uint16Array(H);
   const tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
@@ -121,10 +123,12 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     // (panel-dimmed) back. The highlight is a reflection off the liquid surface, so it goes on
     // after that (undiluted), and the glass wall over both.
     c = scale(c, br);
+    let residue = c;
     c = mix(c, scale(back, p.brightness), p.liquidTransparency);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       const k = Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp); // tent
       c = mix(c, liquidHiScaled, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
+      residue = mix(residue, liquidHiScaled, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
     }
     const gw = glassW(y);
     const glassWet = gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency);
@@ -133,11 +137,15 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     // rising to the full dry-side weight as the liquid turns transparent (the lower reflection
     // band must run continuously across the meniscus of a clear liquid).
     c = ambientize(mix(c, glassHiScaled, glassWet), bodyL, ambAmt);
+    // A dried deposit retains pigment: its coverage comes from traceAmount / drying,
+    // not from transmission through the bulk liquid. Keep the opaque-liquid shading.
+    residue = ambientize(mix(residue, glassHiScaled, gw * p.glassOverLiquid), bodyL, p.ambientLight);
+    traceRows[y] = q(scale(rgb565to888(q(residue)), 0.85));
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
   }
   return {
-    rows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)),
+    rows, traceRows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)),
     bubbleRim: q(ambientize(scale(hexToRgb(p.bubbleRim), br), bodyL, ambAmt)), bubbleIn,
   };
 }
@@ -629,7 +637,6 @@ function traceGamma(t: number): number {   // t in 0..1
   const sc = t * 255, i = Math.min(254, sc | 0), f = sc - i;
   return traceGammaLut[i] + f * (traceGammaLut[i + 1] - traceGammaLut[i]);
 }
-const traceCol = new Uint16Array(TUBE_HEIGHT_MAX);   // per-row dried (slightly darkened) liquid colour
 const traceA = new Float32Array(TUBE_LENGTH_PX);    // per-column residue alpha before the wall weight
 const traceRaw = new Uint16Array(TUBE_LENGTH_PX);   // render-frame copy of the residue, input to the taper blur
 
@@ -770,7 +777,6 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // panel-frame; this render runs mirrored for `remaining`, so the column index flips with it.
   if (p.traces && p.traceAmount > 0 && state.trace && state.traceHi > state.traceLo) {
     const yc = (H - 1) / 2;
-    for (let ry = 0; ry < H; ry++) traceCol[ry] = q(scale(rgb565to888(pal.rows[ry]), 0.85));
     // All loops run only over the occupied residue range (physics keeps [traceLo, traceHi) tight):
     // panel range mirrored into the render frame, widened ±4 for the blur reach (and 4 more for the
     // columns the blur reads); columns outside the range are guaranteed zero and never touched.
@@ -793,7 +799,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       for (let x = a0; x < a1; x++) {
         if (x > xiL && x < xi) continue;
         const a = traceA[x] * rowW;
-        if (a >= 1 / 255) pxa(x, y, traceCol[ry], Math.min(1, a));
+        if (a >= 1 / 255) pxa(x, y, pal.traceRows[ry], Math.min(1, a));
       }
     }
   }

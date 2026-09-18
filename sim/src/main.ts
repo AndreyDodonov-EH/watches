@@ -62,6 +62,7 @@ app.innerHTML = `
         <label><input type="radio" id="tm-demo" name="tm" value="demo"> demo ×<input type="number" id="demospeed" value="60" min="1" max="3600" style="width:5em"></label>
         <label><input type="radio" id="tm-set" name="tm" value="set"> set <input type="number" id="seth" value="10" min="0" max="23" style="width:3.5em">:<input type="number" id="setm" value="9" min="0" max="59" style="width:3.5em"></label>
         <span id="clock"></span>
+        <button id="settime" title="Send this time and mode to the device: real, demo speed, or frozen selected time">send sim time</button>
       </fieldset>
       <fieldset><legend>Tilt input</legend>
         <label><input type="radio" name="src" value="manual" checked> sliders / drag on panel</label>
@@ -76,7 +77,7 @@ app.innerHTML = `
       <fieldset><legend>Device</legend>
         <label><select id="link"><option value="serial">Web Serial</option><option value="ble">Bluetooth</option></select> <button id="serialbtn">connect</button> <span id="serialst">disconnected</span></label>
         <label><input type="checkbox" id="livepush" checked> push params live</label>
-        <label><button id="pull">pull params</button> <button id="settime" title="Send the selected Time mode: real, demo speed, or a frozen set time">set time</button> <button id="pushall">push all</button></label>
+        <label><button id="pull">pull params</button> <button id="pushall">push all</button></label>
       </fieldset>
     </div>
   </section>
@@ -130,11 +131,17 @@ $('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).va
 $('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
 $('grid').oninput = (e) => { showGrid = (e.target as HTMLInputElement).checked; drawGrid(); };
 $('pause').oninput = (e) => { paused = (e.target as HTMLInputElement).checked; };
-for (const r of document.querySelectorAll<HTMLInputElement>('input[name=tm]')) r.oninput = () => { timeMode = r.value as any; demoClock = Date.now(); };
+function selectTimeMode(mode: typeof timeMode): void {
+  // Demo continues from the displayed time, including a manually selected starting time.
+  if (mode === 'demo' && timeMode !== 'demo') demoClock = currentDate().getTime();
+  timeMode = mode;
+  $<HTMLInputElement>(`tm-${mode}`).checked = true;
+}
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name=tm]')) r.oninput = () => selectTimeMode(r.value as typeof timeMode);
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name=src]')) r.oninput = () => { inputSource = r.value as any; if (inputSource === 'device') askOrientation(); };
-$('demospeed').oninput = (e) => { demoSpeed = +(e.target as HTMLInputElement).value; };
-$('seth').oninput = (e) => { setClock.h = +(e.target as HTMLInputElement).value; };
-$('setm').oninput = (e) => { setClock.m = +(e.target as HTMLInputElement).value; };
+$('demospeed').oninput = (e) => { demoSpeed = +(e.target as HTMLInputElement).value; selectTimeMode('demo'); };
+$('seth').oninput = (e) => { setClock.h = +(e.target as HTMLInputElement).value; selectTimeMode('set'); };
+$('setm').oninput = (e) => { setClock.m = +(e.target as HTMLInputElement).value; selectTimeMode('set'); };
 $('resetview').onclick = () => {
   Object.assign(overlay, DEFAULT_OVERLAY); Object.assign(manual, DEFAULT_VIEW.manual); Object.assign(setClock, DEFAULT_VIEW.setClock);
   ({ scale, showGrid, paused, timeMode, demoSpeed } = DEFAULT_VIEW);
@@ -254,7 +261,8 @@ async function pushTime(): Promise<void> {
        !Number.isInteger(setClock.m) || setClock.m < 0 || setClock.m > 59))) throw new Error('invalid time');
     await transport.setDemoSpeed(speed);
     await transport.setTime(d.getTime(), -d.getTimezoneOffset());
-    $('serialst').textContent = speed === 0 ? 'time frozen' : timeMode === 'demo' ? `demo ×${speed} set` : 'real time set';
+    const mode = speed === 0 ? 'frozen' : speed === 1 ? 'real speed' : `demo ×${speed}`;
+    $('serialst').textContent = `${d.toTimeString().slice(0, 8)} sent (${mode})`;
   } catch (e) { $('serialst').textContent = String(e); }
   finally { button.disabled = false; }
 }

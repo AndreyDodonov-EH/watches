@@ -122,6 +122,7 @@ struct Tube;
 // ---------------------------------------------------------------------------------------------
 struct Palette {
   uint16_t rows[TUBE_HEIGHT_MAX], bubbleIn[TUBE_HEIGHT_MAX], tubeBackRows[TUBE_HEIGHT_MAX];
+  uint16_t traceRows[TUBE_HEIGHT_MAX]; // dried pigment, independent of bulk liquid transparency
   uint16_t body, tubeBack, bubbleRim;
   float rowK[TUBE_HEIGHT_MAX];   // luma weight per row for front brightening (sim step 3a)
   uint32_t gen = 0; int H = 0; float light = 0; bool valid = false;   // cache key (light is exact: hit while the tube is at rest)
@@ -370,15 +371,20 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     // Transparent liquid shows the per-row tube-back gradient. The highlight remains a surface
     // reflection and goes on after it.
     c = scale(c, br);
+    RGB residue = c;
     c = mix(c, scale(back, p.brightness), p.liquidTransparency);
     if (y >= hiTop && y < hiTop + p.highlightH) {
       float k = powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
       c = mix(c, liquidHiScaled, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
+      residue = mix(residue, liquidHiScaled, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
     float gw = glassW(p, y, hiTop, lam);
     float glassWet = gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency);
     pal.tubeBackRows[y] = q(scale(mix(back, ghi, gw), p.brightness));
     c = ambientize(mix(c, glassHiScaled, glassWet), bodyL, ambAmt);   // glass weight rises to the dry-side one with transparency
+    // Dried pigment uses opaque-liquid shading; traceAmount / drying supply its coverage.
+    residue = ambientize(mix(residue, glassHiScaled, gw * p.glassOverLiquid), bodyL, p.ambientLight);
+    pal.traceRows[y] = q(scale(to888(q(residue)), 0.85f));
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
   }
@@ -989,8 +995,6 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       float a = v > 0 ? traceGamma(v * (1.0f / TRACE_FULL)) * 255.0f * p.traceAmount * traceStreak(x + (uint32_t)idx * 6151u) : 0.0f;
       traceA[x] = (uint8_t)(fminf(255.0f, a) + 0.5f);
     }
-    uint16_t traceCol[TUBE_HEIGHT_MAX];
-    for (int ry = 0; ry < H; ry++) traceCol[ry] = q(scale(to888(pal.rows[ry]), 0.85f));
     for (int ry = 0; ry < H; ry++) {
       float d = (ry - yc) / yc;
       int rowW = (int)((0.4f + 0.6f * d * d) * 256.0f + 0.5f), y = y0 + ry;
@@ -998,7 +1002,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       for (int x = a0; x < a1; x++) {
         if (x > xiL && x < xi) continue;
         int a = (traceA[x] * rowW) >> 8;
-        if (a) pxaT(x, y, traceCol[ry], a);
+        if (a) pxaT(x, y, pal.traceRows[ry], a);
       }
     }
   }
