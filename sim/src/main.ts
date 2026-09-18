@@ -76,7 +76,7 @@ app.innerHTML = `
       <fieldset><legend>Device</legend>
         <label><select id="link"><option value="serial">Web Serial</option><option value="ble">Bluetooth</option></select> <button id="serialbtn">connect</button> <span id="serialst">disconnected</span></label>
         <label><input type="checkbox" id="livepush" checked> push params live</label>
-        <label><button id="pull">pull params</button> <button id="settime">set time</button> <button id="pushall">push all</button></label>
+        <label><button id="pull">pull params</button> <button id="settime" title="Send the selected Time mode: real, demo speed, or a frozen set time">set time</button> <button id="pushall">push all</button></label>
       </fieldset>
     </div>
   </section>
@@ -218,7 +218,7 @@ $('serialbtn').onclick = async () => {
   transport = links[$<HTMLSelectElement>('link').value]; serial.attach(transport);
   if (!transport.supported) { $('serialst').textContent = `${transport instanceof BleTransport ? 'Web Bluetooth' : 'Web Serial'} not supported (use Chrome)`; return; }
   try { await transport.connect(); } catch { return; }
-  const d = new Date(); await transport.setTime(d.getTime(), -d.getTimezoneOffset());  // port open may have reset the board
+  await pushTime();  // port open may have reset the board
   await serial.setStream(true);
   srcRadio('serial').checked = true; inputSource = 'serial';
 };
@@ -242,7 +242,23 @@ $('pull').onclick = async () => {
   catch (e) { $('serialst').textContent = String(e); }
 };
 $('pushall').onclick = async () => { if (!transport.connected) return; await transport.setParams(params); $('serialst').textContent = 'pushed'; };
-$('settime').onclick = async () => { const d = new Date(); await transport.setTime(d.getTime(), -d.getTimezoneOffset()); $('serialst').textContent = 'time set'; };
+async function pushTime(): Promise<void> {
+  if (!transport.connected) { $('serialst').textContent = 'connect first'; return; }
+  const button = $<HTMLButtonElement>('settime');
+  button.disabled = true;
+  try {
+    const d = currentDate();
+    const speed = timeMode === 'demo' ? demoSpeed : timeMode === 'set' ? 0 : 1;
+    if (!Number.isFinite(d.getTime()) || (timeMode === 'set' &&
+      (!Number.isInteger(setClock.h) || setClock.h < 0 || setClock.h > 23 ||
+       !Number.isInteger(setClock.m) || setClock.m < 0 || setClock.m > 59))) throw new Error('invalid time');
+    await transport.setDemoSpeed(speed);
+    await transport.setTime(d.getTime(), -d.getTimezoneOffset());
+    $('serialst').textContent = speed === 0 ? 'time frozen' : timeMode === 'demo' ? `demo ×${speed} set` : 'real time set';
+  } catch (e) { $('serialst').textContent = String(e); }
+  finally { button.disabled = false; }
+}
+$('settime').onclick = pushTime;
 
 // params panel
 const LAYOUT_KEYS: (keyof Params)[] = ['tubeHeight', 'hoursY', 'minutesY'];

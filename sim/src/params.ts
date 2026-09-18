@@ -123,6 +123,7 @@ export interface Params {
   digitDryLens: number;  // -1..1 depth warp for rear digits behind air; negative stretches the edges
   topLens: number;       // -1..1 pre-distortion for digits printed on top; negative compensates physical glass magnification
   topParallax: number;   // px across-shift of top digits per g of across-tilt; counters the apparent shift under the physical lens
+  digitParallax: number; // px shift of rear digits behind the liquid per g of tilt (along → along the tube, across → across it); behind air none
   liquidTransparency: number; // 0..1 how much of ticks/digits shows through the liquid (0 = opaque liquid)
   markContrast: number;  // min luma difference a tick/digit must keep from the liquid behind it (0 = off)
   digitsLeadingZero: boolean; // minutes as 05,10,... instead of 5,10,...
@@ -132,16 +133,15 @@ export interface Params {
   digitMinuteStart: number; // first labelled minute (0 = step)
   digitsLastOnlyH: boolean; // hours: one label only, the last passed hour (none before 1)
   digitsLastOnlyM: boolean; // minutes: one label only, last passed multiple of digitMinuteStep
-  // --- free liquid: the column slides as a slug; a wrist turn into the reading pose parks it home ---
-  freeLiquid: boolean;   // false = pinned column (time always shown)
+  // --- tilt-controlled liquid: gentle tilt reads time, strong tilt releases the slug ---
+  freeLiquid: boolean;   // true = automatic tilt response; false = always pinned
   freeGain: number;      // px/s^2 per g of along-tilt
   freeDamp: number;      // 1/s viscous drag
   freeBounce: number;    // 0..1 restitution at the tube ends
   freeHomeK: number;     // 1/s^2 pull toward the home end while reading (critically damped)
-  readFaceUp: number;    // 0..1 min face-up gravity component of the reading pose
-  readAlongMax: number;  // g, max |along| of the reading pose
-  readTurn: number;      // dps of gyro energy that counts as a wrist turn (0 = pose alone reads)
-  readHold: number;      // s the time stays shown after the turn, while the pose holds
+  readTiltStart: number; // degrees from horizontal: time held below this angle
+  readTiltEnd: number;   // degrees from horizontal: fully free above this angle
+  playHold: number;      // seconds to stay free after deliberate back-and-forth tilting; 0 disables
   // --- physics (fixed-step 50 Hz) ---
   fillK: number;         // spring stiffness of fill-edge position (1/s^2)
   fillDamp: number;      // damping ratio-ish (1/s)
@@ -174,7 +174,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 15;
+export const PARAMS_VERSION = 17;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -271,6 +271,7 @@ export const DEFAULT_PARAMS: Params = {
   digitDryLens: -0.4,
   topLens: 0,
   topParallax: 0,
+  digitParallax: 3,
   liquidTransparency: 0.17,
   markContrast: 0,
   digitsLeadingZero: false,
@@ -280,15 +281,14 @@ export const DEFAULT_PARAMS: Params = {
   digitMinuteStart: 0,
   digitsLastOnlyH: false,
   digitsLastOnlyM: false,
-  freeLiquid: false,
+  freeLiquid: true,
   freeGain: 500,
   freeDamp: 1.5,
   freeBounce: 0.25,
   freeHomeK: 30,
-  readFaceUp: 0.7,
-  readAlongMax: 0.3,
-  readTurn: 80,
-  readHold: 5,
+  readTiltStart: 20,
+  readTiltEnd: 50,
+  playHold: 5,
   fillK: 246,
   fillDamp: 14.8,
   fillSloshGain: 5.5,
@@ -363,9 +363,9 @@ const MODERN_BASE: Partial<Params> = {
   digitTint: '#827c40', digitTintAmount: 0.9, digitTone: -0.4,
   digitScaleX: 3.5, digitScaleY: 3.25, digitBottom: 15, digitHourStep: 1, digitHourStart: 0, digitsLastOnlyH: false,
   digitScaleXMin: 2.5, digitScaleYMin: 2.75, digitBottomMin: 13, digitMinuteStep: 5, digitMinuteStart: 0, digitsLeadingZero: false, digitsLastOnlyM: false,
-  bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10,
+  bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
   liquidTransparency: 0.52, markContrast: 0,
-  freeLiquid: true, freeGain: 570, freeDamp: 0.8, freeBounce: 0.15, freeHomeK: 150, readFaceUp: 1, readAlongMax: 0.3, readTurn: 125, readHold: 11,
+  freeLiquid: true, freeGain: 570, freeDamp: 0.8, freeBounce: 0.15, freeHomeK: 150,
   fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6, angleTiltGain: 5.5, angleGyroGain: 0.37, angleMax: 6,
   lightPhys: 1, lightAngle: 73,
   brightness: 1, liquidBright: 2, tickBright: 1.2, digitBright: 1.75,
@@ -619,8 +619,8 @@ export const PRESET_MOLTEN: Partial<Params> = {
   liquidBright: 1.3, tickBright: 1, digitBright: 1.1,
 };
 
-/** Free liquid: the column slides as a slug and only parks to show the time on a wrist turn into the reading pose
- *  (readFaceUp 1 = never, i.e. always free — lower it to ~0.75 to enable reads). Dark bottle green, low-climb wetting
+/** Free liquid: the column slides as a slug at strong tilt and settles home at a gentle viewing angle.
+ *  Dark bottle green, low-climb wetting
  *  liquid with a watery surface (K 460, ζ≈0.12), copper gauge numerals behind the liquid. Saved 2026-08-26. */
 const PRESET_FREE: Partial<Params> = {
   ...PLAIN_TUBE_BACK,
@@ -639,7 +639,7 @@ const PRESET_FREE: Partial<Params> = {
   digitTint: '#827c40', digitTintAmount: 0.9, digitTone: -0.1, digitScaleX: 3.5, digitScaleY: 3.25,
   digitScaleXMin: 2.5, digitScaleYMin: 3, digitBottomMin: 17, digitBottom: 17, bottomLens: 0.45, digitDryLens: 0.35,
   topLens: 0.35, topParallax: -10, liquidTransparency: 0.47, markContrast: 34, digitMinuteStep: 5, digitHourStep: 1,
-  freeLiquid: true, freeGain: 990, freeDamp: 0.8, freeHomeK: 150, readFaceUp: 1, readTurn: 125, readHold: 11,
+  freeLiquid: true, freeGain: 990, freeDamp: 0.8, freeHomeK: 150,
   fillK: 756, fillDamp: 40, lightPhys: 1, brightness: 1, liquidBright: 2, digitBright: 1.53,
 };
 
@@ -657,6 +657,7 @@ export function bigLens(p: Partial<Params>): Partial<Params> {
   if (base.tubeHeight === MODERN_BASE.tubeHeight) {
     Object.assign(out, { tickMinorHeightH: 21, tickMinorHeightM: 16, digitScaleYMin: 3, digitBottom: 25, digitBottomMin: 26 });
     if (!base.ticksOnTop) Object.assign(out, { tickLens: 0.45, tickParallax: 3.75, tickDryLens: 0.45, tickEmboss: 0.25 });
+    if (!base.digitsOnTop) Object.assign(out, { digitParallax: 3.75 });
   } else {
     const k = 72 / base.tubeHeight;
     for (const key of ['tickMinorHeightH', 'tickMajorHeightH', 'tickMinorHeightM', 'tickMajorHeightM', 'digitBottom', 'digitBottomMin'] as const)
@@ -684,7 +685,7 @@ export const PRESETS: PresetEntry[] = [
   { id: 'glow', name: 'Glow stick', note: 'fluorescent green, glows past the cap, seven-segment print', p: PRESET_GLOW, mat: M('medium', 'translucent', true, true, 'none') },
   { id: 'xenon', name: 'Xenon', note: 'violet discharge tube, glowing ends, no inertia', p: PRESET_XENON, mat: M('plasma', 'translucent', true, false, 'none') },
   { id: 'molten', name: 'Molten iron', note: 'emissive orange, dense, non-wetting, forged numerals', p: PRESET_MOLTEN, mat: M('medium', 'opaque', true, false, 'trapped') },
-  { id: 'free', name: 'Free liquid', note: 'bottle green slug that slides with the wrist; parks to show time on a raise', p: PRESET_FREE },
+  { id: 'free', name: 'Free liquid', note: 'bottle green slug; gentle tilt reads time, strong tilt flows', p: PRESET_FREE },
 ];
 // Every preset also exists for the big rod: `<id>-big`.
 PRESETS.push(...PRESETS.map((e) => ({ ...e, id: e.id + '-big', name: e.name + ' (big lens)', p: bigLens(e.p), big: true })));
@@ -712,6 +713,8 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   // older presets: same warp behind air as behind liquid, as before
   if (!('tickDryLens' in r) && typeof r.tickLens === 'number') r.tickDryLens = r.tickLens;
   if (!('digitDryLens' in r) && typeof r.bottomLens === 'number') r.digitDryLens = r.bottomLens;
+  // older presets: rear digits refract like the rear ticks
+  if (!('digitParallax' in r) && typeof r.tickParallax === 'number') r.digitParallax = r.tickParallax;
   if (from < 2) {
     // v1 counted "major every N-th minor tick"; v2 counts units (hours / minutes).
     for (const [every, step] of [['tickMajorEveryH', 'tickStepH'], ['tickMajorEveryM', 'tickStepM']] as const) {
@@ -727,6 +730,12 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
       'angleGyroGain', 'angleMax', 'acrossK', 'acrossDamp', 'acrossGyroGain', 'shakeGain', 'deadzone', 'accelLpHz', 'gyroHpHz',
       'gyroDeadzone', 'gyroMax', 'inputGain']) delete r[k];
   }
+  // Gesture thresholds/timers have no angle equivalent. Old exports get the new viewing band.
+  if (from < 16) {
+    r.readTiltStart = DEFAULT_PARAMS.readTiltStart;
+    r.readTiltEnd = DEFAULT_PARAMS.readTiltEnd;
+  }
+  if (from < 17) r.playHold = DEFAULT_PARAMS.playHold;
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -853,6 +862,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   bottomLens: { help: 'Depth warp for digits behind the liquid.', group: 'Digits', label: 'rear lens', min: 0, max: 1, step: 0.05 },
   digitDryLens: { help: 'Depth warp for rear digits where the tube is empty, chosen per pixel column. Negative stretches the edges instead of magnifying the middle.', group: 'Digits', label: 'rear lens behind air', min: -1, max: 1, step: 0.05 },
   topParallax: { help: 'Across-shift of top digits per g of across-tilt, countering the apparent shift under the physical lens. Sign flips direction.', group: 'Digits', label: 'front parallax px/g', min: -10, max: 10, step: 0.25 },
+  digitParallax: { help: 'Rear digits seen through the liquid slide with tilt (along-tilt along the tube, across-tilt across it) while those behind air stay put, so a label straddling the fill edge breaks at it. Same scale as the tick parallax.', group: 'Digits', label: 'rear parallax px/g', min: 0, max: 10, step: 0.25 },
   // digits — hours tube
   digitHourStep: { help: 'Label every N hours.', group: 'Digits · hours', label: 'label every N h', min: 1, max: 6, step: 1 },
   digitsLastOnlyH: { help: 'Show only the last passed hour.', group: 'Digits · hours', label: 'last passed only' },
@@ -868,15 +878,14 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   digitScaleXMin: { help: 'Minutes tube horizontal scale.', group: 'Digits · minutes', label: 'scale X', min: 0.5, max: 6, step: 0.25 },
   digitScaleYMin: { help: 'Minutes tube vertical scale.', group: 'Digits · minutes', label: 'scale Y', min: 0.5, max: 6, step: 0.25 },
   digitBottomMin: { help: 'Minutes tube: px from the tube bottom edge to the digit baseline.', group: 'Digits · minutes', label: 'baseline from bottom', min: 0, max: 40, step: 1 },
-  freeLiquid: { help: 'The column is a free slug that slides along the tube under gravity. A wrist turn into the reading pose (face up, tube level) parks it at its home end for readHold seconds so the time edge is true; otherwise it goes where gravity takes it.', group: 'Free liquid', label: 'free liquid' },
+  freeLiquid: { help: 'Automatically holds the time at gentle tilt and releases the liquid as tilt increases. Deliberate back-and-forth tilts keep it free for the play hold, even through the viewing angle. Turn off to keep the column pinned.', group: 'Free liquid', label: 'tilt-controlled flow' },
   freeGain: { help: 'Slug acceleration per g of along-tilt, px/s².', group: 'Free liquid', label: 'gravity px/s²/g', min: 0, max: 2000, step: 10 },
   freeDamp: { help: 'Viscous drag on the slug, 1/s. Higher = syrup.', group: 'Free liquid', label: 'drag', min: 0, max: 20, step: 0.1 },
   freeBounce: { help: 'Restitution when the slug hits a tube end. 0 = splat, 1 = elastic.', group: 'Free liquid', label: 'end bounce', min: 0, max: 1, step: 0.05 },
   freeHomeK: { help: 'Pull toward the home end while reading, 1/s² (critically damped).', group: 'Free liquid', label: 'home pull K', min: 1, max: 300, step: 1 },
-  readFaceUp: { help: 'Reading pose: minimum face-up component of gravity (1 = perfectly flat).', group: 'Free liquid', label: 'pose: face-up min', min: 0, max: 1, step: 0.05 },
-  readAlongMax: { help: 'Reading pose: maximum along-tube tilt, g.', group: 'Free liquid', label: 'pose: |along| max g', min: 0, max: 1, step: 0.05 },
-  readTurn: { help: 'Gyro energy (dps, both axes) that counts as the wrist turn which arms a read. 0 = the pose alone reads (sliders have no gyro: use the raise-wrist button or 0).', group: 'Free liquid', label: 'turn dps to arm', min: 0, max: 400, step: 5 },
-  readHold: { help: 'Seconds the time stays shown after the turn while the pose holds.', group: 'Free liquid', label: 'read hold s', min: 0.5, max: 30, step: 0.5 },
+  readTiltStart: { help: 'Degrees from horizontal, counting both tilt axes. Below this angle the liquid settles to the exact time; above it the home pull gradually releases.', group: 'Free liquid', label: 'read below °', min: 0, max: 89, step: 1 },
+  readTiltEnd: { help: 'Degrees from horizontal at which the liquid flows completely freely. The transition is smooth; this is kept at least 1° above the reading angle.', group: 'Free liquid', label: 'fully free above °', min: 1, max: 90, step: 1 },
+  playHold: { help: 'Seconds to keep flowing freely after substantial back-and-forth tilts within 2 seconds. Further tilts refresh the hold; a steady pose does not. Zero disables the hold.', group: 'Free liquid', label: 'play hold s', min: 0, max: 30, step: 0.5 },
   fillK: { help: 'Spring stiffness of fill-edge position, 1/s².', group: 'Physics', min: 1, max: 800, step: 1 },
   fillDamp: { help: 'Damping of the fill-edge spring, 1/s.', group: 'Physics', min: 0, max: 40, step: 0.1 },
   fillSloshGain: { help: 'Fill-edge shift per g of along-tube acceleration, px.', group: 'Physics', label: 'slosh px/g (capped 30)', min: 0, max: 30, step: 0.5 },

@@ -13,7 +13,7 @@ import {
   ANGLE_HARD_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, GravityNorm, ImuFilter, PHYS_DT,
   columnLen, newTube, stepTube, type TiltInput,
 } from '../src/physics';
-import { DEFAULT_PARAMS } from '../src/params';
+import { DEFAULT_PARAMS, PRESETS, migrateParams, presetParams } from '../src/params';
 
 // Constants copied from spec/layout.ts + render.ts edgeX so this file needs no '@spec' alias.
 const TUBE_LENGTH_PX = 536, TUBE_HEIGHT_PX = 72;
@@ -74,7 +74,7 @@ const scenarios: [string, number[][]][] = [
       [GBIAS[0] + 200 * Math.cos(2 * Math.PI * 8 * t), 0, 0.4], 0.02, 5)),
 ];
 
-const p = { ...DEFAULT_PARAMS };
+const p = { ...DEFAULT_PARAMS, freeLiquid: false };
 // Max distance the drawn edge may ever sit from the time-true fill edge (px):
 // hard slosh cap + tan(hard angle cap)·(H/2) + |meniscus| + 1 px slack.
 const EDGE_BUDGET = FILL_SLOSH_MAX_PX + Math.tan((ANGLE_HARD_MAX_DEG * Math.PI) / 180) * (TUBE_HEIGHT_PX / 2)
@@ -115,8 +115,8 @@ for (const [name, samples] of scenarios) {
   console.log(`${failures ? '' : 'ok  '}${name}: edge dev ${maxDev.toFixed(1)} px (budget ${EDGE_BUDGET.toFixed(1)}), angle ${maxAngle.toFixed(1)}°, slosh ${maxFill.toFixed(1)} px, cap ${maxCap.toFixed(1)} px, tilt in ${maxIn.toFixed(2)} g`);
 }
 
-// Free liquid: the slug must stay inside the tube through every scenario, come home on a wrist
-// turn into the reading pose, and leave again once the hold expires and the tube tilts.
+// Automatic liquid: remain bounded during motion, read indefinitely at gentle tilt, release
+// at strong tilt, and return without a gyro gesture. Exercise both elapsed and remaining time.
 {
   const pf = { ...DEFAULT_PARAMS, freeLiquid: true };
   for (const [name, samples] of scenarios) {
@@ -132,20 +132,128 @@ for (const [name, samples] of scenarios) {
     if (bad) fail(`free liquid, ${name}: slug left the tube (${tube.slugPos})`);
     else console.log(`ok  free liquid, ${name}: slug ${tube.slugPos.toFixed(1)} px, reading ${tube.reading.toFixed(2)}`);
   }
-  // turn → pose → read → hold expires → tilt → slides away
-  const tube = newTube(); tube.fillTarget = 0.3;
-  const step = (inp: TiltInput, n: number) => { for (let i = 0; i < n; i++) stepTube(tube, inp, pf); };
-  step({ along: 0.6, across: 0, gyroAlong: 0, gyroAcross: 0 }, 150);          // tilted: slug slides to the far end
-  const travel = TUBE_LENGTH_PX - columnLen(0.3, pf);
-  if (tube.slugPos < travel - 5) fail(`free liquid: slug did not slide out (${tube.slugPos.toFixed(1)} of ${travel.toFixed(1)})`);
-  step({ along: 0, across: 0.1, gyroAlong: 300, gyroAcross: 0 }, 20);        // wrist turn into the pose
-  step({ along: 0, across: 0.1, gyroAlong: 0, gyroAcross: 0 }, 150);         // hold still 3 s
-  if (tube.reading < 0.95 || tube.slugPos > 2) fail(`free liquid: did not come home on a wrist turn (reading ${tube.reading.toFixed(2)}, slug ${tube.slugPos.toFixed(1)})`);
-  else console.log(`ok  free liquid: wrist turn parks the slug home (slug ${tube.slugPos.toFixed(1)} px)`);
-  step({ along: 0, across: 0.1, gyroAlong: 0, gyroAcross: 0 }, 50 * (pf.readHold + 1));
-  step({ along: 0.6, across: 0, gyroAlong: 0, gyroAcross: 0 }, 150);
-  if (tube.reading > 0.05 || tube.slugPos < travel - 5) fail(`free liquid: stayed home after the hold expired (reading ${tube.reading.toFixed(2)}, slug ${tube.slugPos.toFixed(1)})`);
-  else console.log('ok  free liquid: released after the hold');
+  for (const remaining of [false, true]) for (const fill of [0, 0.02, 0.3, 0.98, 1]) {
+    const pp = { ...pf, remaining };
+    const tube = newTube(); tube.fillTarget = fill;
+    const travel = TUBE_LENGTH_PX - columnLen(fill, pp), home = remaining ? travel : 0;
+    const sign = remaining ? -1 : 1;
+    const filt = new ImuFilter();
+    const step = (along: number, across: number, n: number) => {
+      for (let i = 0; i < n; i++) {
+        stepTube(tube, filt.step({ along, across, gyroAlong: 0, gyroAcross: 0 }, pp), pp);
+        if (!Number.isFinite(tube.slugPos) || tube.slugPos < 0 || tube.slugPos > travel + 1e-6)
+          throw new Error(`automatic liquid escaped: ${tube.slugPos}, travel ${travel}`);
+      }
+    };
+    step(sign * 0.9, 0, 250);
+    if (tube.reading > 0.01 || Math.abs(tube.slugPos - home) < travel - 5)
+      fail(`automatic liquid: did not release (remaining=${remaining}, fill=${fill})`);
+    step(sign * 0.2, 0.1, 200);
+    if (tube.reading < 0.99 || Math.abs(tube.slugPos - home) > 0.1 || Math.abs(tube.fillPos) > 0.1)
+      fail(`automatic liquid: did not return to accurate time (remaining=${remaining}, fill=${fill}, pos=${tube.slugPos})`);
+    step(sign * 0.2, 0.1, 3000); // a full minute: no timeout, no turn required
+    if (tube.reading < 0.99 || Math.abs(tube.slugPos - home) > 0.01 || Math.abs(tube.fillPos) > 0.01)
+      fail('automatic liquid: reading drifted while held');
+    step(sign * 0.9, 0, 250);
+    if (tube.reading > 0.01 || Math.abs(tube.slugPos - home) < travel - 5)
+      fail('automatic liquid: failed to release again');
+  }
+  console.log('ok  automatic liquid: tilt → read → hold 60 s → tilt, both directions and fill extremes');
+
+  // Both axes and diagonals use the physical angle, independent of artistic input gain/deadzone.
+  for (const inputGain of [0.1, 1, 2]) for (const axis of ['along', 'across', 'diagonal']) {
+    const pp = { ...pf, inputGain, deadzone: 0.2 };
+    const tube = newTube(); tube.fillTarget = 0.3;
+    const filt = new ImuFilter();
+    let prev = 1;
+    for (const degrees of [0, 20, 25, 35, 45, 50, 80]) {
+      const g = Math.sin(degrees * Math.PI / 180);
+      const raw = { along: axis === 'across' ? 0 : g / (axis === 'diagonal' ? Math.SQRT2 : 1),
+        across: axis === 'along' ? 0 : g / (axis === 'diagonal' ? Math.SQRT2 : 1), gyroAlong: 0, gyroAcross: 0 };
+      for (let i = 0; i < 250; i++) stepTube(tube, filt.step(raw, pp), pp);
+      if (tube.reading > prev + 1e-6) fail('automatic liquid: release is not monotonic');
+      if (degrees <= 20 && tube.reading < 0.999) fail('automatic liquid: gentle tilt released');
+      if (degrees === 35 && Math.abs(tube.reading - 0.5) > 0.001) fail('automatic liquid: midpoint depends on axis/gain');
+      if (degrees >= 50 && tube.reading > 0.001) fail('automatic liquid: strong tilt held');
+      prev = tube.reading;
+    }
+  }
+  console.log('ok  automatic liquid: smooth viewing band across axes and input gains');
+
+  // Every liquid material must return home with its own drag/spring tuning.
+  for (const e of PRESETS) {
+    const pp = presetParams(e), tube = newTube(); tube.fillTarget = 0.3; tube.slugPos = 200; tube.reading = 0;
+    for (let i = 0; i < 250; i++) stepTube(tube, { along: 0.2 * pp.inputGain, across: 0, gyroAlong: 0, gyroAcross: 0 }, pp);
+    if (Math.abs(tube.slugPos) > 0.1 || !Number.isFinite(tube.slugPos)) fail(`${e.id}: reading did not settle (${tube.slugPos})`);
+  }
+  const migrated = migrateParams({ v: 15, freeLiquid: true, readFaceUp: 1, readTurn: 125, readHold: 11 });
+  if (migrated.readTiltStart !== 20 || migrated.readTiltEnd !== 50 || 'readTurn' in migrated)
+    fail('automatic liquid: legacy gesture settings did not migrate');
+  for (const [start, end] of [[50, 20], [90, 90], [0, 0]]) {
+    const pp = { ...pf, readTiltStart: start, readTiltEnd: end }, tube = newTube();
+    for (let i = 0; i < 100; i++) stepTube(tube, { along: 0.7, across: 0.7, gyroAlong: 0, gyroAcross: 0 }, pp);
+    if (!Number.isFinite(tube.reading) || tube.reading < 0 || tube.reading > 1) fail('automatic liquid: invalid band produced invalid state');
+  }
+  console.log('ok  automatic liquid: material presets, legacy settings and overlapping thresholds');
 }
+// Play needs opposite substantial tilts, then remains free through the viewing angle.
+// Use the real filter and gradual movements, including roll and low/high artistic gains.
+for (const axis of ['along', 'across', 'diagonal']) for (const inputGain of [0.1, 1, 2]) {
+  const pp = { ...DEFAULT_PARAMS, inputGain }, tube = newTube(), filter = new ImuFilter();
+  tube.fillTarget = 0.3;
+  let position = 0;
+  const move = (target: number, seconds: number) => {
+    const from = position, n = Math.round(seconds / PHYS_DT);
+    for (let i = 0; i < n; i++) {
+      position = from + (target - from) * (i + 1) / n;
+      const raw = { along: axis === 'across' ? 0 : position / (axis === 'diagonal' ? Math.SQRT2 : 1),
+        across: axis === 'along' ? 0 : position / (axis === 'diagonal' ? Math.SQRT2 : 1), gyroAlong: 0, gyroAcross: 0 };
+      stepTube(tube, filter.step(raw, pp), pp);
+      if (!Number.isFinite(tube.slugPos) || tube.slugPos < 0 || tube.slugPos > TUBE_LENGTH_PX - columnLen(tube.fillTarget, pp) + 1e-6)
+        fail('play: slug escaped');
+    }
+  };
+  const expectNoPlay = (label: string) => { if (tube.playTimer > 0) fail(`play: ${label} triggered a hold (${axis}, gain ${inputGain})`); };
+  move(0, 0.5);
+  move(0.9, 0.6); // lower arm: one stroke, then leave it down
+  expectNoPlay('single lowering');
+  move(0.9, 8);
+  expectNoPlay('steady hand down');
+  move(0, 0.6); move(0, 2);
+  expectNoPlay('single raise to read');
+  if (tube.reading < 0.99) fail('play: ordinary raise delayed reading');
+  move(0.9, 5); move(0, 5);
+  expectNoPlay('slow posture changes');
+  for (let i = 0; i < 100; i++) move(i % 2 ? 0.02 : -0.02, 0.04);
+  expectNoPlay('small jitter');
+
+  move(0.8, 0.5); move(-0.8, 0.7); move(0.1, 0.4); move(0.1, 1);
+  if (tube.playTimer < 3 || tube.reading > 0.01) fail(`play: back-and-forth did not hold free (${axis}, gain ${inputGain})`);
+  const left = tube.playTimer;
+  move(0.1, 1);
+  if (Math.abs(tube.playTimer - (left - 1)) > 1e-5) fail('play: steady pose refreshed the timer');
+  move(0.8, 0.5);
+  if (tube.playTimer < pp.playHold - 0.5) fail('play: further tilt did not refresh');
+  move(0.1, 0.5); move(0.1, pp.playHold + 4);
+  if (tube.playTimer !== 0 || tube.reading < 0.99 || Math.abs(tube.slugPos) > 0.1)
+    fail('play: failed to settle home after expiry');
+
+  move(-0.8, 0.5); move(0.8, 0.7); move(0.8, pp.playHold + 1);
+  if (tube.playTimer !== 0 || tube.reading > 0.01) fail('play: expiry at steep tilt should retain ordinary free flow');
+  move(0, 0.6); move(0, 3);
+  expectNoPlay('raise after play expired while down');
+
+  move(0.8, 0.5); move(-0.8, 0.7);
+  pp.freeLiquid = false; move(0, 0.5);
+  if (tube.playTimer !== 0 || tube.slugPos !== 0) fail('play: pinned override did not cancel');
+  pp.freeLiquid = true; pp.playHold = 0;
+  move(0.8, 0.5); move(-0.8, 0.7); move(0, 0.5); move(0, 3);
+  if (tube.playTimer !== 0 || tube.reading < 0.99) fail('play: zero duration did not disable the hold');
+}
+console.log('ok  play hold: intentional reversals, refresh, expiry, quiet poses, slow motion, axes/gains and overrides');
+const previousTilt = migrateParams({ v: 16, readTiltStart: 15, readTiltEnd: 60 });
+if (previousTilt.playHold !== 5 || previousTilt.readTiltStart !== 15 || previousTilt.readTiltEnd !== 60)
+  fail('play: migration lost custom viewing angles');
+if (migrateParams({ v: 17, playHold: 0 }).playHold !== 0) fail('play: migration lost disabled hold');
 if (failures) throw new Error(`${failures} failure(s)`);
 console.log('all scenarios within bounds');

@@ -112,6 +112,7 @@ struct Params {
   float digitDryLens;
   float topLens;
   float topParallax;
+  float digitParallax;
   float liquidTransparency;
   float markContrast;
   bool digitsLeadingZero;
@@ -126,10 +127,9 @@ struct Params {
   float freeDamp;
   float freeBounce;
   float freeHomeK;
-  float readFaceUp;
-  float readAlongMax;
-  float readTurn;
-  float readHold;
+  float readTiltStart;
+  float readTiltEnd;
+  float playHold;
   float fillK;
   float fillDamp;
   float fillSloshGain;
@@ -158,7 +158,7 @@ struct Params {
 };
 
 #define PARAMS_NUM_FIELDS 151
-#define PARAMS_SCHEMA_CRC 0x73016811u  // field names+types; guards the NVS blob
+#define PARAMS_SCHEMA_CRC 0x2c46422fu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -271,6 +271,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"digitDryLens", 'f', (uint16_t)offsetof(Params, digitDryLens)},
   {"topLens", 'f', (uint16_t)offsetof(Params, topLens)},
   {"topParallax", 'f', (uint16_t)offsetof(Params, topParallax)},
+  {"digitParallax", 'f', (uint16_t)offsetof(Params, digitParallax)},
   {"liquidTransparency", 'f', (uint16_t)offsetof(Params, liquidTransparency)},
   {"markContrast", 'f', (uint16_t)offsetof(Params, markContrast)},
   {"digitsLeadingZero", 'b', (uint16_t)offsetof(Params, digitsLeadingZero)},
@@ -285,10 +286,9 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"freeDamp", 'f', (uint16_t)offsetof(Params, freeDamp)},
   {"freeBounce", 'f', (uint16_t)offsetof(Params, freeBounce)},
   {"freeHomeK", 'f', (uint16_t)offsetof(Params, freeHomeK)},
-  {"readFaceUp", 'f', (uint16_t)offsetof(Params, readFaceUp)},
-  {"readAlongMax", 'f', (uint16_t)offsetof(Params, readAlongMax)},
-  {"readTurn", 'f', (uint16_t)offsetof(Params, readTurn)},
-  {"readHold", 'f', (uint16_t)offsetof(Params, readHold)},
+  {"readTiltStart", 'f', (uint16_t)offsetof(Params, readTiltStart)},
+  {"readTiltEnd", 'f', (uint16_t)offsetof(Params, readTiltEnd)},
+  {"playHold", 'f', (uint16_t)offsetof(Params, playHold)},
   {"fillK", 'f', (uint16_t)offsetof(Params, fillK)},
   {"fillDamp", 'f', (uint16_t)offsetof(Params, fillDamp)},
   {"fillSloshGain", 'f', (uint16_t)offsetof(Params, fillSloshGain)},
@@ -318,7 +318,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  15, // v
+  17, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -426,6 +426,7 @@ static const Params PRESET_1 = {
   -0.4f, // digitDryLens
   0.0f, // topLens
   0.0f, // topParallax
+  3.0f, // digitParallax
   0.17f, // liquidTransparency
   0.0f, // markContrast
   false, // digitsLeadingZero
@@ -435,15 +436,14 @@ static const Params PRESET_1 = {
   0.0f, // digitMinuteStart
   false, // digitsLastOnlyH
   false, // digitsLastOnlyM
-  false, // freeLiquid
+  true, // freeLiquid
   500.0f, // freeGain
   1.5f, // freeDamp
   0.25f, // freeBounce
   30.0f, // freeHomeK
-  0.7f, // readFaceUp
-  0.3f, // readAlongMax
-  80.0f, // readTurn
-  5.0f, // readHold
+  20.0f, // readTiltStart
+  50.0f, // readTiltEnd
+  5.0f, // playHold
   246.0f, // fillK
   14.8f, // fillDamp
   5.5f, // fillSloshGain

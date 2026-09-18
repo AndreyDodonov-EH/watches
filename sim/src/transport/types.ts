@@ -15,4 +15,5 @@ export interface WatchTransport {
   setParam(key: ParamKey, value: Params[ParamKey]): Promise<boolean>;
   setParams(patch: Partial<Params>): Promise<void>;
   setTime(epochMs: number, tzOffsetMin: number): Promise<void>;
+  setDemoSpeed(speed: number): Promise<void>;
 }

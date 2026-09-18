@@ -38,7 +38,8 @@ and bubbles): 46 px tubes at y 12 / 185 (or `LAYOUT_WIDE` 55 px at 7 / 224), `le
 for the rod, physical light with a broad soft highlight, dark body × high `liquidBright` for a saturated tint
 at ~0.5 transparency, sprite digits behind the liquid every hour / 5 min at a mid-tube baseline, dark rear
 ticks on both edges, hysteretic wetting meniscus (contact lag 3, film 15, hard edge, faint caustic glow) and
-the **free slug** (`readFaceUp` 1, `readTurn` 125, `readHold` 11). Opaque liquids and lab glassware use
+the **tilt-controlled slug** (time held below 20°, smoothly released by 50°; deliberate back-and-forth
+tilts keep it free for `playHold`, default 5 s). Opaque liquids and lab glassware use
 `FRONT_PRINT` instead (marks on the glass). Xenon is the only pinned column — plasma is not a slug.
 
 ## Acceptance rules (checked)

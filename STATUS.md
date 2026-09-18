@@ -1,6 +1,38 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-01 (traces on glass: dried residue smears, sim + firmware)_
+_Last update: 2026-09-10 (play hold after deliberate tilts, sim + firmware)_
+
+## Play hold (2026-09-10)
+
+- Substantial opposing tilt strokes within 2 s start a 5 s free-flow hold. Each stroke changes
+  filtered in-plane gravity by at least 0.35 g; its direction must oppose the previous stroke
+  (dot product < −0.5). After play starts, further substantial strokes refresh the hold.
+- The hold overrides reading through gentle angles; once it expires, the existing smooth tilt
+  response resumes. Steady hand-down, a single raise, small jitter and slow posture changes do
+  not start or refresh a hold in replay tests. Real wrist motion still needs feel tuning.
+- Params v17 adds `playHold` (0–30 s, default 5; 0 disables). Older settings gain the default
+  while retaining their viewing angles. Pinned mode cancels play. Six scalar floats and a bool
+  per tube track the gesture; all state remains statically owned, with no allocations.
+- Verified: IMU/play replays, material checks, simulator build, native firmware motion checks,
+  and PlatformIO build. Static RAM increased by 64 bytes. Not flashed or wrist-tested.
+
+## Tilt-controlled reading (2026-09-09)
+
+- `freeLiquid` now enables automatic flow: below `readTiltStart` (20°) the slug and slosh settle
+  home; above `readTiltEnd` (50°) gravity moves it freely. Smooth interpolation and a 250 ms
+  follower soften the transition. Both filtered gravity axes count, before input gain/deadzone.
+- Reading persists while held, with no wrist gesture or timeout. Defaults and liquid presets enable
+  it; `freeLiquid=false` remains an always-pinned override (also used by the xenon plasma preset).
+- Params v16 replaces `readFaceUp/readAlongMax/readTurn/readHold` with the two angle controls.
+  Imported/browser v15 settings receive the new angle defaults and retain their pinned override.
+  Firmware's existing schema guard rejects the old NVS blob on first boot after flashing; export
+  a custom device look before upgrading if it needs preserving, then import/push it via the simulator.
+- Regression coverage: motion replays, both fill directions and fill extremes, minute-long viewing,
+  both tilt axes/diagonals, artistic gains, preset settling, migration and overlapping thresholds.
+  The initial tilt change reduced firmware state; no buffers or allocations added.
+- Verified: `check:imu`, `check:presets`, simulator production build, browser tilt/read interaction,
+  and PlatformIO firmware build. Native C++/sim comparison ran 45,000 physics frames with 180
+  sampled states: maximum slug difference 0.00037 px. Not flashed or tested on the wrist yet.
 
 ## Toolchain (decided)
 - **PlatformIO 6.1.19** (installed via `pipx`, binary `~/.local/bin/pio`) + **pioarduino platform 55.03.311**
@@ -268,6 +300,7 @@ else `display_init` fails at boot before `ble_init`.
   (`tickMajorEvery*` counts hours/minutes, migrated from the old "every N-th minor" via `params.v`).
   `ticksOnTop` selects the rear/bottom or front/top surface. Both use the cylinder `tickLens` and follow the whole-tube lens. Tilt-driven
   `tickParallax` projects them through the circular rear-half depth, producing a bow while keeping the outer endpoint attached to the tube silhouette. `tickEmboss` adds glass-cut highlight/shadow edges.
+  Rear digits refract the same way (`digitParallax`, px/g): the columns behind liquid slide with tilt, those behind air stay put, so a label straddling the fill edge breaks at it. The wet copy is placed at the fractional shift and bilinearly resampled, so it glides instead of stepping a pixel at a time.
   `tickPosH/M` independently select the top, bottom, or both edges.
   Marks inside the liquid keep a minimum luma distance from it (`markContrast`). Contract: `throughLiquid` in `sim/src/render.ts`.
 - Layer order is rear ticks → rear digits → bubbles/fizz → front ticks → tube lens remap → front digits. Ticks are never dropped for label bounds; later marks overwrite only intersecting pixels. `lens` and `lensCurve` use the same nearest-row remap in the simulator and firmware; `lensSmooth` is a simulator view option. Top ticks follow the curved tube. Top digits stay outside the tube lens; signed `topLens` independently pre-distorts them to compensate physical glass.

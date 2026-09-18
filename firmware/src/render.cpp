@@ -198,8 +198,10 @@ struct Labels {
   Label list[12]; int n; int bw, bh, ry0, ry1, yTop; ScaledGlyph *sprite; const Font *font; int gap;
   uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow;
   int16_t drySourceRows[TUBE_HEIGHT_MAX]; int dryRy0, dryRy1;   // rear digits behind air (digitDryLens)
-  // cache key: everything above is a function of (params gen, H) plus these two motion-derived ints
-  uint32_t gen = 0; int H = 0, bottomOff = 0, first = -1; bool valid = false, have = false;
+  float wetDx = 0, wetDy = 0;   // fractional refraction shift of the columns behind liquid (digitParallax); 0 behind air / on top
+  // cache key: everything above is a function of (params gen, H) plus these motion-derived ints (the shifts
+  // are applied at draw time; only floor(wetDy) enters the key, through the wet row span)
+  uint32_t gen = 0; int H = 0, bottomOff = 0, first = -1, keyWetDy = 0; bool valid = false, have = false;
 };
 
 static void markSourceRows(int height, float lens, int16_t *out, float curve = 1) {
@@ -295,7 +297,7 @@ struct Tube {
   int highlightTop(const Params &p, float lightDeg) const;
   void buildPalette(const Params &p, float lightDeg, Palette &pal) const;
   ScaledGlyph *scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone);
-  bool layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float fill, Labels &lb);
+  bool layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float edgeLight, float fill, Labels &lb);
   void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
   void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
   void drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
@@ -429,11 +431,16 @@ ScaledGlyph *Tube::scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, 
 }
 
 
-bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float fill, Labels &lb) {
+bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float edgeLight, float fill, Labels &lb) {
   bool minutes = ticksN == 60;
   int every = (int)fmaxf(1, jround(minutes ? p.digitMinuteStep : p.digitHourStep));
   // Motion-dependent parts of the layout, folded into the cache key.
   int bottomOff = p.digitsOnTop ? (int)jround(acrossTilt * p.topParallax) : 0;
+  // Liquid refracts the rear wall: the wet columns slide with tilt (same sign convention as the ticks).
+  // Fractional: the wet copy is resampled at draw time so it glides rather than steps.
+  lb.wetDx = p.digitsOnTop ? 0 : -edgeLight * p.digitParallax;
+  lb.wetDy = p.digitsOnTop ? 0 : acrossTilt * p.digitParallax;
+  int wetDy = (int)floorf(lb.wetDy);
   int start = (int)jround(minutes ? p.digitMinuteStart : p.digitHourStart); if (start <= 0) start = every;
   int first = start, last = ticksN - 1;
   if (minutes ? p.digitsLastOnlyM : p.digitsLastOnlyH) {
@@ -441,8 +448,8 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
     int s = minutes ? every : 1; first = last = (int)f / s * s;
     if (first == 0) first = 1;
   }
-  if (lb.valid && lb.gen == gen && lb.H == H && lb.bottomOff == bottomOff && lb.first == first) return lb.have;
-  lb.valid = true; lb.gen = gen; lb.H = H; lb.bottomOff = bottomOff; lb.first = first; lb.have = false;
+  if (lb.valid && lb.gen == gen && lb.H == H && lb.bottomOff == bottomOff && lb.first == first && lb.keyWetDy == wetDy) return lb.have;
+  lb.valid = true; lb.gen = gen; lb.H = H; lb.bottomOff = bottomOff; lb.first = first; lb.keyWetDy = wetDy; lb.have = false;
   if (!p.digits) return false;
   float kx = minutes ? p.digitScaleXMin : p.digitScaleX, ky = minutes ? p.digitScaleYMin : p.digitScaleY;
   float bottom = (minutes ? p.digitBottomMin : p.digitBottom) + bottomOff;
@@ -461,7 +468,7 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
   int sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
   lb.ry0 = H; lb.ry1 = -1; lb.dryRy0 = H; lb.dryRy1 = -1;
   for (int ry = 0; ry < H; ry++) {
-    if (lb.sourceRows[ry] >= sourceRy0 && lb.sourceRows[ry] <= sourceRy1) {
+    if (lb.sourceRows[ry] >= sourceRy0 + wetDy && lb.sourceRows[ry] <= sourceRy1 + wetDy + 1) {   // +1: fractional overhang
       if (ry < lb.ry0) lb.ry0 = ry;
       if (ry > lb.ry1) lb.ry1 = ry;
     }
@@ -489,49 +496,77 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
   return true;
 }
 
-// Column by column so each column can take the wet or dry warp.
-// Rows outer (glyph memory is row-major); each column still takes its own wet/dry warp. Every pixel is
-// written at most once so the order is invisible in the output.
-void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
-  int sourceTop = lb.yTop - y0;
-  bool wcol[128]; int gw = g.w > 128 ? 128 : g.w;
-  bool anyWet = false, anyDry = false;
-  for (int dx = 0; dx < gw; dx++) { wcol[dx] = wet(x + dx); if (wcol[dx]) anyWet = true; else anyDry = true; }
-  int a0 = H, a1 = -1;
-  if (anyWet) { a0 = lb.ry0; a1 = lb.ry1; }
-  if (anyDry) { if (lb.dryRy0 < a0) a0 = lb.dryRy0; if (lb.dryRy1 > a1) a1 = lb.dryRy1; }
-  for (int ry = a0; ry <= a1; ry++) {
-    int dyW = lb.sourceRows[ry] - sourceTop, dyD = lb.drySourceRows[ry] - sourceTop;
-    bool okW = ry >= lb.ry0 && ry <= lb.ry1 && dyW >= 0 && dyW < g.h;
-    bool okD = ry >= lb.dryRy0 && ry <= lb.dryRy1 && dyD >= 0 && dyD < g.h;
-    if (!okW && !okD) continue;
-    const uint8_t *aW = g.a + dyW * g.w, *aD = g.a + dyD * g.w;
-    const uint16_t *cW = g.c + dyW * g.w, *cD = g.c + dyD * g.w;
-    int y = y0 + ry;
-    for (int dx = 0; dx < gw; dx++) {
-      if (wcol[dx]) { if (!okW) continue; uint8_t a = aW[dx]; if (!a) continue; mark(x + dx, y, cW[dx], LUT_alphaT16[a]); }
-      else          { if (!okD) continue; uint8_t a = aD[dx]; if (!a) continue; mark(x + dx, y, cD[dx], LUT_alphaT16[a]); }
-    }
+// Coverage (0..255) and colour of glyph pixel (cx, cy); both only defined inside w x h.
+struct SpriteSampler {
+  const ScaledGlyph &g; int w, h;
+  explicit SpriteSampler(const ScaledGlyph &gg) : g(gg), w(gg.w), h(gg.h) {}
+  int a(int cx, int cy) const { return g.a[cy * g.w + cx]; }
+  uint16_t c(int cx, int cy) const { return g.c[cy * g.w + cx]; }
+};
+struct BitmapSampler {
+  const uint8_t *g; const Font &f; const Labels &lb; int w, h, msb;
+  BitmapSampler(const Font &ff, int d, const Labels &l) : g(ff.g[d]), f(ff), lb(l), w(l.bw), h(l.bh), msb(1 << (ff.w - 1)) {}
+  int a(int cx, int cy) const {
+    int col = cx * f.w / w; if (col > f.w - 1) col = f.w - 1;
+    int row = cy * f.h / h; if (row > f.h - 1) row = f.h - 1;
+    return (g[row] & (msb >> col)) ? 255 : 0;
   }
-}
-void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
-  const uint8_t *g = f.g[d];
-  int msb = 1 << (f.w - 1);
-  for (int pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
-    int off = pass == 0 ? 1 : 0;
-    int sourceTop = lb.yTop - y0 + off;
-    for (int dx = 0; dx < lb.bw; dx++) {
-      int col = (dx * f.w / lb.bw) < f.w - 1 ? dx * f.w / lb.bw : f.w - 1;
-      bool w = wet(x + dx + off);
-      const int16_t *rows = w ? lb.sourceRows : lb.drySourceRows; int a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
-      for (int ry = a0; ry <= a1; ry++) {
-        int dy = rows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
-        int row = g[(dy * f.h / lb.bh) < f.h - 1 ? dy * f.h / lb.bh : f.h - 1];
-        if (!(row & (msb >> col))) continue;
-        mark(x + dx + off, y0 + ry, pass == 0 ? (uint16_t)lb.shadow : lb.rows[dy]);
+  uint16_t c(int, int cy) const { return lb.rows[cy]; }
+};
+// Draw one glyph (see sim drawGlyph). A panel column shows the wet image where it is behind liquid and the dry
+// one where it is behind air, so a source column may feed both and every panel column gets exactly one; a
+// label straddling the fill edge breaks there like a refracted image. The dry copy is unshifted. The wet copy
+// sits at the fractional refraction shift (wetDx, wetDy) and is bilinearly resampled (weights in 1/256) so it
+// glides with tilt instead of stepping a whole pixel; its colour comes from the tap contributing the most
+// coverage. Rows outer (glyph memory is row-major); every pixel is written at most once.
+template <class S>
+static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark, bool shadowPass) {
+  int off = shadowPass ? 1 : 0, xg = x + off, sourceTop = lb.yTop - y0 + off;
+  bool dcol[129], wcol[129]; int gw = s.w > 128 ? 128 : s.w;
+  bool anyDry = false, anyWet = false;
+  int ix = (int)floorf(lb.wetDx), iy = (int)floorf(lb.wetDy);
+  int wx1 = (int)((lb.wetDx - ix) * 256 + 0.5f), wx0 = 256 - wx1, wy1 = (int)((lb.wetDy - iy) * 256 + 0.5f), wy0 = 256 - wy1;
+  for (int cx = 0; cx <= gw; cx++) {
+    dcol[cx] = cx < gw && !wet(xg + cx); if (dcol[cx]) anyDry = true;
+    wcol[cx] = wet(xg + ix + cx); if (wcol[cx]) anyWet = true;
+  }
+  auto tap = [&](int cx, int cy) -> int { return cx < 0 || cy < 0 || cx >= s.w || cy >= s.h ? 0 : s.a(cx, cy); };
+  int a0 = lb.dryRy0 < lb.ry0 ? lb.dryRy0 : lb.ry0, a1 = lb.dryRy1 > lb.ry1 ? lb.dryRy1 : lb.ry1;
+  for (int ry = a0; ry <= a1; ry++) {
+    int y = y0 + ry;
+    int cyD = lb.drySourceRows[ry] - sourceTop;
+    if (anyDry && ry >= lb.dryRy0 && ry <= lb.dryRy1 && cyD >= 0 && cyD < s.h) {
+      for (int cx = 0; cx < gw; cx++) {
+        if (!dcol[cx]) continue; int a = s.a(cx, cyD); if (!a) continue;
+        mark(xg + cx, y, shadowPass ? (uint16_t)lb.shadow : s.c(cx, cyD), LUT_alphaT16[a]);
+      }
+    }
+    int cy = lb.sourceRows[ry] - sourceTop - iy;
+    if (anyWet && ry >= lb.ry0 && ry <= lb.ry1 && cy >= 0 && cy <= s.h) {
+      for (int cx = 0; cx <= gw; cx++) {                    // one extra column: the fractional overhang
+        if (!wcol[cx]) continue;
+        // destination (cx, cy) samples source (cx - fx, cy - fy): taps at columns cx / cx-1, rows cy / cy-1
+        int a00 = tap(cx, cy) * wx0 * wy0, a10 = tap(cx - 1, cy) * wx1 * wy0;
+        int a01 = tap(cx, cy - 1) * wx0 * wy1, a11 = tap(cx - 1, cy - 1) * wx1 * wy1;
+        int a = (a00 + a10 + a01 + a11 + 32768) >> 16; if (!a) continue;
+        uint16_t c;
+        if (shadowPass) c = (uint16_t)lb.shadow;
+        else {
+          int m = a00; if (a10 > m) m = a10; if (a01 > m) m = a01; if (a11 > m) m = a11;
+          c = m == a00 ? s.c(cx, cy) : m == a10 ? s.c(cx - 1, cy) : m == a01 ? s.c(cx, cy - 1) : s.c(cx - 1, cy - 1);
+        }
+        mark(xg + ix + cx, y, c, LUT_alphaT16[a]);
       }
     }
   }
+}
+void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
+  drawGlyph(SpriteSampler(g), x, y0, lb, wet, mark, false);
+}
+void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
+  BitmapSampler s(f, d, lb);
+  if (lb.shadow >= 0) drawGlyph(s, x, y0, lb, wet, mark, true);   // 1 px shadow copy offset down-right, then the body
+  drawGlyph(s, x, y0, lb, wet, mark, false);
 }
 void Tube::drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   for (int i = 0; i < lb.n; i++) {
@@ -1000,7 +1035,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   }
 
   // Scale marks, all before bubbles.
-  bool haveLabels = layoutLabels(y0, p, gen, ticksN, st.acrossTilt, st.fillTarget, labels);
+  bool haveLabels = layoutLabels(y0, p, gen, ticksN, st.acrossTilt, st.edgeLight, st.fillTarget, labels);
   auto drawTickLayer = [&](bool onTop) {
     if (p.ticksOnTop == onTop) {
       Mark tickMark(*this, y0, bounds, p, onTop, p.markContrast * p.tickBright);

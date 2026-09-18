@@ -62,7 +62,16 @@ export abstract class LineTransport implements WatchTransport {
   }
 
   async setTime(epochMs: number, tzOffsetMin: number): Promise<void> {
-    await this.request(`T ${Math.floor(epochMs / 1000)} ${tzOffsetMin}`);
+    if (!Number.isFinite(epochMs) || !Number.isInteger(tzOffsetMin)) throw new Error('invalid time');
+    const reply = await this.request(`T ${Math.floor(epochMs / 1000)} ${tzOffsetMin}`);
+    if (!/^time \d{2}:\d{2}:\d{2}$/.test(reply)) throw new Error(`time not accepted: ${reply || 'no reply'}`);
+  }
+
+  async setDemoSpeed(speed: number): Promise<void> {
+    if (!Number.isFinite(speed) || speed < 0 || speed > 3600) throw new Error('invalid demo speed (0–3600)');
+    const reply = await this.request(`d${speed}`);
+    if (!reply.startsWith('demo speed x') || Number(reply.slice(12)) !== speed)
+      throw new Error(`demo speed not accepted: ${reply || 'no reply'}`);
   }
 
   protected setStatus(s: TransportStatus, detail?: string): void { this.status = s; this.onStatus(s, detail); }
