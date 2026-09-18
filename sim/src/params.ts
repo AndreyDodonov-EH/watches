@@ -15,7 +15,9 @@ export interface Params {
   glassBody: number;     // 0..1 ambient cylinder shade of the empty wall (0 = pure black, AMOLED off)
   glassHiBright: number; // 0..1 strength of the specular band (same rows as the liquid highlight)
   glassReflect: number;  // 0..1 faint second reflection on the lower wall
-  glassRim: number;      // 0..1 brightening of the outermost rows (wall edges catch light)
+  glassRim: number;      // 0..1 grazing reflection across the wall band, brightest at the silhouette
+  glassWall: number;     // px wall thickness at the top/bottom silhouette: dry rows behind it show no tube back (only the grazing reflection), rear marks fade out there
+  glassWallGlow: number; // 0..1 the wall band lit by light piped along the glass (visible on a black tube back); plateau across the band under the grazing rim
   glassOverLiquid: number; // 0..1 how much of the glass specular is laid over the liquid too
   lens: number;          // -1..1 vertical distortion; negative compresses, positive magnifies
   lensCurve: number;     // -3..3 profile; negative reverses the distortion direction
@@ -31,6 +33,7 @@ export interface Params {
   highlightBright: number; // 0..1.5 strength of the specular band
   highlightSharp: number;  // 0.3..4 band profile exponent (high = narrow, glossy)
   shadeDepth: number;    // 0..1, how dark the bottom rows get (cylinder shading)
+  liquidThin: number;    // 0..1 the liquid lightens and desaturates toward the walls (short path through the column)
   meniscusDepth: number; // px, how far the liquid climbs the wall at top/bottom vs centre (>0 concave)
   meniscusPow: number;   // curve exponent (2 = parabola)
   meniscusTiltGain: number; // tilt into the end pushes the surface centre out (convex bulge), away hollows it; × |meniscusDepth|
@@ -174,7 +177,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 17;
+export const PARAMS_VERSION = 18;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -193,6 +196,8 @@ export const DEFAULT_PARAMS: Params = {
   glassHiBright: 0.55,
   glassReflect: 0.22,
   glassRim: 0.4,
+  glassWall: 4,
+  glassWallGlow: 0.25,
   glassOverLiquid: 0.4,
   lens: 0.6,
   lensCurve: 1,
@@ -202,6 +207,7 @@ export const DEFAULT_PARAMS: Params = {
   highlightSharp: 1,
   highlightInset: 0,
   shadeDepth: 0.49,
+  liquidThin: 0.4,
   meniscusDepth: -12,
   meniscusPow: 3.2,
   meniscusTiltGain: 0.55,
@@ -645,12 +651,12 @@ const PRESET_FREE: Partial<Params> = {
 
 /** User-tuned olive oil (2026-09-18), preserved independently of the material-class ranges. */
 const PRESET_OLIVE_OIL: Partial<Params> = {
-  v: 17, tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: false,
+  v: 18, tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: false,
   liquid: '#5e5b08', liquidHi: '#8a8619', liquidLo: '#89861f',
   tubeBack: '#110b03', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#322d2a',
-  glassBody: 0.32, glassHiBright: 0.77, glassReflect: 0.35, glassRim: 0.69, glassOverLiquid: 0.64,
+  glassBody: 0.32, glassHiBright: 0.77, glassReflect: 0.35, glassRim: 0.69, glassWall: 5, glassWallGlow: 0.6, glassOverLiquid: 0.64,
   lens: -0.2, lensCurve: 0.2, bubbleRim: '#2d3319',
-  highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
+  highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25, liquidThin: 0.6,
   meniscusDepth: 4, meniscusPow: 4, meniscusTiltGain: 3, meniscusAsym: 2, meniscusLens: 0,
   meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, contactLag: 1.9, wetFilm: 15,
   traces: true, traceAmount: 2, traceDry: 2, traceFollow: 0.66, traceStain: 1, traceThin: 1.9,
@@ -795,7 +801,9 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   glassBody: { help: 'Ambient cylinder shade of the empty wall. 0 = pure black.', group: 'Glass', label: 'ambient body', min: 0, max: 0.5, step: 0.01 },
   glassHiBright: { help: 'Strength of the glass specular band (same rows as the liquid highlight).', group: 'Glass', label: 'specular', min: 0, max: 1, step: 0.01 },
   glassReflect: { help: 'Faint second reflection on the lower wall.', group: 'Glass', label: 'lower reflection', min: 0, max: 1, step: 0.01 },
-  glassRim: { help: 'Brightening of the outermost rows (wall edges catch light).', group: 'Glass', label: 'wall rims', min: 0, max: 1, step: 0.01 },
+  glassRim: { help: 'Grazing reflection across the wall band: brightest at the silhouette, fading inward.', group: 'Glass', label: 'wall rims', min: 0, max: 1, step: 0.01 },
+  glassWall: { help: 'Wall thickness at the top/bottom silhouette in px. Behind it the empty tube shows no tube back (only the rim reflection) and rear marks fade out; the liquid reaches the silhouette.', group: 'Glass', label: 'wall thickness', min: 0, max: 10, step: 0.5 },
+  glassWallGlow: { help: 'Light piped along the glass lights the wall band itself, so the walls read on a black tube back. Plateau across the band, the grazing rim on top.', group: 'Glass', label: 'wall glow', min: 0, max: 1, step: 0.01 },
   glassOverLiquid: { help: 'How much of the glass specular is laid over the liquid too.', group: 'Glass', label: 'specular over liquid', min: 0, max: 1, step: 0.01 },
   brightness: { help: 'Global panel dimmer (emulates cmd 0x51).', group: 'Colour', label: 'brightness (panel)', min: 0.1, max: 1, step: 0.01 },
   liquidBright: { help: 'Per-layer trim on top of brightness: liquid body, highlight, shade, bubble, fizz.', group: 'Colour', label: '· liquid trim', min: 0, max: 2, step: 0.01 },
@@ -811,6 +819,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   highlightBright: { help: 'Strength of the specular band.', group: 'Shape', min: 0, max: 1.5, step: 0.05 },
   highlightSharp: { help: 'Band profile exponent. High = narrow, glossy.', group: 'Shape', min: 0.3, max: 4, step: 0.1 },
   shadeDepth: { help: 'How dark the bottom rows get (cylinder shading).', group: 'Shape', min: 0, max: 1, step: 0.01 },
+  liquidThin: { help: 'The liquid lightens and desaturates toward the walls, where the path through the column is short.', group: 'Shape', label: 'thin edge', min: 0, max: 1, step: 0.01 },
   meniscusDepth: { help: 'How far the liquid climbs the wall at top/bottom vs centre, px. >0 concave, <0 convex.', group: 'Shape', min: -30, max: 40, step: 0.5 },
   meniscusPow: { help: 'Meniscus curve exponent. 2 = parabola.', group: 'Shape', min: 0.5, max: 6, step: 0.1 },
   meniscusTiltGain: { help: 'Gravity pressing the liquid into this end pushes the surface centre outward (convex bulge), draining hollows it — for concave and convex liquids alike. In px of |meniscusDepth| per g. With free liquid the two ends get opposite signs: the lower end bulges, the upper end hollows.', group: 'Shape', label: 'meniscus bulge vs tilt', min: -1, max: 3, step: 0.05 },

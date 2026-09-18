@@ -125,6 +125,7 @@ struct Palette {
   uint16_t traceRows[TUBE_HEIGHT_MAX]; // dried pigment, independent of bulk liquid transparency
   uint16_t body, tubeBack, bubbleRim;
   float rowK[TUBE_HEIGHT_MAX];   // luma weight per row for front brightening (sim step 3a)
+  uint16_t dryT[TUBE_HEIGHT_MAX]; // 1/256: what an empty tube transmits of the back per row (0 inside the wall band); fades rear marks behind air
   uint32_t gen = 0; int H = 0; float light = 0; bool valid = false;   // cache key (light is exact: hit while the tube is at rest)
 };
 
@@ -197,7 +198,7 @@ struct Mark {
 struct Label { int x0; char text[3]; int len; int adv[2]; };
 struct Labels {
   Label list[12]; int n; int bw, bh, ry0, ry1, yTop; ScaledGlyph *sprite; const Font *font; int gap;
-  uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow;
+  uint16_t rows[96]; int16_t sourceRows[TUBE_HEIGHT_MAX]; int shadow, shadowT, shadowOff;   // shadow colour (-1 = none), opacity 1/256, px offset
   int16_t drySourceRows[TUBE_HEIGHT_MAX]; int dryRy0, dryRy1;   // rear digits behind air (digitDryLens)
   float wetDx = 0, wetDy = 0;   // fractional refraction shift of the columns behind liquid (digitParallax); 0 behind air / on top
   // cache key: everything above is a function of (params gen, H) plus these motion-derived ints (the shifts
@@ -265,7 +266,7 @@ struct Tube {
   float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
   float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds when `remaining`
   Fizz fizz[MAX_FIZZ]; int fizzN = 0; float fizzLen = 0;      // liquid length px, set by drawTube
-  uint8_t traceA[TUBE_LENGTH_PX];                             // dried-trace residue alpha per column (0..255)
+  uint16_t traceA[TUBE_LENGTH_PX];                            // dried-trace residue alpha per column, 1/256 with headroom (traceAmount > 1)
   uint16_t traceRaw[TUBE_LENGTH_PX];                          // render-frame residue copy, input to the taper blur
 
   inline bool inStrip(int x, int y) const { return x >= 0 && x < PANEL_W && y >= baseY && y < baseY + H; }
@@ -320,15 +321,17 @@ static Tube tubes[2];
 inline void Mark::operator()(int x, int y, uint16_t c, int covT, int rel) const {
   if (!t.inStrip(x, y)) return;
   int ry = y - y0;
-  if (!onTop && x >= edges.lo[ry] && x < edges.hi[ry])
+  if (!onTop && x >= edges.lo[ry] && x < edges.hi[ry]) {
     c = throughLiquid(t.rd(x, y), c, T, C);
+    if (rel) { covT = covT * T >> 8; if (covT <= 0) return; }   // rear relief fades with the liquid's opacity (sim markFn)
+  } else if (!onTop) { covT = covT * t.pal.dryT[ry] >> 8; if (covT <= 0) return; }   // rear marks vanish behind the wall band
   if (rel > 0) c = embossHi(c);
   else if (rel < 0) c = embossLo(c);
   t.wr(x, y, covT >= 256 ? c : blend565T(t.rd(x, y), c, covT));
 }
 
 // Glass wall shading weight 0..1 per row (sim: glassW): ambient cylinder shade, specular tent on the
-// top wall, faint band on the lower wall, brighter outermost rows.
+// top wall, faint band on the lower wall. The wall band and rim live in buildPalette.
 float Tube::glassW(const Params &p, int y, int hiTop, float lam) const {
   float t = (float)y / (H - 1);
   float amb = 0.5f + 0.5f * cosf((t - 0.3f) * (float)M_PI * 1.6f);
@@ -337,8 +340,6 @@ float Tube::glassW(const Params &p, int y, int hiTop, float lam) const {
     w += p.glassHiBright * powf(1 - fabsf((y - hiTop) / fmaxf(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
   float d = (t - 0.82f) / 0.07f;
   w += p.glassReflect * expf(-d * d);
-  int rim = y < H - 1 - y ? y : H - 1 - y;
-  if (rim < 2) w += p.glassRim * (rim == 0 ? 1 : 0.4f);
   return fminf(1, w);
 }
 
@@ -357,8 +358,21 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   float bodyL = ambientBodyL(p), ambAmt = ambientAmt(p);
   float yc = (H - 1) / 2.0f, lightRad = 2 * lightDeg * (float)M_PI / 180;
   int hiTop = highlightTop(p, lightDeg);
+  // Wall band (sim buildPalette): rows whose ray misses the bore never reach the back (dryT 0),
+  // ramping up over a few rows inside; the liquid still shows through there. A neutral grazing
+  // rim rises toward the silhouette on both sides (glassRim). glassWall 0 keeps a one-row rim.
+  float wallU = 1 - 2 * fmaxf(1, p.glassWall) / H;
+  RGB glassEdge = scale(mix(ghi, {180, 190, 195}, 0.72f), p.brightness);
   for (int y = 0; y < H; y++) {
     float t = (float)y / (H - 1);
+    float u = (y + 0.5f - H / 2.0f) / (H / 2.0f), au = fabsf(u);
+    float rim = p.glassRim * powf(fmaxf(0, (au - wallU) / (1 - wallU)), 2.5f);
+    // Wall glow (sim glowW/wallW): light piped along the wall lights the band itself; plateau with a
+    // short ramp starting just inside the band, the grazing rim on top.
+    float glow = p.glassWallGlow * clampf(0.4f + 3 * (au - wallU) / (1 - wallU), 0, 1);
+    rim = glow + rim - glow * rim;
+    float dryT = p.glassWall <= 0 ? 1 : au >= wallU ? 0 : 1 - expf(-(wallU - au) / 0.04f);
+    pal.dryT[y] = (uint16_t)(dryT * 256 + 0.5f);
     int gradient = (int)jround(p.tubeBackGradient);
     float backMix = gradient == 1 ? t : gradient == 2 ? 1 - fabsf(t * 2 - 1)
       : gradient == 3 ? fabsf(t * 2 - 1) : 0;
@@ -368,6 +382,12 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     if (t < 0.33f) c = mix(mix(body, lo, 0.25f), body, t / 0.33f);
     else c = mix(body, lo, ((t - 0.33f) / 0.67f) * p.shadeDepth);
     if (p.lightPhys > 0) c = mix(c, mix(lo, body, 1 - p.shadeDepth * (1 - lam)), p.lightPhys);
+    // Thin edge: shorter chord toward the walls absorbs less, the colour drifts to a grey of its
+    // own peak channel, strongest on the outermost rows.
+    if (p.liquidThin > 0) {
+      float chord = sqrtf(fmaxf(0, 1 - u * u)), m = fmaxf(c.r, fmaxf(c.g, c.b));
+      c = mix(c, {m, m, m}, p.liquidThin * (1 - chord) * (1 - chord));
+    }
     // Transparent liquid shows the per-row tube-back gradient. The highlight remains a surface
     // reflection and goes on after it.
     c = scale(c, br);
@@ -379,11 +399,12 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
       residue = mix(residue, liquidHiScaled, fminf(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
     float gw = glassW(p, y, hiTop, lam);
-    float glassWet = gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency);
-    pal.tubeBackRows[y] = q(scale(mix(back, ghi, gw), p.brightness));
-    c = ambientize(mix(c, glassHiScaled, glassWet), bodyL, ambAmt);   // glass weight rises to the dry-side one with transparency
+    float wetK = p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency, glassWet = gw * wetK;
+    // Empty tube: back only where the ray reaches it (wall band dark), glass over it, rim on top.
+    pal.tubeBackRows[y] = q(mix(scale(mix(scale(back, dryT), ghi, gw), p.brightness), glassEdge, rim));
+    c = ambientize(mix(mix(c, glassHiScaled, glassWet), glassEdge, rim * wetK), bodyL, ambAmt);   // glass weight rises to the dry-side one with transparency
     // Dried pigment uses opaque-liquid shading; traceAmount / drying supply its coverage.
-    residue = ambientize(mix(residue, glassHiScaled, gw * p.glassOverLiquid), bodyL, p.ambientLight);
+    residue = ambientize(mix(mix(residue, glassHiScaled, gw * p.glassOverLiquid), glassEdge, rim * p.glassOverLiquid), bodyL, p.ambientLight);
     pal.traceRows[y] = q(scale(to888(q(residue)), 0.85f));
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
@@ -466,12 +487,13 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
   if (bh > 96) bh = 96;
   ScaledGlyph *sprite = useSprite ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, p.digitTint, p.digitTintAmount, p.digitTone) : nullptr;
   int gap = sprite ? (int)fmaxf(1, jround(bw / 5.0f)) : (int)fmaxf(1, jround(kx));
-  int shadow = !sprite && p.digitShadow ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
+  float shadowA = clampf(p.digitShadowStrength, 0, 1); int shadowOff = (int)fmaxf(1, jround(p.digitShadowOffset));
+  int shadow = p.digitShadow && shadowA > 0 ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
   int yBase = y0 + H - 1 - (int)bottom, yTop = yBase - bh + 1;
   // NB: sim uses yBase = y0+H-1-bottom with fractional `bottom` possible; presets use integers.
   if (p.digitsOnTop) { markSourceRows(H, p.topLens, lb.sourceRows, p.lensCurve); memcpy(lb.drySourceRows, lb.sourceRows, sizeof(lb.sourceRows)); }
   else { markSourceRows(H, p.bottomLens, lb.sourceRows); markSourceRows(H, p.digitDryLens, lb.drySourceRows); }
-  int sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? 1 : 0);
+  int sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? shadowOff : 0);
   lb.ry0 = H; lb.ry1 = -1; lb.dryRy0 = H; lb.dryRy1 = -1;
   for (int ry = 0; ry < H; ry++) {
     if (lb.sourceRows[ry] >= sourceRy0 + wetDy && lb.sourceRows[ry] <= sourceRy1 + wetDy + 1) {   // +1: fractional overhang
@@ -496,7 +518,7 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
     l.x0 = x0 < m ? m : x0 > L - w - m ? L - w - m : x0;
   }
   lb.bw = bw; lb.bh = bh; lb.yTop = yTop;
-  lb.sprite = sprite; lb.font = font; lb.gap = gap; lb.shadow = shadow;
+  lb.sprite = sprite; lb.font = font; lb.gap = gap; lb.shadow = shadow; lb.shadowT = alphaT(shadowA); lb.shadowOff = shadowOff;
   digitRowColors(p, bh, lb.rows);
   lb.have = true;
   return true;
@@ -527,7 +549,8 @@ struct BitmapSampler {
 // coverage. Rows outer (glyph memory is row-major); every pixel is written at most once.
 template <class S>
 static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark, bool shadowPass) {
-  int off = shadowPass ? 1 : 0, xg = x + off, sourceTop = lb.yTop - y0 + off;
+  int off = shadowPass ? lb.shadowOff : 0, xg = x + off, sourceTop = lb.yTop - y0 + off;
+  auto covT = [&](int a) { return shadowPass ? LUT_alphaT16[a] * lb.shadowT >> 8 : LUT_alphaT16[a]; };   // shadow copy at its own opacity
   bool dcol[129], wcol[129]; int gw = s.w > 128 ? 128 : s.w;
   bool anyDry = false, anyWet = false;
   int ix = (int)floorf(lb.wetDx), iy = (int)floorf(lb.wetDy);
@@ -544,7 +567,7 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
     if (anyDry && ry >= lb.dryRy0 && ry <= lb.dryRy1 && cyD >= 0 && cyD < s.h) {
       for (int cx = 0; cx < gw; cx++) {
         if (!dcol[cx]) continue; int a = s.a(cx, cyD); if (!a) continue;
-        mark(xg + cx, y, shadowPass ? (uint16_t)lb.shadow : s.c(cx, cyD), LUT_alphaT16[a]);
+        mark(xg + cx, y, shadowPass ? (uint16_t)lb.shadow : s.c(cx, cyD), covT(a));
       }
     }
     int cy = lb.sourceRows[ry] - sourceTop - iy;
@@ -561,13 +584,15 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
           int m = a00; if (a10 > m) m = a10; if (a01 > m) m = a01; if (a11 > m) m = a11;
           c = m == a00 ? s.c(cx, cy) : m == a10 ? s.c(cx - 1, cy) : m == a01 ? s.c(cx, cy - 1) : s.c(cx - 1, cy - 1);
         }
-        mark(xg + ix + cx, y, c, LUT_alphaT16[a]);
+        mark(xg + ix + cx, y, c, covT(a));
       }
     }
   }
 }
 void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
-  drawGlyph(SpriteSampler(g), x, y0, lb, wet, mark, false);
+  SpriteSampler s(g);
+  if (lb.shadow >= 0) drawGlyph(s, x, y0, lb, wet, mark, true);   // shadow copy offset down-right, then the body
+  drawGlyph(s, x, y0, lb, wet, mark, false);
 }
 void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   BitmapSampler s(f, d, lb);
@@ -663,10 +688,16 @@ void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows
 // fizz
 // ---------------------------------------------------------------------------------------------
 static inline float frand() { return (esp_random() >> 8) / 16777216.0f; }
+static inline float fizzR(const Params &p, float v) { return p.fizzSize / 2 * (1 + (v - 1) * p.fizzSizeVar); }
+static inline float fizzWall(const Params &p) { return p.glassWall > 0 ? fmaxf(1, p.glassWall) : 0; }   // band px per side (buildPalette wallU)
+// Row where a bubble of size v is fully behind the wall band (respawn/turnaround bound); 3 px without a band.
+static inline float fizzHideY(const Params &p, float v) { float w = fizzWall(p); return w > 0 ? fmaxf(0, w - fizzR(p, v)) : 3; }
+// Random row with the whole bubble in the bore, so bubbles never sit half behind the wall.
+static inline float fizzSpawnY(const Params &p, int H, float v) { float lo = fizzWall(p) + fizzR(p, v), hi = H - lo; return hi <= lo ? H / 2.0f : lo + frand() * (hi - lo); }
 void Tube::ensureFizz(const Params &p, float len, float agitation) {
   fizzLen = len;
   int want = (int)floorf(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want > MAX_FIZZ) want = MAX_FIZZ; if (want < 0) want = 0;
-  while (fizzN < want) { fizz[fizzN++] = { frand() * len, frand() * H, 0.5f + frand() }; }
+  while (fizzN < want) { float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v }; }
   fizzN = want;
 }
 // Rises against in-plane gravity at fizzSpeed px/s on both axes; face up = slow screen-up rise. See sim stepFizz.
@@ -683,8 +714,10 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
       Fizz &f = t.fizz[k];
       f.y += vy * f.v * dt;
       f.x += vx * f.v * dt;
-      if (f.y < 3 || f.y >= H) { f.y = vy <= 0 ? H - 3 : 3; f.x = frand() * len; f.v = 0.5f + frand(); }
-      else if (f.x < 0 || f.x > len) { f.x = vx < 0 ? len : 0; f.y = 3 + frand() * (H - 6); f.v = 0.5f + frand(); }
+      // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
+      const float hide = fizzHideY(p, f.v);
+      if (f.y < hide || f.y >= H - hide) { f.v = 0.5f + frand(); const float h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; f.x = frand() * len; }
+      else if (f.x < 0 || f.x > len) { f.x = vx < 0 ? len : 0; f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); }
     }
   }
 }
@@ -694,8 +727,10 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
 static float fizzMag(const float *mag, int H, float y, float r) {
   float m = 1;
   for (int it = 0; it < 2; it++) {
+    // Clamp into the tube with a <= b: a bubble stranded past a shrunken tube (tubeHeight pushed while fizz
+    // is on) otherwise gets an empty range, magnification 0 and an unbounded draw loop (task-wdt on core 0).
     float ry = r / m;
-    int a = (int)fmaxf(0, floorf(y - ry)), b = (int)fminf(H - 1, ceilf(y + ry));
+    int a = (int)fminf(H - 1, fmaxf(0, floorf(y - ry))), b = (int)fmaxf(a, fminf(H - 1, ceilf(y + ry)));
     float s = 0; for (int i = a; i <= b; i++) s += mag[i];
     m = s / (b - a + 1);
   }
@@ -991,9 +1026,11 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
         acc += (uint32_t)(5 - d) * (traceRaw[m] + traceRaw[q2]);
       }
       const float v = acc * (1.0f / 25.0f);
-      // traceAmount may exceed 1 (opacity boost): clamp before the uint8 cast
-      float a = v > 0 ? traceGamma(v * (1.0f / TRACE_FULL)) * 255.0f * p.traceAmount * traceStreak(x + (uint32_t)idx * 6151u) : 0.0f;
-      traceA[x] = (uint8_t)(fminf(255.0f, a) + 0.5f);
+      // 1/256 units with headroom: traceAmount may exceed 1 (opacity boost) and the sim clamps only
+      // AFTER the row weight below, so the column value keeps the excess (a uint8 cap here made
+      // heavy residue lighter on the board than in the sim)
+      float a = v > 0 ? traceGamma(v * (1.0f / TRACE_FULL)) * 256.0f * p.traceAmount * traceStreak(x + (uint32_t)idx * 6151u) : 0.0f;
+      traceA[x] = (uint16_t)(fminf(65535.0f, a) + 0.5f);
     }
     for (int ry = 0; ry < H; ry++) {
       float d = (ry - yc) / yc;
@@ -1001,7 +1038,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       int xi = (int)ceilf(edges[ry]), xiL = (int)floorf(edgesL[ry]);   // liquid where xiL < x < xi
       for (int x = a0; x < a1; x++) {
         if (x > xiL && x < xi) continue;
-        int a = (traceA[x] * rowW) >> 8;
+        int a = (traceA[x] * rowW) >> 8; if (a > 256) a = 256;   // sim: min(1, traceA * rowW)
         if (a) pxaT(x, y, pal.traceRows[ry], a);
       }
     }
@@ -1065,19 +1102,22 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   // 5: fizz — AA discs, pre-squashed by the local lens magnification (see sim step 5)
   if (p.fizz) {
     const float *mag = rc.mag;
-    const float r = p.fizzSize / 2;
     for (int k = 0; k < fizzN; k++) {
       const Fizz &f = fizz[k];
       int fy = (int)clampf(jround(f.y), 0, H - 1);
       if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
-      const float m = fizzMag(mag, H, f.y, r), ry = r / m;
+      const float r = fizzR(p, f.v);
+      const float m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
       for (int iy = (int)floorf(f.y - ry - 1); iy <= (int)ceilf(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
+        const float wallT = pal.dryT[iy] / 256.0f;   // bubbles live in the bore: invisible where the ray only sees the wall band
+        if (wallT <= 0) continue;
         for (int ix = (int)floorf(f.x - r - 1); ix <= (int)ceilf(f.x + r); ix++) {
           float dx = ix + 0.5f - f.x, dy = (iy + 0.5f - f.y) * m;
-          float d = sqrtf(dx * dx + dy * dy), cov = fminf(1, r + 0.5f - d);
+          float d = sqrtf(dx * dx + dy * dy), cov = fminf(1, r + 0.5f - d) * wallT;
           if (cov <= 0) continue;
-          pxa(mapX(ix + xsI), y0 + iy, r >= 1.5f && d < r - 1 ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
+          float cx = dx - off, cy = dy - off, dc = sqrtf(cx * cx + cy * cy);
+          pxa(mapX(ix + xsI), y0 + iy, r >= 1.5f && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }
       }
     }

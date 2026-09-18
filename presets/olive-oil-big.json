@@ -1,5 +1,5 @@
 {
-  "v": 17,
+  "v": 18,
   "tubeHeight": 72,
   "hoursY": 11,
   "minutesY": 144,
@@ -15,6 +15,8 @@
   "glassHiBright": 0.77,
   "glassReflect": 0.35,
   "glassRim": 0.69,
+  "glassWall": 5,
+  "glassWallGlow": 0.6,
   "glassOverLiquid": 0.64,
   "lens": -0.05,
   "lensCurve": -3,
@@ -24,6 +26,7 @@
   "highlightSharp": 2,
   "highlightInset": 0,
   "shadeDepth": 0.25,
+  "liquidThin": 0.6,
   "meniscusDepth": 4,
   "meniscusPow": 4,
   "meniscusTiltGain": 3,
