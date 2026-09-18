@@ -19,6 +19,8 @@ struct Params {
   float glassHiBright;
   float glassReflect;
   float glassRim;
+  float glassWall;
+  float glassWallGlow;
   float glassOverLiquid;
   float lens;
   float lensCurve;
@@ -29,6 +31,7 @@ struct Params {
   float highlightBright;
   float highlightSharp;
   float shadeDepth;
+  float liquidThin;
   float meniscusDepth;
   float meniscusPow;
   float meniscusTiltGain;
@@ -62,6 +65,8 @@ struct Params {
   bool fizz;
   float fizzCount;
   float fizzSize;
+  float fizzSizeVar;
+  float fizzShadeOff;
   float fizzSpeed;
   float fizzDriftGain;
   float fizzAcrossGain;
@@ -97,6 +102,8 @@ struct Params {
   uint32_t digitColor2;
   bool digitShadow;
   uint32_t digitShadowColor;
+  float digitShadowStrength;
+  float digitShadowOffset;
   uint32_t digitTint;
   float digitTintAmount;
   float digitTone;
@@ -157,8 +164,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 151
-#define PARAMS_SCHEMA_CRC 0x2c46422fu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 158
+#define PARAMS_SCHEMA_CRC 0x17832776u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -178,6 +185,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"glassHiBright", 'f', (uint16_t)offsetof(Params, glassHiBright)},
   {"glassReflect", 'f', (uint16_t)offsetof(Params, glassReflect)},
   {"glassRim", 'f', (uint16_t)offsetof(Params, glassRim)},
+  {"glassWall", 'f', (uint16_t)offsetof(Params, glassWall)},
+  {"glassWallGlow", 'f', (uint16_t)offsetof(Params, glassWallGlow)},
   {"glassOverLiquid", 'f', (uint16_t)offsetof(Params, glassOverLiquid)},
   {"lens", 'f', (uint16_t)offsetof(Params, lens)},
   {"lensCurve", 'f', (uint16_t)offsetof(Params, lensCurve)},
@@ -188,6 +197,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"highlightBright", 'f', (uint16_t)offsetof(Params, highlightBright)},
   {"highlightSharp", 'f', (uint16_t)offsetof(Params, highlightSharp)},
   {"shadeDepth", 'f', (uint16_t)offsetof(Params, shadeDepth)},
+  {"liquidThin", 'f', (uint16_t)offsetof(Params, liquidThin)},
   {"meniscusDepth", 'f', (uint16_t)offsetof(Params, meniscusDepth)},
   {"meniscusPow", 'f', (uint16_t)offsetof(Params, meniscusPow)},
   {"meniscusTiltGain", 'f', (uint16_t)offsetof(Params, meniscusTiltGain)},
@@ -221,6 +231,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"fizz", 'b', (uint16_t)offsetof(Params, fizz)},
   {"fizzCount", 'f', (uint16_t)offsetof(Params, fizzCount)},
   {"fizzSize", 'f', (uint16_t)offsetof(Params, fizzSize)},
+  {"fizzSizeVar", 'f', (uint16_t)offsetof(Params, fizzSizeVar)},
+  {"fizzShadeOff", 'f', (uint16_t)offsetof(Params, fizzShadeOff)},
   {"fizzSpeed", 'f', (uint16_t)offsetof(Params, fizzSpeed)},
   {"fizzDriftGain", 'f', (uint16_t)offsetof(Params, fizzDriftGain)},
   {"fizzAcrossGain", 'f', (uint16_t)offsetof(Params, fizzAcrossGain)},
@@ -256,6 +268,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"digitColor2", 'c', (uint16_t)offsetof(Params, digitColor2)},
   {"digitShadow", 'b', (uint16_t)offsetof(Params, digitShadow)},
   {"digitShadowColor", 'c', (uint16_t)offsetof(Params, digitShadowColor)},
+  {"digitShadowStrength", 'f', (uint16_t)offsetof(Params, digitShadowStrength)},
+  {"digitShadowOffset", 'f', (uint16_t)offsetof(Params, digitShadowOffset)},
   {"digitTint", 'c', (uint16_t)offsetof(Params, digitTint)},
   {"digitTintAmount", 'f', (uint16_t)offsetof(Params, digitTintAmount)},
   {"digitTone", 'f', (uint16_t)offsetof(Params, digitTone)},
@@ -318,7 +332,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  17, // v
+  18, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -333,6 +347,8 @@ static const Params PRESET_1 = {
   0.55f, // glassHiBright
   0.22f, // glassReflect
   0.4f, // glassRim
+  4.0f, // glassWall
+  0.25f, // glassWallGlow
   0.4f, // glassOverLiquid
   0.6f, // lens
   1.0f, // lensCurve
@@ -343,6 +359,7 @@ static const Params PRESET_1 = {
   1.0f, // highlightBright
   1.0f, // highlightSharp
   0.49f, // shadeDepth
+  0.4f, // liquidThin
   -12.0f, // meniscusDepth
   3.2f, // meniscusPow
   0.55f, // meniscusTiltGain
@@ -376,6 +393,8 @@ static const Params PRESET_1 = {
   true, // fizz
   10.0f, // fizzCount
   2.0f, // fizzSize
+  0.5f, // fizzSizeVar
+  0.3f, // fizzShadeOff
   14.0f, // fizzSpeed
   1.0f, // fizzDriftGain
   1.0f, // fizzAcrossGain
@@ -411,6 +430,8 @@ static const Params PRESET_1 = {
   0x20312F, // digitColor2
   true, // digitShadow
   0x101010, // digitShadowColor
+  1.0f, // digitShadowStrength
+  1.0f, // digitShadowOffset
   0x6D6617, // digitTint
   0.65f, // digitTintAmount
   0.0f, // digitTone

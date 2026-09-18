@@ -20,10 +20,41 @@
   (same cost as the existing direct path — presets with edgeGlow > EFFECT_MAX already bypassed the table).
 - Sprite fonts have no emboss shadow (`digitShadow` is bitmap-only), so light sprite numerals over a
   light liquid rely on `markContrast` alone.
+- Glass wall band is drawn in the palette (pre-lens), so a strong `lens` curve squeezes/stretches the
+  band with the rest of the tube; a post-lens rim would keep it a fixed px width, but needs post-lens
+  edge bounds (the earlier post-lens rim pass indexed pre-lens `bounds` rows — removed for that).
+- `liquidThin` is a Beer-Lambert cue; opaque or self-lit presets (blood, milk, molten, xenon) inherit
+  the 0.4 default and could set it to 0 if the greyed silhouette rows look wrong on the device.
+- Physical lab's area-light highlight is a broad Gaussian band at 2·(light angle); the legacy tent
+  highlight (`highlightH`/`highlightSharp`) could take that profile to match the lab look further.
 
 ## Tooling / firmware
-- `f` reports render+wait only; the remaining ~4 ms/frame (physics, IMU I2C, serial poll) is unaccounted —
-  add a loop-total figure to `f`.
+- Push all writes fields one at a time, so the board renders transient combinations (e.g. new
+  `tubeHeight` with the old fizz positions, which used to hit the task watchdog). A `Pbegin`/`Pcommit`
+  transaction like the physical renderer's would apply a whole preset atomically.
+- Internal heap on the board idles at ~19 KB free (`s`: heap 19676) with the physical renderer's
+  343 KB resident; watch it before adding anything that allocates at runtime (BLE, NVS writes).
+- A task-wdt reboot while the browser holds the serial port leaves the panel black until a manual
+  reset (host DTR/RTS state during re-enumeration); the sim could detect the boot banner and reconnect.
+  Same root as the close-reset: on the S3's USB-serial-JTAG, DTR low with RTS high is a reset.
+- A host harness for the legacy renderer (stub `esp_heap_caps.h`/`esp_random.h`, replay `name=value`
+  writes with physics steps) reproduces push-all sequences without the board; worth keeping in tools/.
+- Existing `scaledGlyphs()` silently drops glyphs when `GLYPH_POOL_PX` overflows; report the unsupported
+  size visibly instead of leaving missing digits. Found during the physical-renderer planning audit.
+- `f` now includes whole-frame p95; physics, IMU I2C and serial poll still lack separate cost figures.
+- Fixed clock (`d0` + `t`/`T`) can sit milliseconds before the requested second because demo offset
+  advances on fixed physics ticks; at a minute boundary `s` can consequently show the preceding minute.
+- COM6 bridge reopen reverted volatile physical mode to legacy during testing; capture/select in one
+  connection. Audit the Windows driver's close/open reset behavior separately.
+- Firmware autosaves every `p` write after 2 s, so tooling pins (`bench.py` `inputGain 0`, the `x` dump's
+  `fizz 0`) reach NVS mid-run and survive if the session closes before the restore is flushed. A volatile
+  write (`p~name=value`, no autosave) would make pins safe by construction.
+- `device.py` now dwells 2.5 s on close after any `p` write (NVS autosave) and drops RTS before DTR on
+  close (no reset). Other serial clients (the browser's Web Serial) still reset the board on close, so
+  a preset pushed from the sim and closed within 2 s is lost the same way.
+- `device.py` `close()` waits 5 s for the Windows bridge to exit; once it took longer and `bench.py`
+  died with TimeoutExpired after its work was done, which aborted `e2e.sh` before the parity step.
+  Treat a slow bridge exit as non-fatal (or lengthen the wait).
 - `p!` resets to the compiled preset and 2 s later overwrites the NVS-tuned params; a `p!` that does not
   persist (or a "revert to NVS") would be safer for scripts.
 - Board keeps flipping between Windows COM6 and WSL `/dev/ttyACM0` (usbipd auto-attach?); re-enumeration
@@ -193,3 +224,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   The HBM bit survives the RESX line and a reflash; init now writes B0h=0x04 explicitly.
   `H1` serial command left in for experiments only. QSPI register readback (opcode 0x03) returns 0x00
   for everything with the sh8601 panel_io; needs dummy-cycle config if ever wanted.
+- Fizz now hides behind the wall band (clipped by dryT, turnaround at wall-r): with a wide band (glassWall 10 @ H 60) each bubble spends ~wall-r rows invisible per pass, so perceived density drops a little; scale fizzCount by bore/H if that reads as thin.
+- Any `p<name>=<value>` write persists: `paramsTouch()` + `paramsFlush()` store the whole blob to NVS
+  2 s later (device.py even sleeps 2.5 s on close to let it land), so `p!` is not the only destructive
+  command — a plain param set silently replaces the saved copy too. A read-only "try this value without
+  saving" path (or a `--no-save`/session-only flag in device.py) would make board experiments safe.

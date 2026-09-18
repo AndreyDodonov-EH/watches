@@ -40,6 +40,13 @@ def open_serial(port):
     s.open(); time.sleep(0.1); s.reset_input_buffer()
     return s
 
+def close_serial(s):
+    # Closing the handle drops DTR while RTS stays high = the S3's reset combo (USB-serial-JTAG acts
+    # only when exactly one line is asserted). Drop RTS first, then DTR, so the close changes nothing.
+    try: s.rts = False; s.dtr = False
+    except Exception: pass
+    s.close()
+
 def serial_talk(s, cmd, end, timeout):
     s.reset_input_buffer()
     s.write((cmd + '\n').encode()); s.flush()
@@ -57,6 +64,7 @@ class Device:
         self.port = port or find_port()
         self.windows = self.port.upper().startswith('COM')
         self._s = self._b = None
+        self._wrote = False   # a `p` write happened: hold the session past the 2 s NVS autosave on close
         if self.windows:
             me = subprocess.run(['wslpath', '-w', os.path.abspath(__file__)], capture_output=True, text=True).stdout.strip()
             self._b = subprocess.Popen(['python.exe', me, '--bridge', self.port], stdin=subprocess.PIPE,
@@ -77,6 +85,7 @@ class Device:
 
     def talk(self, cmd, end='\n', timeout=10):
         """Send one command, return the reply with the firmware's echo line stripped."""
+        if cmd.startswith('p') and '=' in cmd: self._wrote = True
         out = self.raw(cmd, end, timeout).replace('\r\n', '\n')
         lines = out.split('\n')
         for l in lines:                                   # boot banner in a reply = the board rebooted
@@ -86,7 +95,8 @@ class Device:
         return '\n'.join(lines).strip()
 
     def close(self):
-        if self._s: self._s.close()
+        if self._wrote: time.sleep(2.5); self._wrote = False
+        if self._s: close_serial(self._s)
         if self._b: self._b.stdin.close(); self._b.wait(5)
     def __enter__(self): return self
     def __exit__(self, *a): self.close()
@@ -98,6 +108,7 @@ def _bridge(port):
         out = serial_talk(s, cmd, end, timeout)
         sys.stdout.write(out if out.endswith('\n') or not out else out + '\n')
         sys.stdout.write(SENTINEL + '\n'); sys.stdout.flush()
+    close_serial(s)
 
 if __name__ == '__main__':
     if len(sys.argv) > 2 and sys.argv[1] == '--bridge':

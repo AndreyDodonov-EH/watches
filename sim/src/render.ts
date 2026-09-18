@@ -44,6 +44,7 @@ export interface Palette {
   traceRows: Uint16Array; // dried deposit colour, independent of bulk liquid transparency
   tubeBackRows: Uint16Array; // tube-back colour with glass shading per row
   body: number; tubeBack: number; bubbleRim: number; bubbleIn: Uint16Array;
+  dryT: Float32Array;    // H: what an empty tube transmits of the back per row (0 inside the glass wall band); fades rear marks behind air
 }
 
 /** Ambient-light desaturation (params.ambientLight): a colour brighter than the diffuse body luma
@@ -103,22 +104,43 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
       w += p.glassHiBright * Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp);
     const d = (t - 0.82) / 0.07;
     w += p.glassReflect * Math.exp(-d * d);
-    const rim = Math.min(y, H - 1 - y);
-    if (rim < 2) w += p.glassRim * (rim === 0 ? 1 : 0.4);
     return Math.min(1, w);
   };
   const hiTop = highlightTop(p, H, lightDeg);
+  // Wall band (from the physical renderer's cylinder trace): rows whose ray misses the bore pass
+  // through wall only and never reach the back (`dryT` 0), ramping up over a few rows inside; the
+  // liquid is near index-matched to the wall, so the wet side still shows through there. The
+  // front surface reflects the room at grazing incidence: a neutral rim rising toward the
+  // silhouette on both sides (`glassRim`). `glassWall` 0 keeps only a one-row rim.
+  const wallU = 1 - 2 * Math.max(1, p.glassWall) / H;
+  const glassEdge = scale(mix(ghi, [180, 190, 195], 0.72), p.brightness);
+  const dryT = new Float32Array(H);
+  const rimW = (u: number): number => p.glassRim * Math.pow(Math.max(0, (Math.abs(u) - wallU) / (1 - wallU)), 2.5);
+  // Wall glow: light piped along the wall (internal paths the cylinder trace omits) lights the band
+  // itself, a plateau with a short ramp starting just inside the band; the grazing rim adds on top.
+  const glowW = (u: number): number => p.glassWallGlow * Math.max(0, Math.min(1, 0.4 + 3 * (Math.abs(u) - wallU) / (1 - wallU)));
+  const wallW = (u: number): number => { const g = glowW(u), r = rimW(u); return g + r - g * r; };
+  const wallT = (u: number): number => p.glassWall <= 0 ? 1 : Math.abs(u) >= wallU ? 0 : 1 - Math.exp(-(wallU - Math.abs(u)) / 0.04);
   for (let y = 0; y < H; y++) {
     const t = y / (H - 1);
     const gradient = Math.round(p.tubeBackGradient);
     const backMix = gradient === 1 ? t : gradient === 2 ? 1 - Math.abs(t * 2 - 1)
       : gradient === 3 ? Math.abs(t * 2 - 1) : 0;
     const back = mix(tubeBack, tubeBack2, backMix);
+    const u = (y + 0.5 - H / 2) / (H / 2), rim = wallW(u);
+    dryT[y] = wallT(u);
     // style shading: brightest around 1/3 from top, darkest at the bottom
     let c: [number, number, number];
     if (t < 0.33) c = mix(mix(body, lo, 0.25), body, t / 0.33);
     else c = mix(body, lo, ((t - 0.33) / 0.67) * p.shadeDepth);
     if (p.lightPhys > 0) c = mix(c, mix(lo, body, 1 - p.shadeDepth * (1 - lambert(y))), p.lightPhys);
+    // Thin edge: the chord through the column shortens toward the walls, so less of the light is
+    // absorbed there — the colour drifts to a grey of its own peak channel (Beer-Lambert, all
+    // channels converging), strongest on the outermost rows.
+    if (p.liquidThin > 0) {
+      const chord = Math.sqrt(Math.max(0, 1 - u * u)), m = Math.max(c[0], c[1], c[2]);
+      c = mix(c, [m, m, m], p.liquidThin * (1 - chord) * (1 - chord));
+    }
     // A transparent liquid shows the tube back through it: blend the lit liquid toward the
     // (panel-dimmed) back. The highlight is a reflection off the liquid surface, so it goes on
     // after that (undiluted), and the glass wall over both.
@@ -131,22 +153,24 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
       residue = mix(residue, liquidHiScaled, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));
     }
     const gw = glassW(y);
-    const glassWet = gw * (p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency);
-    tubeBackRows[y] = q(scale(mix(back, ghi, gw), p.brightness));
+    const wetK = p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency, glassWet = gw * wetK;
+    // Empty tube: the back shows through only where the ray reaches it (wall band dark), the glass
+    // body/specular over it, and the grazing rim on top.
+    tubeBackRows[y] = q(mix(scale(mix(scale(back, dryT[y]), ghi, gw), p.brightness), glassEdge, rim));
     // Glass shading over the liquid: `glassOverLiquid` of the dry-side weight for an opaque liquid,
     // rising to the full dry-side weight as the liquid turns transparent (the lower reflection
-    // band must run continuously across the meniscus of a clear liquid).
-    c = ambientize(mix(c, glassHiScaled, glassWet), bodyL, ambAmt);
+    // band must run continuously across the meniscus of a clear liquid). The rim follows the same rule.
+    c = ambientize(mix(mix(c, glassHiScaled, glassWet), glassEdge, rim * wetK), bodyL, ambAmt);
     // A dried deposit retains pigment: its coverage comes from traceAmount / drying,
     // not from transmission through the bulk liquid. Keep the opaque-liquid shading.
-    residue = ambientize(mix(residue, glassHiScaled, gw * p.glassOverLiquid), bodyL, p.ambientLight);
+    residue = ambientize(mix(mix(residue, glassHiScaled, gw * p.glassOverLiquid), glassEdge, rim * p.glassOverLiquid), bodyL, p.ambientLight);
     traceRows[y] = q(scale(rgb565to888(q(residue)), 0.85));
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
   }
   return {
     rows, traceRows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)),
-    bubbleRim: q(ambientize(scale(hexToRgb(p.bubbleRim), br), bodyL, ambAmt)), bubbleIn,
+    bubbleRim: q(ambientize(scale(hexToRgb(p.bubbleRim), br), bodyL, ambAmt)), bubbleIn, dryT,
   };
 }
 
@@ -289,15 +313,21 @@ function throughLiquid(bg: number, mark: number, p: Params, contrast: number): n
     : mix(c, [255, 255, 255], Math.min(1, (target - lc) / Math.max(1, 255 - lc)));
   return q(c);
 }
-/** Mark compositor for one tube. `onTop` marks ignore the liquid and are drawn opaque.
+/** Mark compositor for one tube. `onTop` marks ignore the liquid and are drawn opaque. Rear marks
+ *  behind air fade by `dryT` (invisible inside the glass wall band, like the tube back there).
  *  Emboss pixels derive from the body's through-liquid colour so the relief survives the contrast floor. */
-function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: number): MarkFn {
+function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: number, dryT: Float32Array | null = null): MarkFn {
   const H = edges.hi.length;
   return (x, y, c, cov = 1, rel = 0) => {
     const ry = y - y0;
+    if (ry < 0 || ry >= H || x < 0 || x >= PANEL_W) return;
     const inside = x >= edges.lo[ry] && x < edges.hi[ry];
-    if (!onTop && ry >= 0 && ry < H && x >= 0 && x < PANEL_W && y >= 0 && y < PANEL_H && inside)
+    if (!onTop && inside) {
       c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast);
+      // The glass-cut relief is on the rear wall too: it fades with the liquid's opacity (invisible
+      // through an opaque liquid) while its colour still derives from the floored through-liquid body.
+      if (rel !== 0) cov *= Math.max(0, Math.min(1, p.liquidTransparency));
+    } else if (!onTop && dryT) cov *= dryT[ry];
     if (rel !== 0) c = embossOf(c, rel);
     pxa(x, y, c, cov);
   };
@@ -544,8 +574,23 @@ function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
   fizzLen[i] = len;
   const want = Math.min(64, Math.floor(p.fizzCount * (len / TUBE_LENGTH_PX) * (1 + (agitation < 0.05 ? 0 : agitation))));
   const H = tubeLayout(p).H;
-  while (arr.length < want) arr.push({ x: Math.random() * len, y: Math.random() * H, v: 0.5 + Math.random() });
+  while (arr.length < want) { const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v }); }
   if (arr.length > want) arr.length = want;
+}
+/** Bubble radius px for size factor `v`. */
+const fizzR = (p: Params, v: number): number => p.fizzSize / 2 * (1 + (v - 1) * p.fizzSizeVar);
+/** Glass wall band px per side (see buildPalette `wallU`); 0 when the band is off. */
+const fizzWall = (p: Params): number => p.glassWall > 0 ? Math.max(1, p.glassWall) : 0;
+/** Row where a bubble of size `v` is fully behind the wall band (respawn/turnaround bound); the old
+ *  3 px margin without a band. */
+function fizzHideY(p: Params, v: number): number {
+  const w = fizzWall(p);
+  return w > 0 ? Math.max(0, w - fizzR(p, v)) : 3;
+}
+/** Random row with the whole bubble in the bore (fully visible), so bubbles never sit half behind the wall. */
+function fizzSpawnY(p: Params, H: number, v: number): number {
+  const lo = fizzWall(p) + fizzR(p, v), hi = H - lo;
+  return hi <= lo ? H / 2 : lo + Math.random() * (hi - lo);
 }
 /** Fizz rises against the in-plane gravity (`along`, `across`) at `fizzSpeed` px/s on both axes:
  *  along-tilt drives it toward the high end (`fizzDriftGain`), across-tilt toward the high edge (`fizzAcrossGain`).
@@ -564,8 +609,10 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
     for (const f of fizz[i]) {
       f.y += vy * f.v * dt;
       f.x += vx * f.v * dt;
-      if (f.y < 3 || f.y >= H) { f.y = vy <= 0 ? H - 3 : 3; f.x = Math.random() * len; f.v = 0.5 + Math.random(); }
-      else if (f.x < 0 || f.x > len) { f.x = vx < 0 ? len : 0; f.y = 3 + Math.random() * (H - 6); f.v = 0.5 + Math.random(); }
+      // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
+      const hide = fizzHideY(p, f.v);
+      if (f.y < hide || f.y >= H - hide) { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; f.x = Math.random() * len; }
+      else if (f.x < 0 || f.x > len) { f.x = vx < 0 ? len : 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); }
     }
   }
 }
@@ -844,12 +891,12 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const dx = onTop ? 0 : -state.edgeLight * p.tickParallax;
       const dy = onTop ? 0 : state.acrossTilt * p.tickParallax;
       drawTicks(y0, p, ticksN, wetRows, dryRows, onTop ? null : bounds,
-        markFn(y0, bounds, p, onTop, p.markContrast * p.tickBright), dx, dy);
+        markFn(y0, bounds, p, onTop, p.markContrast * p.tickBright, onTop ? null : pal.dryT), dx, dy);
     }
   };
   const drawDigitLayer = (onTop: boolean): void => {
     if (labels && p.digitsOnTop === onTop)
-      drawLabels(labels, p, onTop ? null : bounds, markFn(y0, bounds, p, onTop, p.markContrast * p.digitBright));
+      drawLabels(labels, p, onTop ? null : bounds, markFn(y0, bounds, p, onTop, p.markContrast * p.digitBright, onTop ? null : pal.dryT));
   };
   drawTickLayer(false);
   drawDigitLayer(false);
@@ -866,13 +913,15 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     for (const f of fizz[idx]) {
       const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
       if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
-      const r = p.fizzSize / 2 * (1 + (f.v - 1) * p.fizzSizeVar);
+      const r = fizzR(p, f.v);
       const m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
       for (let iy = Math.floor(f.y - ry - 1); iy <= Math.ceil(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
+        const wallT = pal.dryT[iy];   // bubbles live in the bore: invisible where the ray only sees the wall band
+        if (wallT <= 0) continue;
         for (let ix = Math.floor(f.x - r - 1); ix <= Math.ceil(f.x + r); ix++) {
           const dx = ix + 0.5 - f.x, dy = (iy + 0.5 - f.y) * m;
-          const d = Math.sqrt(dx * dx + dy * dy), cov = Math.min(1, r + 0.5 - d);
+          const d = Math.sqrt(dx * dx + dy * dy), cov = Math.min(1, r + 0.5 - d) * wallT;
           if (cov <= 0) continue;
           const cx = dx - off, cy = dy - off, dc = Math.sqrt(cx * cx + cy * cy);
           pxa(mapX(ix + xsI), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
@@ -903,6 +952,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   }
   drawTickLayer(true);
   if (lensEffect) applyLens(y0, H, p, lensSmooth);
+
+  // Front-facing marks are composited last, as on the physical display.
   drawDigitLayer(true);
 }
 
@@ -912,7 +963,9 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
 function fizzMag(mag: Float32Array, H: number, y: number, r: number): number {
   let m = 1;
   for (let it = 0; it < 2; it++) {
-    const ry = r / m, a = Math.max(0, Math.floor(y - ry)), b = Math.min(H - 1, Math.ceil(y + ry));
+    // Clamp into the tube with a <= b: a bubble stranded past a shrunken tube (tubeHeight pushed while fizz
+    // is on) otherwise gets an empty range, magnification 0 and an unbounded draw loop.
+    const ry = r / m, a = Math.min(H - 1, Math.max(0, Math.floor(y - ry))), b = Math.max(a, Math.min(H - 1, Math.ceil(y + ry)));
     let s = 0; for (let i = a; i <= b; i++) s += mag[i];
     m = s / (b - a + 1);
   }

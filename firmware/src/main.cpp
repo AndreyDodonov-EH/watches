@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <Adafruit_GFX.h>
+#include <ctype.h>
 #include <sys/time.h>
 #include "esp_heap_caps.h"
 #include "layout.h"
@@ -20,6 +21,8 @@
 #include "physics.h"
 #include "render.h"
 #include "gen/params_gen.h"
+#include "physical/model.h"
+#include "physical/render.h"
 
 #ifndef BOOT_MODE
 #define BOOT_MODE 'l'
@@ -64,6 +67,13 @@ static bool have_imu = false;
 // ---- liquid face state ----
 static Params params = PRESET_DEFAULT;
 static uint32_t paramsGen = 1;   // bumped on every param change; renderer caches key on it
+enum class Renderer : uint8_t { Legacy, Physical };
+static Renderer renderer = Renderer::Legacy;
+static bool physicalReady = false;
+static physical::Params physicalParams;
+static physical::Params physicalStaged;
+static uint32_t physicalParamsGen = 1;
+static bool physicalTransaction = false;
 // NVS autosave: namespace lw, blob cur. Written 2 s after the last change; ignored if the schema CRC differs.
 static Preferences prefs;
 static uint32_t paramsDirtyAt = 0;
@@ -96,16 +106,47 @@ static double clockNow() {
   double s = fmod((double)(tv.tv_sec % 86400) + tv.tv_usec * 1e-6 + demoOffset, 86400.0);
   return s < 0 ? s + 86400 : s;
 }
+static void updateTimeTargets() {
+  clockSec = clockNow();
+  double minutes = fmod(clockSec / 60.0, 60.0);
+  double hours = fmod(clockSec / 3600.0, 12.0);
+  tubeH.fillTarget = (float)(hours / 12.0);
+  tubeM.fillTarget = (float)(minutes / 60.0);
+}
 static uint32_t lastPhysUs = 0, frames = 0, fpsT0 = 0;
 static float fps = 0;
 static uint32_t renderUs = 0, waitUs = 0;          // accumulated over the current fps window
 static uint32_t hoursUs = 0, minutesUs = 0;        // per-core render time (hours on core 0, minutes here)
 static float renderMs = 0, waitMs = 0, hoursMs = 0, minutesMs = 0;   // per-frame averages of the last window
+static uint16_t frameIntervalHist[256];             // 1 ms bins; bin 255 includes all slower frames
+static uint32_t lastFrameStartUs = 0, frameIntervalSamples = 0;
+static uint16_t frameP95Ms = 0;
 // Tube strips (owned by display.cpp, internal DMA RAM): the panel DMA reads them directly while the
 // next frame renders.
 static uint16_t *strip[2] = {nullptr, nullptr};
+static char dumpHex[PANEL_W * 4 + 2];
 
-static TubeLayout shownLayout = {0, 0, 0};
+struct DisplayLayout {
+  int H, yH, yM;
+  bool operator!=(const DisplayLayout &o) const { return H != o.H || yH != o.yH || yM != o.yM; }
+};
+static DisplayLayout selectedLayout() {
+  if (renderer == Renderer::Physical) {
+    physical::Layout l = physical::layout(physicalParams);
+    return {l.H, l.yH, l.yM};
+  }
+  TubeLayout l = tubeLayout(params);
+  return {l.H, l.yH, l.yM};
+}
+static void renderSelectedTube(int idx, uint16_t *dst) {
+  const TubeState &tube = idx == 0 ? tubeH : tubeM;
+  if (renderer == Renderer::Physical)
+    physical::renderTube(idx, tube.fillTarget, physicalParams, physicalParamsGen, dst);
+  else
+    renderTube(idx, tube, params, paramsGen, dst);
+}
+
+static DisplayLayout shownLayout = {0, 0, 0};
 
 // ---- hours-tube worker on core 0 (the Arduino loop runs on core 1) ----
 // The two tubes are independent, so each frame renders them at the same time: the worker draws hours
@@ -124,7 +165,7 @@ static void renderWorker(void *) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     uint32_t t0 = micros();
-    renderTube(0, tubeH, params, paramsGen, strip[0]);
+    renderSelectedTube(0, strip[0]);
     workerUs = micros() - t0;
     workerStackFree = uxTaskGetStackHighWaterMark(nullptr);
     xTaskNotifyGive(loopTask);
@@ -136,7 +177,7 @@ static void workerStart() {
 }
 
 static void renderBoth() {
-  TubeLayout lay = tubeLayout(params);
+  DisplayLayout lay = selectedLayout();
   if (lay != shownLayout) {                 // tubes moved: wipe the rows they used to cover
     display_wait_all();
     fb.fillScreen(0); display_push_frame(fb.buf);
@@ -148,7 +189,7 @@ static void renderBoth() {
   xTaskNotifyGive(workerTask);                  // hours → core 0
   display_wait_all();                           // minutes strip free (overlaps the hours render)
   uint32_t t2 = micros();
-  renderTube(1, tubeM, params, paramsGen, strip[1]);
+  renderSelectedTube(1, strip[1]);
   uint32_t t3 = micros();
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);      // hours done
   uint32_t t4 = micros();
@@ -188,8 +229,10 @@ static void face_calibration() {
 
 // Live figures of whatever the loop is rendering (2 s rolling window, see liquid_tick).
 static void report_fps() {
-  out.printf("fps %.1f  render %.2f ms  push-wait %.2f ms  cores h %.2f / m %.2f ms  (mode %c, transp %.2f)\n",
-             fps, renderMs, waitMs, hoursMs, minutesMs, mode, params.liquidTransparency);
+  out.printf("fps %.1f  render %.2f ms  push-wait %.2f ms  cores h %.2f / m %.2f ms  (mode %c, renderer %s, transp %.2f)  frame-p95 %u ms\n",
+             fps, renderMs, waitMs, hoursMs, minutesMs, mode,
+             renderer == Renderer::Physical ? "physical" : "legacy", params.liquidTransparency,
+             (unsigned)frameP95Ms);
 }
 
 // ---- liquid face ----
@@ -197,24 +240,34 @@ static void liquid_start() {
   fb.fillScreen(0);
   display_push_frame(fb.buf);
   display_set_brightness(255);   // params.brightness is applied in the render LUTs
+  updateTimeTargets();
+  memset(frameIntervalHist, 0, sizeof(frameIntervalHist));
+  lastFrameStartUs = 0; frameIntervalSamples = 0; frameP95Ms = 0;
   lastPhysUs = micros(); frames = 0; fpsT0 = millis();
 }
 
 static void liquid_tick() {
+  uint32_t frameStartUs = micros();
+  if (lastFrameStartUs) {
+    uint32_t intervalMs = (frameStartUs - lastFrameStartUs + 999) / 1000;
+    if (intervalMs > 255) intervalMs = 255;
+    frameIntervalHist[intervalMs]++;
+    frameIntervalSamples++;
+  }
+  lastFrameStartUs = frameStartUs;
   // physics at 50 Hz, catch up if a render took longer than one step
   uint32_t now = micros();
   int steps = 0;
   while ((int32_t)(now - lastPhysUs) >= (int32_t)(1000000 / PHYS_HZ) && steps < 5) {
     lastPhysUs += 1000000 / PHYS_HZ; steps++;
     demoOffset += PHYS_DT * (demoSpeed - 1);
-    clockSec = clockNow();
-    TiltInput in = have_imu ? imuFilter.step(rawTilt, params) : TiltInput{0, 0, 0, 0};
-    double m = fmod(clockSec / 60.0, 60.0), h = fmod(clockSec / 3600.0, 12.0);
-    tubeH.fillTarget = (float)(h / 12.0);
-    tubeM.fillTarget = (float)(m / 60.0);
-    stepTube(tubeH, in, params);
-    stepTube(tubeM, in, params);
-    stepFizz(params, PHYS_DT, in.along, in.across, tubeH.agitation);
+    updateTimeTargets();
+    if (renderer == Renderer::Legacy) {
+      TiltInput in = have_imu ? imuFilter.step(rawTilt, params) : TiltInput{0, 0, 0, 0};
+      stepTube(tubeH, in, params);
+      stepTube(tubeM, in, params);
+      stepFizz(params, PHYS_DT, in.along, in.across, tubeH.agitation);
+    }
   }
   renderBoth();
   frames++;
@@ -222,6 +275,14 @@ static void liquid_tick() {
     fps = frames * 1000.0f / (millis() - fpsT0);
     renderMs = renderUs / 1000.0f / frames; waitMs = waitUs / 1000.0f / frames;
     hoursMs = hoursUs / 1000.0f / frames; minutesMs = minutesUs / 1000.0f / frames;
+    if (frameIntervalSamples) {
+      uint32_t target = (frameIntervalSamples * 95 + 99) / 100, cumulative = 0;
+      for (int ms = 0; ms < 256; ms++) {
+        cumulative += frameIntervalHist[ms];
+        if (cumulative >= target) { frameP95Ms = (uint16_t)ms; break; }
+      }
+    }
+    memset(frameIntervalHist, 0, sizeof(frameIntervalHist)); frameIntervalSamples = 0;
     frames = 0; renderUs = waitUs = hoursUs = minutesUs = 0; fpsT0 = millis();
   }
 }
@@ -274,6 +335,66 @@ static void dumpParams() {
   out.println("}");
 }
 
+static const char *rendererName() { return renderer == Renderer::Physical ? "physical" : "legacy"; }
+
+static bool parsePhysicalValue(const char *text, float &value) {
+  if (!text || !*text || isspace((unsigned char)*text)) return false;
+  char *end = nullptr;
+  value = strtof(text, &end);
+  return end != text && *end == 0 && std::isfinite(value);
+}
+
+static const physical::Field *findPhysicalField(const char *name) {
+  for (size_t i = 0; i < physical::FIELD_COUNT; i++)
+    if (!strcmp(name, physical::FIELDS[i].name)) return &physical::FIELDS[i];
+  return nullptr;
+}
+
+// Stage only field-local constraints here. Cross-field and derived-layout constraints are checked
+// by validate() at commit so a valid transition can pass through a temporarily invalid candidate.
+static bool stagePhysicalParam(const char *name, const char *text, const char *&error) {
+  const physical::Field *field = findPhysicalField(name);
+  if (!field) { error = "unknown param"; return false; }
+  float value;
+  if (!parsePhysicalValue(text, value)) { error = "invalid number"; return false; }
+  if (value < field->min || value > field->max || (field->integer && std::floor(value) != value)) {
+    error = "out of range"; return false;
+  }
+  physicalStaged.*(field->member) = value;
+  return true;
+}
+
+static void dumpPhysicalParams() {
+  out.print("{");
+  for (size_t i = 0; i < physical::FIELD_COUNT; i++) {
+    const physical::Field &field = physical::FIELDS[i];
+    // Seven significant digits avoid exposing binary32 endpoint noise (e.g. 1.70000005)
+    // beyond the schema's exact UI bounds, while retaining the supported control precision.
+    out.printf("%s\"%s\":%.7g", i ? "," : "", field.name,
+               (double)(physicalParams.*(field.member)));
+  }
+  out.println("}");
+}
+
+static void dumpPhysicalStrips() {
+  display_wait_all();
+  updateTimeTargets();
+  physical::Layout lay = physical::layout(physicalParams);
+  physical::renderTube(0, tubeH.fillTarget, physicalParams, physicalParamsGen, strip[0]);
+  physical::renderTube(1, tubeM.fillTarget, physicalParams, physicalParamsGen, strip[1]);
+  out.printf("PHYSICAL %d %d %d %.6f %.6f\n", lay.H, lay.yH, lay.yM,
+             tubeH.fillTarget, tubeM.fillTarget);
+  for (int tube = 0; tube < 2; tube++) for (int y = 0; y < lay.H; y++) {
+    const uint16_t *row = strip[tube] + y * PANEL_W; char *dst = dumpHex;
+    for (int x = 0; x < PANEL_W; x++) {
+      uint16_t color = __builtin_bswap16(row[x]);
+      dst += sprintf(dst, "%04x", color);
+    }
+    *dst++ = '\n'; *dst = 0; out.write(dumpHex);
+  }
+  out.println("END");
+}
+
 static void show(char m) {
   display_wait_all();
   mode = m;
@@ -300,6 +421,42 @@ static void handleLine(char *line) {
       else out.println("usage: T <epoch_s> <tz_min>");
       break; }
     case 'd': demoSpeed = atof(arg); out.printf("demo speed x%g\n", demoSpeed); break;
+    case 'V':
+      if (*arg) out.println("error usage: V");
+      else out.printf("{\"physical\":1,\"schema\":\"%s\",\"renderer\":\"%s\"}\n",
+                      physical::PHYSICAL_SCHEMA_DIGEST, rendererName());
+      break;
+    case 'R':
+      if (!strcmp(arg, "legacy")) { renderer = Renderer::Legacy; show('l'); out.println("ok renderer legacy"); }
+      else if (!strcmp(arg, "physical")) {
+        if (!physicalReady) out.println("error physical renderer unavailable");
+        else { renderer = Renderer::Physical; show('l'); out.println("ok renderer physical"); }
+      } else out.println("error usage: R physical | R legacy");
+      break;
+    case 'P': {
+      if (!strcmp(arg, "begin")) {
+        physicalStaged = physicalParams; physicalTransaction = true; out.println("ok Pbegin");
+      } else if (!strcmp(arg, "commit")) {
+        if (!physicalTransaction) out.println("error no physical transaction");
+        else if (!physical::validate(physicalStaged)) out.println("error physical params invalid");
+        else {
+          physicalParams = physicalStaged; physicalParamsGen++; physicalTransaction = false;
+          out.println("ok Pcommit");
+        }
+      } else if (!strcmp(arg, "cancel")) {
+        physicalTransaction = false; out.println("ok Pcancel");
+      } else if (!strcmp(arg, "?")) {
+        dumpPhysicalParams();
+      } else {
+        if (!physicalTransaction) { out.println("error no physical transaction"); break; }
+        char *eq = strchr(arg, '=');
+        if (!eq || eq == arg || !eq[1]) { out.println("error usage: P name=value"); break; }
+        *eq = 0;
+        const char *error = nullptr;
+        if (stagePhysicalParam(arg, eq + 1, error)) out.printf("ok %s\n", arg);
+        else out.printf("error %s %s\n", error, arg);
+      }
+      break; }
     case 'p': {
       if (arg[0] == '?') dumpParams();
       else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsGen++; paramsErase(); out.println("params reset"); }
@@ -308,6 +465,7 @@ static void handleLine(char *line) {
         out.printf(ok ? "ok %s\n" : "unknown param %s\n", arg); }
       break; }
     case 'x': {  // dump state + both strips (hex) for offline comparison with the sim
+      if (renderer == Renderer::Physical) { out.println("error legacy dump unavailable in physical renderer"); break; }
       display_wait_all();
       renderTube(0, tubeH, params, paramsGen, strip[0]); renderTube(1, tubeM, params, paramsGen, strip[1]);
       auto dumpState = [&](const TubeState &t) {
@@ -323,20 +481,25 @@ static void handleLine(char *line) {
         out.print(thex); out.print(' ');
       };
       out.print("TRACE "); dumpTrace(tubeH); dumpTrace(tubeM); out.println();
-      static char hex[PANEL_W * 4 + 2];
       for (int t = 0; t < 2; t++) for (int y = 0; y < tubeLayout(params).H; y++) {
-        const uint16_t *row = strip[t] + y * PANEL_W; char *o = hex;
+        const uint16_t *row = strip[t] + y * PANEL_W; char *o = dumpHex;
         for (int x = 0; x < PANEL_W; x++) { uint16_t c = __builtin_bswap16(row[x]); o += sprintf(o, "%04x", c); }
-        *o++ = '\n'; *o = 0; out.write(hex);
+        *o++ = '\n'; *o = 0; out.write(dumpHex);
       }
       out.println("END");
       break; }
-    case 's': out.printf("mode %c fps %.1f clock %02d:%02d:%02d along %.3f across %.3f gyro %.1f fillH %.3f fillM %.3f heap %u worker-stack-free %u\n",
-                 mode, fps, (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60,
-                 rawTilt.along, rawTilt.across, rawTilt.gyroAcross, tubeH.fillTarget, tubeM.fillTarget, ESP.getFreeHeap(), (unsigned)workerStackFree); break;
+    case 'X':
+      if (*arg) out.println("error usage: X");
+      else if (renderer != Renderer::Physical) out.println("error physical dump requires physical renderer");
+      else dumpPhysicalStrips();
+      break;
+    case 's': out.printf("mode %c renderer %s fps %.1f clock %02d:%02d:%02d along %.3f across %.3f gyro %.1f fillH %.3f fillM %.3f heap %u physical-bytes %u worker-stack-free %u\n",
+                 mode, rendererName(), fps, (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60,
+                 rawTilt.along, rawTilt.across, rawTilt.gyroAcross, tubeH.fillTarget, tubeM.fillTarget,
+                 ESP.getFreeHeap(), (unsigned)physical::memoryBytes(), (unsigned)workerStackFree); break;
     case 'r': ESP.restart(); break;
-    case '?': out.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> p<name>=<v> p? p! r"); break;
-    default: break;
+    case '?': out.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> p<name>=<v> p? p! V R <legacy|physical> Pbegin P <name>=<v> Pcommit Pcancel P? x X r"); break;
+    default: out.println("error unknown command"); break;
   }
 }
 
@@ -354,6 +517,10 @@ void setup() {
   if (!fb.buf) { out.println("FATAL: framebuffer alloc failed"); }
   if (!display_init()) out.println("display init FAILED");
   if (!render_init()) out.println("render init FAILED (glyph pools)");
+  physicalParams = physical::defaults();
+  physicalStaged = physicalParams;
+  physicalReady = physical::init();
+  if (!physicalReady) out.println("physical render init FAILED");
   tubeH.trace = traceBuf(0); tubeM.trace = traceBuf(1);   // static dried-trace buffers (see physics.h)
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   workerStart();

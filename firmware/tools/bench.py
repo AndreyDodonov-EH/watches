@@ -69,7 +69,10 @@ def main():
                 print(f'{k + "=" + fmt(v):22} {f2:6.1f} {r2:8.2f} {ren - r2:+8.2f}')
     finally:
         for k in touched: d.talk(f'p{k}={fmt(snap[k])}')
-        d.talk('d1'); d.close()
+        d.talk('d1')
+        # The board autosaves params to NVS 2 s after the last write, so the pinned values (inputGain 0)
+        # were saved mid-bench; hold the session past the autosave so the restored ones replace them.
+        time.sleep(2.5); d.talk('s'); d.close()
     if a.json: print(json.dumps(result))
 
 if __name__ == '__main__': main()

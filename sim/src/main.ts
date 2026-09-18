@@ -33,7 +33,7 @@ let demoClock = Date.now();
 const app = document.getElementById('app')!;
 app.innerHTML = `
 <header>
-  <h1>Liquid Watch — sim</h1>
+    <h1>Liquid Watch — sim <a href="./physical.html">physical lab</a></h1>
   <div class="top">
     <label>scale <select id="scale"><option value="0.33">0.33 (≈ real size @96 dpi)</option><option value="0.5" selected>0.5</option><option value="0.75">0.75</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
     <label><input type="checkbox" id="ovl" checked> leather cuff</label>
