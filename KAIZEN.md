@@ -1,6 +1,14 @@
 # Kaizen — continuous-improvement backlog
 
+- Host parity checks: sandboxed Node `spawnSync` can hang or report EPERM despite child output;
+  the approved run outside the sandbox completes normally.
+
 ## Visual / layout
+- Tilt pose currently uses the two in-plane gravity axes; face-down horizontal is indistinguishable
+  from face-up. Carry signed normal gravity through the input pipeline if upside-down release is wanted.
+- Rear ticks still round their parallax to whole pixels (each tick at its own depth, so the ladder steps one tick at a time); the digits now glide sub-pixel. The same bilinear placement would smooth the ticks.
+- `digitParallax` shifts a rear label as a block; the ticks bow through the rear-half depth. A per-row depth factor
+  (digits are ~centre row on every preset, so ≈1) would only matter for digits pushed toward a wall.
 - Rear-mark compositors index row bounds before checking that the row is in range; clip `ry` first in sim and firmware.
 - Even if hour has passed, edge might be before it, example is 06:01
 - Empty space at the top and bottom of the real screen? Move tubes further away from one another?

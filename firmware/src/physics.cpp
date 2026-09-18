@@ -33,25 +33,43 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   const float along = dz(in.along, p.deadzone);
   const float across = dz(in.across, p.deadzone);
 
-  const float fillRest = clampf(along * p.fillSloshGain, -FILL_SLOSH_MAX_PX, FILL_SLOSH_MAX_PX);
-  const float fillKick = in.gyroAcross * p.angleGyroGain * 4;
+  // Tilt-controlled reading: filtered gravity before artistic gain/deadzone, both axes. See sim.
+  const float gain = p.inputGain > 0 ? p.inputGain : 1;
+  const float poseAlong = in.along / gain, poseAcross = in.across / gain;
+  const float hold = clampf(p.playHold, 0, 30);
+  s.playTimer = fmaxf(0, fminf(hold, s.playTimer) - dt);
+  s.playWindow = fmaxf(0, s.playWindow - dt);
+  if (!p.freeLiquid || hold == 0) {
+    s.playTimer = s.playWindow = 0; s.playInit = false;
+  } else if (!s.playInit) {
+    s.playAnchorAlong = poseAlong; s.playAnchorAcross = poseAcross; s.playInit = true;
+  } else {
+    // Substantial back-and-forth excursions start play; further strokes refresh it. See sim.
+    const float da = poseAlong - s.playAnchorAlong, dc = poseAcross - s.playAnchorAcross;
+    const float distance = sqrtf(da * da + dc * dc);
+    if (distance >= PLAY_STROKE_G) {
+      const bool reversal = s.playWindow > 0 && da * s.playDirAlong + dc * s.playDirAcross < -0.5f * distance;
+      if (reversal || s.playTimer > 0) s.playTimer = hold;
+      s.playDirAlong = da / distance; s.playDirAcross = dc / distance;
+      s.playAnchorAlong = poseAlong; s.playAnchorAcross = poseAcross;
+      s.playWindow = PLAY_REVERSAL_S;
+    }
+  }
+  const float tilt = asinf(fminf(1, sqrtf(in.along * in.along + in.across * in.across) / gain)) * 180 / (float)M_PI;
+  const float start = clampf(p.readTiltStart, 0, 89);
+  const float end = fmaxf(start + 1, fminf(90, p.readTiltEnd));
+  const float t = clampf((tilt - start) / (end - start), 0, 1);
+  const float readTarget = p.freeLiquid ? (s.playTimer > 0 ? 0 : 1 - t * t * (3 - 2 * t)) : 1;
+  s.reading += (readTarget - s.reading) * fminf(1, 4 * dt);
+  const float flow = p.freeLiquid ? 1 - s.reading : 1;
+
+  const float fillRest = clampf(along * p.fillSloshGain * flow, -FILL_SLOSH_MAX_PX, FILL_SLOSH_MAX_PX);
+  const float fillKick = in.gyroAcross * p.angleGyroGain * 4 * flow;
   const float fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
   s.fillVel += fillAcc * dt;
   s.fillPos += s.fillVel * dt;
   if (s.fillPos > FILL_SLOSH_MAX_PX) { s.fillPos = FILL_SLOSH_MAX_PX; s.fillVel = fminf(0, s.fillVel); }
   if (s.fillPos < -FILL_SLOSH_MAX_PX) { s.fillPos = -FILL_SLOSH_MAX_PX; s.fillVel = fmaxf(0, s.fillVel); }
-
-  // Reading gesture: a wrist turn then the reading pose (face up, tube level) → readHold s read. See sim.
-  const float turn = fabsf(in.gyroAlong) + fabsf(in.gyroAcross);
-  const float motionT = p.readTurn <= 0 ? 1 : fminf(1, turn / p.readTurn);
-  s.motion += (motionT - s.motion) * fminf(1, (motionT > s.motion ? 20 : 1.5f) * dt);
-  const float faceUp = sqrtf(fmaxf(0, 1 - along * along - across * across));
-  const bool inPose = faceUp >= p.readFaceUp && fabsf(along) <= p.readAlongMax;
-  if (s.motion > 0.5f) s.armed = true;
-  if (!inPose) s.readTimer = 0;
-  else if (s.armed && s.motion < 0.25f) { s.armed = false; s.readTimer = p.readHold; }
-  s.readTimer = fmaxf(0, s.readTimer - dt);
-  s.reading += ((!p.freeLiquid || s.readTimer > 0 ? 1 : 0) - s.reading) * fminf(1, 4 * dt);
 
   // Free liquid: slug slides under along-gravity with drag, bounces at the ends, parked home while reading.
   const float travel = fmaxf(0, TUBE_LENGTH_PX - columnLen(s.fillTarget, p));
@@ -59,7 +77,7 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   float slugAcc = 0;
   if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
   else {
-    slugAcc = along * p.freeGain - p.freeDamp * s.slugVel
+    slugAcc = flow * along * p.freeGain - p.freeDamp * s.slugVel
       + s.reading * (-p.freeHomeK * (s.slugPos - home) - 2 * sqrtf(p.freeHomeK) * s.slugVel);
     const float v0 = s.slugVel;
     s.slugVel += slugAcc * dt;

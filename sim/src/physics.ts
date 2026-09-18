@@ -5,6 +5,8 @@ import { TUBE_LENGTH_PX } from '../../spec/layout';
 
 export const PHYS_HZ = 50;
 export const PHYS_DT = 1 / PHYS_HZ;
+const PLAY_STROKE_G = 0.35; // substantial change in filtered gravity (~20° near horizontal)
+const PLAY_REVERSAL_S = 2;  // opposite strokes must be close together to count as play
 
 /** Input in the tube's frame (already mapped from IMU axes via spec/layout IMU_* constants). */
 export interface TiltInput {
@@ -65,16 +67,19 @@ export interface TubeState {
   slugPos: number;
   slugVel: number;
   reading: number;
-  motion: number;      // 0..1 gyro-energy follower with slow decay: "a turn was just made"
-  armed: boolean;      // a turn was made and not yet consumed by a read
-  readTimer: number;   // s left of the current read
+  playTimer: number; // seconds of free flow remaining after deliberate tilts
+  playWindow: number; // seconds in which an opposite stroke can start play
+  playAnchorAlong: number; playAnchorAcross: number;
+  playDirAlong: number; playDirAcross: number; // unit direction of the last substantial stroke
+  playInit: boolean;
 }
 
 export function newTube(): TubeState {
   return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, light: 0, lightVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0,
     cap: 0, capVel: 0, filmFree: 0, filmHome: 0,
     trace: new Uint16Array(TUBE_LENGTH_PX), traceLo: TUBE_LENGTH_PX, traceHi: 0, xtPrev: 0, xhPrev: 0, traceInit: false,
-    slugPos: 0, slugVel: 0, reading: 1, motion: 0, armed: false, readTimer: 0 };
+    slugPos: 0, slugVel: 0, reading: 1, playTimer: 0, playWindow: 0,
+    playAnchorAlong: 0, playAnchorAcross: 0, playDirAlong: 0, playDirAcross: 0, playInit: false };
 }
 
 /** Per-column unevenness of the dried traces: the high 16 bits scatter the decay rates, the low 16
@@ -109,28 +114,46 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   const along = dz(inp.along, p.deadzone);
   const across = dz(inp.across, p.deadzone);
 
+  // Pose uses filtered gravity before the artistic gain/deadzone. Both tilt axes count.
+  // A smooth band releases the slug without a mode boundary or a timed reading gesture.
+  const gain = p.inputGain > 0 ? p.inputGain : 1;
+  const poseAlong = inp.along / gain, poseAcross = inp.across / gain;
+  const hold = Math.max(0, Math.min(30, p.playHold));
+  s.playTimer = Math.max(0, Math.min(hold, s.playTimer) - dt);
+  s.playWindow = Math.max(0, s.playWindow - dt);
+  if (!p.freeLiquid || hold === 0) {
+    s.playTimer = s.playWindow = 0; s.playInit = false;
+  } else if (!s.playInit) {
+    s.playAnchorAlong = poseAlong; s.playAnchorAcross = poseAcross; s.playInit = true;
+  } else {
+    // Remember substantial excursions, ignoring small jitter. One move can be lowering/raising
+    // an arm; an opposing move soon afterwards is stronger evidence of intentional play.
+    const da = poseAlong - s.playAnchorAlong, dc = poseAcross - s.playAnchorAcross;
+    const distance = Math.hypot(da, dc);
+    if (distance >= PLAY_STROKE_G) {
+      const reversal = s.playWindow > 0 && da * s.playDirAlong + dc * s.playDirAcross < -0.5 * distance;
+      if (reversal || s.playTimer > 0) s.playTimer = hold;
+      s.playDirAlong = da / distance; s.playDirAcross = dc / distance;
+      s.playAnchorAlong = poseAlong; s.playAnchorAcross = poseAcross;
+      s.playWindow = PLAY_REVERSAL_S;
+    }
+  }
+  const tilt = Math.asin(Math.min(1, Math.hypot(inp.along, inp.across) / gain)) * 180 / Math.PI;
+  const start = Math.max(0, Math.min(89, p.readTiltStart));
+  const end = Math.max(start + 1, Math.min(90, p.readTiltEnd));
+  const t = Math.max(0, Math.min(1, (tilt - start) / (end - start)));
+  const readTarget = p.freeLiquid ? (s.playTimer > 0 ? 0 : 1 - t * t * (3 - 2 * t)) : 1;
+  s.reading += (readTarget - s.reading) * Math.min(1, 4 * dt);
+  const flow = p.freeLiquid ? 1 - s.reading : 1;
+
   // Fill-edge slosh: static offset proportional to along-tilt; spring returns to rest.
-  const fillRest = Math.max(-FILL_SLOSH_MAX_PX, Math.min(FILL_SLOSH_MAX_PX, along * p.fillSloshGain));
-  const fillKick = inp.gyroAcross * p.angleGyroGain * 4; // quick flicks kick the edge
+  const fillRest = Math.max(-FILL_SLOSH_MAX_PX, Math.min(FILL_SLOSH_MAX_PX, along * p.fillSloshGain * flow));
+  const fillKick = inp.gyroAcross * p.angleGyroGain * 4 * flow; // quick flicks kick the edge
   const fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
   s.fillVel += fillAcc * dt;
   s.fillPos += s.fillVel * dt;
   if (s.fillPos > FILL_SLOSH_MAX_PX) { s.fillPos = FILL_SLOSH_MAX_PX; s.fillVel = Math.min(0, s.fillVel); }
   if (s.fillPos < -FILL_SLOSH_MAX_PX) { s.fillPos = -FILL_SLOSH_MAX_PX; s.fillVel = Math.max(0, s.fillVel); }
-
-  // Reading gesture: a turn (gyro energy above readTurn) followed by the reading pose — face up,
-  // tube level — starts a read of readHold seconds; leaving the pose ends it. readTurn <= 0: the
-  // pose alone reads. Pinned liquid is always "reading".
-  const turn = Math.abs(inp.gyroAlong) + Math.abs(inp.gyroAcross);
-  const motionT = p.readTurn <= 0 ? 1 : Math.min(1, turn / p.readTurn);
-  s.motion += (motionT - s.motion) * Math.min(1, (motionT > s.motion ? 20 : 1.5) * dt);
-  const faceUp = Math.sqrt(Math.max(0, 1 - along * along - across * across));
-  const inPose = faceUp >= p.readFaceUp && Math.abs(along) <= p.readAlongMax;
-  if (s.motion > 0.5) s.armed = true;
-  if (!inPose) s.readTimer = 0;
-  else if (s.armed && s.motion < 0.25) { s.armed = false; s.readTimer = p.readHold; }
-  s.readTimer = Math.max(0, s.readTimer - dt);
-  s.reading += ((!p.freeLiquid || s.readTimer > 0 ? 1 : 0) - s.reading) * Math.min(1, 4 * dt);
 
   // Free liquid: the slug slides under the along component of gravity with viscous drag and
   // bounces off the tube ends; while reading, a critically damped pull parks it at its home end.
@@ -139,7 +162,7 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   let slugAcc = 0;
   if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
   else {
-    slugAcc = along * p.freeGain - p.freeDamp * s.slugVel
+    slugAcc = flow * along * p.freeGain - p.freeDamp * s.slugVel
       + s.reading * (-p.freeHomeK * (s.slugPos - home) - 2 * Math.sqrt(p.freeHomeK) * s.slugVel);
     const v0 = s.slugVel;
     s.slugVel += slugAcc * dt;

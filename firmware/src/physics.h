@@ -5,6 +5,8 @@
 
 #define PHYS_HZ 50
 #define PHYS_DT (1.0f / PHYS_HZ)
+#define PLAY_STROKE_G 0.35f      // substantial filtered gravity excursion (~20° near horizontal)
+#define PLAY_REVERSAL_S 2.0f     // opposite strokes inside this window count as play
 #define FILL_SLOSH_MAX_PX 30.0f   // structural caps — params only tighten, never widen
 #define ANGLE_HARD_MAX_DEG 20.0f
 #define LIGHT_MAX_DEG 85.0f
@@ -33,8 +35,10 @@ struct TubeState {
   float xtPrev = 0, xhPrev = 0;   // panel-frame edge positions at the previous tick
   bool traceInit = false;
   // free liquid: slug home-edge position (px from the left end), reading 1 = parked home showing the time
-  float slugPos = 0, slugVel = 0, reading = 1, motion = 0, readTimer = 0;
-  bool armed = false;
+  float slugPos = 0, slugVel = 0, reading = 1;
+  float playTimer = 0, playWindow = 0;
+  float playAnchorAlong = 0, playAnchorAcross = 0, playDirAlong = 0, playDirAcross = 0;
+  bool playInit = false;
 };
 
 float columnLen(float fillTarget, const Params &p);   // liquid column length, px

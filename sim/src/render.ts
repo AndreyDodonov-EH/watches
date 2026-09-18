@@ -307,6 +307,8 @@ interface Labels {
   list: Label[]; bw: number; bh: number; ry0: number; ry1: number; y0: number; yTop: number; sourceRows: Int16Array;
   /** Rear digits behind air (see `digitDryLens`); same as the wet tables for digits on top. */
   drySourceRows: Int16Array; dryRy0: number; dryRy1: number;
+  /** Refraction shift (px, fractional) of the columns behind liquid (`digitParallax`); 0 behind air and for digits on top. */
+  wetDx: number; wetDy: number;
   sprite: ScaledGlyph[] | null; font: Font; gap: number; rows: Uint16Array; shadow: number; shadowA: number; shadowOff: number;
 }
 
@@ -325,7 +327,7 @@ function markSourceRows(H: number, lens: number, curve = 1): Int16Array {
 }
 
 /** Measure (but do not draw) the labels of one tube. Returns null when digits are off. */
-function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number, fill: number): Labels | null {
+function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number, edgeLight: number, fill: number): Labels | null {
   if (!p.digits) return null;
   const minutes = ticksN === 60;
   const every = Math.max(1, Math.round(minutes ? p.digitMinuteStep : p.digitHourStep));
@@ -346,13 +348,17 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   const H = tubeLayout(p).H;
   const sourceRows = p.digitsOnTop ? markSourceRows(H, p.topLens, p.lensCurve) : markSourceRows(H, p.bottomLens);
   const drySourceRows = p.digitsOnTop ? sourceRows : markSourceRows(H, p.digitDryLens);
+  // Liquid refracts the rear wall: the wet columns slide with tilt (same sign convention as the ticks).
+  // Fractional: the wet copy is resampled at draw time so it glides rather than steps.
+  const wetDx = p.digitsOnTop ? 0 : -edgeLight * p.digitParallax;
+  const wetDy = p.digitsOnTop ? 0 : acrossTilt * p.digitParallax;
   const sourceRy0 = yTop - y0, sourceRy1 = yBase - y0 + (shadow >= 0 ? shadowOff : 0);
-  const rowSpan = (rows: Int16Array): [number, number] => {
+  const rowSpan = (rows: Int16Array, shift: number): [number, number] => {
     let a = H, b = -1;
-    for (let ry = 0; ry < H; ry++) if (rows[ry] >= sourceRy0 && rows[ry] <= sourceRy1) { a = Math.min(a, ry); b = Math.max(b, ry); }
+    for (let ry = 0; ry < H; ry++) if (rows[ry] >= sourceRy0 + Math.floor(shift) && rows[ry] <= sourceRy1 + Math.ceil(shift)) { a = Math.min(a, ry); b = Math.max(b, ry); }
     return [a, b];
   };
-  const [ry0, ry1] = rowSpan(sourceRows), [dryRy0, dryRy1] = rowSpan(drySourceRows);
+  const [ry0, ry1] = rowSpan(sourceRows, wetDy), [dryRy0, dryRy1] = rowSpan(drySourceRows, 0);
   const list: Label[] = [];
   const start = Math.round(minutes ? p.digitMinuteStart : p.digitHourStart) || every;
   const push = (i: number) => {
@@ -365,51 +371,64 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   };
   if (minutes ? p.digitsLastOnlyM : p.digitsLastOnlyH) { const s = minutes ? every : 1, i = Math.floor(Math.min(ticksN - 1e-6, Math.max(0, fill) * ticksN) / s) * s; if (i > 0) push(i); }
   else for (let i = start; i < ticksN; i += every) push(i);
-  return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, drySourceRows, dryRy0, dryRy1, sprite, font, gap, rows: digitRowColors(p, bh), shadow, shadowA, shadowOff };
+  return { list, bw, bh, y0, yTop, ry0, ry1, sourceRows, drySourceRows, dryRy0, dryRy1, wetDx, wetDy, sprite, font, gap, rows: digitRowColors(p, bh), shadow, shadowA, shadowOff };
 }
 
 /** Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi. */
 export interface Edges { lo: Float32Array; hi: Float32Array; }
 /** Which column is behind liquid: `wet(x)`; always true when digits are on top or edges are unknown. */
 type WetFn = (x: number) => boolean;
-/** Image glyph: per-pixel coverage from the pre-scaled sheet, column by column so each column can
- *  take the wet or dry warp. Optional 1 px emboss shadow, same as the bitmap fonts. */
-function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
-  if (!g) return;
+/** Coverage (0..255) and colour of glyph pixel (cx, cy); both only defined inside w x h. */
+interface GlyphSampler { w: number; h: number; a: (cx: number, cy: number) => number; c: (cx: number, cy: number) => number; }
+/** Draw one glyph. A panel column shows the wet image where it is behind liquid and the dry one where it is
+ *  behind air, so a source column may feed both and every panel column gets exactly one; a label straddling
+ *  the fill edge breaks there like a refracted image. The dry copy is unshifted. The wet copy sits at the
+ *  fractional refraction shift (`wetDx`, `wetDy`) and is bilinearly resampled, so it glides with tilt instead
+ *  of stepping a whole pixel at a time; its colour comes from the tap contributing the most coverage. */
+function drawGlyph(s: GlyphSampler, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
   // pass 0 = 1 px shadow copy offset down-right (the glyph's alpha mask in the shadow colour), pass 1 = body
   for (let pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
-    const off = pass === 0 ? lb.shadowOff : 0;
-    const sourceTop = lb.yTop - lb.y0 + off;
-    for (let dx = 0; dx < g.w; dx++) {
-      const w = wet(x + dx + off);
-      const rows = w ? lb.sourceRows : lb.drySourceRows, a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
-      for (let ry = a0; ry <= a1; ry++) {
-        const dy = rows[ry] - sourceTop; if (dy < 0 || dy >= g.h) continue;
-        const a = g.a[dy * g.w + dx]; if (!a) continue;
-        mark(x + dx + off, lb.y0 + ry, pass === 0 ? lb.shadow : g.c[dy * g.w + dx], (a / 255) * (pass === 0 ? lb.shadowA : 1));
+    const shadow = pass === 0, off = shadow ? lb.shadowOff : 0, xg = x + off, sourceTop = lb.yTop - lb.y0 + off;
+    const gain = (shadow ? lb.shadowA : 1) / 255;
+    for (let cx = 0; cx < s.w; cx++) {
+      const xd = xg + cx; if (wet(xd)) continue;
+      for (let ry = lb.dryRy0; ry <= lb.dryRy1; ry++) {
+        const cy = lb.drySourceRows[ry] - sourceTop; if (cy < 0 || cy >= s.h) continue;
+        const a = s.a(cx, cy); if (!a) continue;
+        mark(xd, lb.y0 + ry, shadow ? lb.shadow : s.c(cx, cy), a * gain);
+      }
+    }
+    const ix = Math.floor(lb.wetDx), fx = lb.wetDx - ix, iy = Math.floor(lb.wetDy), fy = lb.wetDy - iy;
+    const tap = (cx: number, cy: number): number => cx < 0 || cy < 0 || cx >= s.w || cy >= s.h ? 0 : s.a(cx, cy);
+    for (let cx = 0; cx <= s.w; cx++) {                       // one extra column: the fractional overhang
+      const xd = xg + ix + cx; if (!wet(xd)) continue;
+      for (let ry = lb.ry0; ry <= lb.ry1; ry++) {
+        const cy = lb.sourceRows[ry] - sourceTop - iy; if (cy < 0 || cy > s.h) continue;
+        // destination (cx, cy) samples source (cx - fx, cy - fy): taps at columns cx / cx-1, rows cy / cy-1
+        const a00 = tap(cx, cy) * (1 - fx) * (1 - fy), a10 = tap(cx - 1, cy) * fx * (1 - fy);
+        const a01 = tap(cx, cy - 1) * (1 - fx) * fy, a11 = tap(cx - 1, cy - 1) * fx * fy;
+        const a = a00 + a10 + a01 + a11; if (a < 0.5) continue;
+        const m = Math.max(a00, a10, a01, a11);
+        const c = shadow ? lb.shadow : m === a00 ? s.c(cx, cy) : m === a10 ? s.c(cx - 1, cy) : m === a01 ? s.c(cx, cy - 1) : s.c(cx - 1, cy - 1);
+        mark(xd, lb.y0 + ry, c, a * gain);
       }
     }
   }
 }
-/** Bitmap glyph, nearest-neighbour scaled into bw x bh, optional 1 px emboss shadow. */
+/** Image glyph: per-pixel coverage from the pre-scaled sheet. */
+function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
+  if (!g) return;
+  drawGlyph({ w: g.w, h: g.h, a: (cx, cy) => g.a[cy * g.w + cx], c: (cx, cy) => g.c[cy * g.w + cx] }, x, lb, wet, mark);
+}
+/** Bitmap glyph, nearest-neighbour scaled into bw x bh. */
 function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
   const g = f.g[d]; if (!g) return;
   const msb = 1 << (f.w - 1);
-  for (let pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
-    const off = pass === 0 ? lb.shadowOff : 0;
-    const sourceTop = lb.yTop - lb.y0 + off;
-    for (let dx = 0; dx < lb.bw; dx++) {
-      const col = Math.min(f.w - 1, Math.floor((dx * f.w) / lb.bw));
-      const w = wet(x + dx + off);
-      const rows = w ? lb.sourceRows : lb.drySourceRows, a0 = w ? lb.ry0 : lb.dryRy0, a1 = w ? lb.ry1 : lb.dryRy1;
-      for (let ry = a0; ry <= a1; ry++) {
-        const dy = rows[ry] - sourceTop; if (dy < 0 || dy >= lb.bh) continue;
-        const row = g[Math.min(f.h - 1, Math.floor((dy * f.h) / lb.bh))];
-        if (!(row & (msb >> col))) continue;
-        mark(x + dx + off, lb.y0 + ry, pass === 0 ? lb.shadow : lb.rows[dy], pass === 0 ? lb.shadowA : 1);
-      }
-    }
-  }
+  drawGlyph({
+    w: lb.bw, h: lb.bh,
+    a: (cx, cy) => g[Math.min(f.h - 1, Math.floor((cy * f.h) / lb.bh))] & (msb >> Math.min(f.w - 1, Math.floor((cx * f.w) / lb.bw))) ? 255 : 0,
+    c: (_cx, cy) => lb.rows[cy],
+  }, x, lb, wet, mark);
 }
 function digitRowColors(p: Params, bh: number): Uint16Array {
   const n = Math.max(1, bh), out = new Uint16Array(n);
@@ -811,7 +830,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   }
 
   // Scale marks, all before bubbles.
-  const labels = layoutLabels(y0, p, ticksN, state.acrossTilt, state.fillTarget);
+  const labels = layoutLabels(y0, p, ticksN, state.acrossTilt, state.edgeLight, state.fillTarget);
   const drawTickLayer = (onTop: boolean): void => {
     if (p.ticksOnTop === onTop) {
       const wetRows = markSourceRows(H, p.tickLens);
