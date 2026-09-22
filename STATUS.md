@@ -239,6 +239,38 @@ else `display_init` fails at boot before `ble_init`.
   seeded 160-px smear: far tail collapsed to its uneven stain floors in ~5 s while the band at the
   edge stayed wet, then slow fade; buffer values sampled at 0/6/18 s).
 
+## Digit shadow baked into the sprite (2026-09-22, sim + firmware)
+- The shadow (`digitShadow*`) was a full second glyph pass. It is now composited into the scaled sprite in
+  `scaledGlyphs` (`bakeShadow`), once per parameter change; the draw pass runs once. All shadow params stay
+  live (they are part of the sprite cache key). Bitmap fonts still use the two-pass path (see KAIZEN).
+- Two planes per glyph: behind air (k = 1) and behind liquid with the liquid transparency folded into the
+  alpha, because two layers each blended at T reach opacity 1 − (1 − T)² which one mark at T cannot; the
+  Mark skips its own transparency for these glyphs (`Mark::bakedT` / markFn `bakedT`) and only the contrast
+  floor applies. The plane is chosen per pixel with the compositor's own edge test (`Mark::inLiquid`), not
+  per column — the meniscus rows near the walls differ from the middle-row column split.
+  `GLYPH_POOL_PX` is now sized for the sliders' worst case (scale 6 × 6, offset 4, two planes): 31280
+  texels, ~92 KB PSRAM per tube, boot-time as before. A zero transparency bakes a fully transparent
+  behind-liquid plane (guarded: no 0/0).
+- Fidelity vs the two-pass renderer (`firmware/tools/check_render_frames.py --tolerance N`, 4000 host
+  scenes): 99% of the differing pixels are one 565 step; the rest sit in the wall-band fade rows behind
+  air (their per-row factor is not bakeable), come from `markContrast` > 0 (floor on the composite), or
+  are glyph-edge texels the box-filter fix below changed on purpose.
+- Board (olive-oil params, film 0.17, shadow 0.8/1 px), median of 5 pinned samples:
+
+| scene | before (two passes) | after (baked) | shadow cost before → after |
+|---|---|---|---|
+| 11:59:50 nearly dry, digits behind air | 35.2 fps / 20.81 ms | 39.7 fps / 17.65 ms | 4.98 → 1.21 ms |
+| 10:09:30 default, digits behind liquid | 25.1 fps / 32.08 ms | 32.7 fps / 22.97 ms | 10.97 → −0.02 ms |
+
+- Parity: a baked shadow puts a dark texel right next to a bright one, so two old sim/firmware rounding
+  gaps that used to hide inside 1 LSB became visible 25–58/255 pixels and were fixed on both sides: (1) the
+  sprite box filter computed its sheet-column bounds as `x / sx` (float vs double land on opposite sides
+  of an integer, dropping the glyph's last sheet column on the board) — now exact ratios `x * width / gw`;
+  (2) the bake uses the same clamped float transparency on both sides, and the sim picks the colour of the
+  heaviest bilinear tap with the firmware's 1/256 weights so near-ties resolve alike. Host render of the
+  firmware vs the sim reference: 0 px > 12/255 on four captured states; `compare-device` on the board
+  likewise (see e2e log).
+
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.
 - **fps (full frame 536×240×16bpp):** 32.3 fps render+push, **41.7 fps push-only**, **71.4 fps pushing only

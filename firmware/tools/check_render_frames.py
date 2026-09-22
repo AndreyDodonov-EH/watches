@@ -66,6 +66,8 @@ int main() {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference', required=True, type=Path)
+    parser.add_argument('--tolerance', type=int, default=0,
+                        help='max per-channel difference (RGB888 steps) still accepted; 0 = byte-identical (default)')
     args = parser.parse_args()
     reference = args.reference.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix='watches-frames-') as tmp:
@@ -82,24 +84,51 @@ def main():
         for name, source in [('reference', reference), ('current', ROOT / 'firmware/src/render.cpp')]:
             exe, output = tmp / name, tmp / (name + '.bin')
             subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O2',
-                            '-ffp-contract=off', '-fsanitize=undefined', '-fno-sanitize-recover=all',
+                            '-ffp-contract=off', '-fsanitize=undefined,float-cast-overflow', '-fno-sanitize-recover=all',
                             '-I', str(tmp), '-I', str(ROOT / 'firmware/src'), '-I', str(ROOT / 'spec'),
                             str(cpp), str(source), str(ROOT / 'firmware/src/physics.cpp'),
                             '-o', str(exe)], check=True)
             with output.open('wb') as stream:
                 subprocess.run([str(exe)], stdout=stream, check=True)
             outputs.append(output)
+        scenes_differing = pixels_differing = worst = 0
         with outputs[0].open('rb') as before, outputs[1].open('rb') as after:
             for scene in range(SCENES):
                 a, b = before.read(FRAME_BYTES), after.read(FRAME_BYTES)
                 if len(a) != FRAME_BYTES or len(b) != FRAME_BYTES:
                     raise SystemExit(f'incomplete output at scene {scene}')
-                if a != b:
+                if a == b:
+                    continue
+                if not args.tolerance:
                     pixel = next(i for i, (x, y) in enumerate(zip(a, b)) if x != y) // 2
                     raise SystemExit(f'scene {scene}: different pixel at x={pixel % 536}, row={pixel // 536}')
+                scenes_differing += 1
+                pa, pb = memoryview(a).cast('H'), memoryview(b).cast('H')   # strip words are byte-swapped 565; equal-or-not is layout-agnostic
+                for i in range(len(pa)):
+                    if pa[i] == pb[i]:
+                        continue
+                    pixels_differing += 1
+                    d = channel_delta(pa[i], pb[i])
+                    if d > worst:
+                        worst = d
+                    if d > args.tolerance:
+                        raise SystemExit(f'scene {scene}: pixel x={i % 536}, row={i // 536} differs by {d} > {args.tolerance} (RGB888 steps)')
             if before.read(1) or after.read(1):
                 raise SystemExit('unexpected trailing frame data')
-        print(f'{SCENES} complete render strips are byte-identical; UBSan passed')
+        if not scenes_differing:
+            print(f'{SCENES} complete render strips are byte-identical; UBSan passed')
+        else:
+            print(f'{SCENES} render strips within {args.tolerance} RGB888 steps: {scenes_differing} scenes / '
+                  f'{pixels_differing} pixels differ, worst {worst}; UBSan passed')
+
+
+def channel_delta(a, b):
+    """Largest per-channel RGB888 difference between two byte-swapped RGB565 strip words."""
+    a, b = ((a & 0xff) << 8) | (a >> 8), ((b & 0xff) << 8) | (b >> 8)
+    def expand(c):
+        r5, g6, b5 = c >> 11, (c >> 5) & 63, c & 31
+        return (r5 << 3) | (r5 >> 2), (g6 << 2) | (g6 >> 4), (b5 << 3) | (b5 >> 2)
+    return max(abs(x - y) for x, y in zip(expand(a), expand(b)))
 
 
 if __name__ == '__main__':

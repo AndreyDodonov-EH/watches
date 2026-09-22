@@ -228,7 +228,10 @@ export const SPRITE_FONT = FONTS.length; // digitFont value that selects the ima
 /** Image-based glyph sheet (AI-generated metal digits, see tools/make-digit-sprites.py).
  *  Firmware equivalent: one pre-scaled RGB565+A8 table per tube size, generated offline. */
 export interface SpriteSheet { cellW: number; cellH: number; widths: number[]; data: Uint8ClampedArray; w: number; h: number; }
-interface ScaledGlyph { w: number; h: number; c: Uint16Array; a: Uint8Array; } // a = 0..255 coverage
+/** w x h texels (body plus the baked shadow margin); `adv` is the body width the layout advances by. a = 0..255 coverage.
+ *  c/a: the glyph as drawn behind air; cw/aw: as drawn behind liquid (the shadow composite depends on the liquid's
+ *  transparency, see bakeShadow). Without a shadow both pairs are the same arrays. */
+interface ScaledGlyph { w: number; h: number; adv: number; c: Uint16Array; a: Uint8Array; cw: Uint16Array; aw: Uint8Array; }
 /** Sheet names in digitFont order starting at SPRITE_FONT (files live in public/assets/<name>.png[.json]). */
 export const SPRITE_SHEETS = [
   'digits-steel',
@@ -257,32 +260,72 @@ function loadSprite(url: string): Promise<SpriteSheet> {
     return { cellW: meta.cellW, cellH: meta.cellH, widths: meta.widths, data: ctx.getImageData(0, 0, im.width, im.height).data, w: im.width, h: im.height };
   });
 }
-/** Box-filter the sheet glyph d into bw x bh device pixels (once per size; firmware ships the result). */
-function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number, tint: [number, number, number], tintAmt: number, tone: number): ScaledGlyph[] | null {
+/** Bake the digit shadow into one plane (w x h texels c/a holding the body at the top-left): the shadow copy,
+ *  offset `off` px down-right in the shadow colour at `shadowA`, composited UNDER the body. The draw pass used
+ *  to blend the two copies one after the other, each at its coverage times the factor k the compositor applies
+ *  to a mark behind liquid (liquidTransparency; 1 behind air):
+ *  out = bg(1 - k*s)(1 - k*b) + shadowC*k*s*(1 - k*b) + bodyC*k*b. That is one blend of the composite with
+ *  alpha A = 1 - (1 - k*s)(1 - k*b) and colour (shadowC*k*s*(1 - k*b) + bodyC*k*b) / A — the transparency
+ *  INCLUDED, because two layers at k reach an opacity (up to 1 - (1-k)^2) a single mark at k never could.
+ *  So a plane is baked per context: behind air with k = 1, behind liquid with k = transparency, and markFn
+ *  skips its own transparency step for these glyphs (`bakedT`). Exact to within one quantisation step at half
+ *  the per-frame work; the approximations are the wall-band fade rows behind air (their factor varies per row)
+ *  and a non-zero markContrast (floored on the composite instead of per layer). Texels are visited bottom-right
+ *  to top-left so the body texel a shadow sample reads, (x-off, y-off), has not been rewritten yet.
+ *  Mirrored by the firmware. */
+function bakeShadow(c: Uint16Array, a: Uint8Array, w: number, h: number, bw: number, bh: number, off: number, shadowC: number, shadowA: number, k: number): void {
+  const sc = rgb565to888(shadowC);
+  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) {
+    const i = y * w + x;
+    const as = x >= off && y >= off ? a[(y - off) * w + (x - off)] : 0;
+    const ab = x < bw && y < bh ? a[i] : 0;
+    if (!as && (!ab || k >= 1)) continue;                // empty, or a body-only texel behind air: unchanged
+    const s = as * shadowA * (1 / 255) * k, b = ab * (1 / 255) * k, A = 1 - (1 - s) * (1 - b);
+    if (A <= 0) { c[i] = 0; a[i] = 0; continue; }        // fully transparent (k = 0: opaque liquid hides the mark)
+    const ws = s * (1 - b) / A, wb = b / A;
+    const bc = ab ? rgb565to888(c[i]) : [0, 0, 0];
+    c[i] = q([sc[0] * ws + bc[0] * wb, sc[1] * ws + bc[1] * wb, sc[2] * ws + bc[2] * wb]);
+    a[i] = Math.round(A * 255);
+  }
+}
+/** Box-filter the sheet glyph d into bw x bh device pixels (once per size; firmware ships the result).
+ *  shadow: 565 colour of the baked digit shadow (-1 = none), shadowA its opacity, shadowOff its px offset,
+ *  transK the liquid transparency the behind-liquid plane is baked for. */
+function scaledGlyphs(sheet: number, bw: number, bh: number, brightness: number, tint: [number, number, number], tintAmt: number, tone: number,
+                      shadow: number, shadowA: number, shadowOff: number, transK: number): ScaledGlyph[] | null {
   const sprite = sprites[sheet]; if (!sprite) return null;
-  const key = `${sheet}:${bw}x${bh}@${brightness}/${tint}/${tintAmt}/${tone}`; const hit = scaledCache.get(key); if (hit) return hit;
+  const key = `${sheet}:${bw}x${bh}@${brightness}/${tint}/${tintAmt}/${tone}/${shadow}/${shadowA}/${shadowOff}/${transK}`; const hit = scaledCache.get(key); if (hit) return hit;
+  const off = shadow >= 0 ? shadowOff : 0;   // baked shadow margin (right and bottom)
   const out: ScaledGlyph[] = [];
   // tint = multiply by colour (greyscale sheets become bronze/gold/etc.), blended by tintAmt
   const tm = (v: number, ch: number) => v * (1 - tintAmt) + v * (tint[ch] / 255) * tintAmt;
   const t = Math.max(-1, Math.min(1, tone));
   const tn = (v: number) => t < 0 ? v * (1 + t) : v + (255 - v) * t;
-  const sy = bh / sprite.cellH;
   for (let d = 0; d < 10; d++) {
     const gw = Math.max(1, Math.round(sprite.widths[d] * bw / sprite.cellW));
-    const sx = gw / sprite.widths[d], cx0 = d * sprite.cellW + (sprite.cellW - sprite.widths[d]) / 2;
-    const c = new Uint16Array(gw * bh), a = new Uint8Array(gw * bh);
+    const cx0 = d * sprite.cellW + (sprite.cellW - sprite.widths[d]) / 2;
+    const tw = gw + off, th = bh + off;
+    const c = new Uint16Array(tw * th), a = new Uint8Array(tw * th);
+    // Box bounds as exact ratios (x * width / gw, not x / sx): the reciprocal form lands a hair above an
+    // integer in doubles and a hair below in the firmware's floats, dropping the glyph's last sheet column there.
     for (let y = 0; y < bh; y++) for (let x = 0; x < gw; x++) {
-      const X0 = Math.floor(cx0 + x / sx), X1 = Math.max(X0 + 1, Math.floor(cx0 + (x + 1) / sx));
-      const Y0 = Math.floor(y / sy), Y1 = Math.max(Y0 + 1, Math.floor((y + 1) / sy));
+      const X0 = Math.floor(cx0 + (x * sprite.widths[d]) / gw), X1 = Math.max(X0 + 1, Math.floor(cx0 + ((x + 1) * sprite.widths[d]) / gw));
+      const Y0 = Math.floor((y * sprite.cellH) / bh), Y1 = Math.max(Y0 + 1, Math.floor(((y + 1) * sprite.cellH) / bh));
       let r = 0, g = 0, b = 0, al = 0, n = 0;
       for (let Y = Y0; Y < Y1; Y++) for (let X = X0; X < X1; X++) {
         const i = (Y * sprite.w + X) * 4, pa = sprite.data[i + 3];
         r += sprite.data[i] * pa; g += sprite.data[i + 1] * pa; b += sprite.data[i + 2] * pa; al += pa; n++;
       }
-      const k = y * gw + x;
+      const k = y * tw + x;
       if (al > 0) { c[k] = q(scale([tn(tm(r / al, 0)), tn(tm(g / al, 1)), tn(tm(b / al, 2))], brightness)); a[k] = Math.round(al / n); }
     }
-    out.push({ w: gw, h: bh, c, a });
+    let cw = c, aw = a;
+    if (off > 0) {
+      cw = c.slice(); aw = a.slice();
+      bakeShadow(c, a, tw, th, gw, bh, off, shadow, shadowA, 1);
+      bakeShadow(cw, aw, tw, th, gw, bh, off, shadow, shadowA, transK);
+    }
+    out.push({ w: tw, h: th, adv: gw, c, a, cw, aw });
   }
   scaledCache.set(key, out);
   return out;
@@ -302,9 +345,9 @@ const luma = (c: [number, number, number]): number => 0.299 * c[0] + 0.587 * c[1
  *  otherwise the floor would simply undo the dimming wherever the mark sits over liquid.
  *  Firmware note: the liquid behind a mark is the per-row LUT colour, so this whole function
  *  collapses into one extra H-row table per mark colour, built when params change. */
-function throughLiquid(bg: number, mark: number, p: Params, contrast: number): number {
+function throughLiquid(bg: number, mark: number, p: Params, contrast: number, transparency = p.liquidTransparency): number {
   const B = rgb565to888(bg);
-  let c = mix(B, rgb565to888(mark), p.liquidTransparency);
+  let c = mix(B, rgb565to888(mark), transparency);
   const lb = luma(B), lc = luma(c), d = lc - lb;
   if (Math.abs(d) >= contrast) return q(c);
   const dir = d !== 0 ? Math.sign(d) : lb > 110 ? -1 : 1;      // no room to darken a near-black row: go up
@@ -316,14 +359,16 @@ function throughLiquid(bg: number, mark: number, p: Params, contrast: number): n
 /** Mark compositor for one tube. `onTop` marks ignore the liquid and are drawn opaque. Rear marks
  *  behind air fade by `dryT` (invisible inside the glass wall band, like the tube back there).
  *  Emboss pixels derive from the body's through-liquid colour so the relief survives the contrast floor. */
-function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: number, dryT: Float32Array | null = null): MarkFn {
+/** `bakedT`: the mark's coverage already includes the liquid's transparency (sprite digits with a baked shadow,
+ *  see bakeShadow), so behind liquid only the contrast floor applies. */
+function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: number, dryT: Float32Array | null = null, bakedT = false): MarkFn {
   const H = edges.hi.length;
   return (x, y, c, cov = 1, rel = 0) => {
     const ry = y - y0;
     if (ry < 0 || ry >= H || x < 0 || x >= PANEL_W) return;
     const inside = x >= edges.lo[ry] && x < edges.hi[ry];
     if (!onTop && inside) {
-      c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast);
+      c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast, bakedT ? 1 : p.liquidTransparency);
       // The glass-cut relief is on the rear wall too: it fades with the liquid's opacity (invisible
       // through an opaque liquid) while its colour still derives from the floored through-liquid body.
       if (rel !== 0) cov *= Math.max(0, Math.min(1, p.liquidTransparency));
@@ -376,12 +421,15 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   // sprite glyphs use the same nominal 5x7 em as the bitmap fonts so the scale sliders mean the same thing
   const bw = Math.max(1, Math.round((useSprite ? 5 : font.w) * kx));
   const bh = Math.max(1, Math.round((useSprite ? 7 : font.h) * ky));
-  const sprite = useSprite
-    ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, hexToRgb(p.digitTint), p.digitTintAmount, p.digitTone)
-    : null;
-  const gap = sprite ? Math.max(1, Math.round(bw / 5)) : Math.max(1, Math.round(kx));
   const shadowA = Math.max(0, Math.min(1, p.digitShadowStrength)), shadowOff = Math.max(1, Math.round(p.digitShadowOffset));
   const shadow = p.digitShadow && shadowA > 0 ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
+  // Sprite glyphs carry the shadow baked in (one draw pass); bitmap glyphs still draw it as a second pass.
+  // The behind-liquid plane is baked for the transparency markFn applies.
+  const transK = Math.max(0, Math.min(1, p.liquidTransparency));
+  const sprite = useSprite
+    ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, hexToRgb(p.digitTint), p.digitTintAmount, p.digitTone, shadow, shadowA, shadowOff, transK)
+    : null;
+  const gap = sprite ? Math.max(1, Math.round(bw / 5)) : Math.max(1, Math.round(kx));
   const yBase = y0 + tubeLayout(p).H - 1 - bottom, yTop = yBase - bh + 1;
   const H = tubeLayout(p).H;
   const sourceRows = p.digitsOnTop ? markSourceRows(H, p.topLens, p.lensCurve) : markSourceRows(H, p.bottomLens);
@@ -401,7 +449,7 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
   const start = Math.round(minutes ? p.digitMinuteStart : p.digitHourStart) || every;
   const push = (i: number) => {
     const text = minutes && p.digitsLeadingZero ? String(i).padStart(2, '0') : String(i);
-    const adv = [...text].map((ch) => sprite?.[ch.charCodeAt(0) - 48]?.w ?? bw);
+    const adv = [...text].map((ch) => sprite?.[ch.charCodeAt(0) - 48]?.adv ?? bw);
     const w = adv.reduce((a, b) => a + b + gap, -gap);
     const m = Math.round(p.cornerR);
     const x0 = Math.max(m, Math.min(TUBE_LENGTH_PX - w - m, Math.round((i * TUBE_LENGTH_PX) / ticksN - w / 2)));
@@ -417,56 +465,77 @@ export interface Edges { lo: Float32Array; hi: Float32Array; }
 /** Which column is behind liquid: `wet(x)`; always true when digits are on top or edges are unknown. */
 type WetFn = (x: number) => boolean;
 /** Coverage (0..255) and colour of glyph pixel (cx, cy); both only defined inside w x h. */
-interface GlyphSampler { w: number; h: number; a: (cx: number, cy: number) => number; c: (cx: number, cy: number) => number; }
+interface GlyphSampler {
+  w: number; h: number; a: (cx: number, cy: number) => number; c: (cx: number, cy: number) => number;
+  /** The same glyph as drawn behind liquid (baked shadow composite for the liquid's transparency). */
+  aw: (cx: number, cy: number) => number; cw: (cx: number, cy: number) => number;
+}
 /** Draw one glyph. A panel column shows the wet image where it is behind liquid and the dry one where it is
  *  behind air, so a source column may feed both and every panel column gets exactly one; a label straddling
  *  the fill edge breaks there like a refracted image. The dry copy is unshifted. The wet copy sits at the
  *  fractional refraction shift (`wetDx`, `wetDy`) and is bilinearly resampled, so it glides with tilt instead
  *  of stepping a whole pixel at a time; its colour comes from the tap contributing the most coverage. */
-function drawGlyph(s: GlyphSampler, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
+/** `inLiquid(x, ry)`: whether the mark at that pixel is composited through the liquid (the markFn test);
+ *  null = never (digits on top). */
+type InLiquidFn = ((x: number, ry: number) => boolean) | null;
+function drawGlyph(s: GlyphSampler, x: number, lb: Labels, wet: WetFn, mark: MarkFn, withShadow: boolean, inLiquid: InLiquidFn): void {
+  // Plane per PIXEL: the behind-liquid plane (aw/cw) exactly where markFn composites through the liquid,
+  // the behind-air plane elsewhere. The wet/dry column split (`wet`) decides which copy (shifted or not) a
+  // column shows and is taken at the middle row; the meniscus makes the rows near the walls differ from it,
+  // and there the compositor's per-row test wins — as it did when the shadow was a second pass.
+  const A = (L: boolean, cx: number, cy: number): number => L ? s.aw(cx, cy) : s.a(cx, cy);
+  const C = (L: boolean, cx: number, cy: number): number => L ? s.cw(cx, cy) : s.c(cx, cy);
   // pass 0 = 1 px shadow copy offset down-right (the glyph's alpha mask in the shadow colour), pass 1 = body
-  for (let pass = lb.shadow >= 0 ? 0 : 1; pass < 2; pass++) {
+  for (let pass = withShadow ? 0 : 1; pass < 2; pass++) {
     const shadow = pass === 0, off = shadow ? lb.shadowOff : 0, xg = x + off, sourceTop = lb.yTop - lb.y0 + off;
     const gain = (shadow ? lb.shadowA : 1) / 255;
     for (let cx = 0; cx < s.w; cx++) {
       const xd = xg + cx; if (wet(xd)) continue;
       for (let ry = lb.dryRy0; ry <= lb.dryRy1; ry++) {
         const cy = lb.drySourceRows[ry] - sourceTop; if (cy < 0 || cy >= s.h) continue;
-        const a = s.a(cx, cy); if (!a) continue;
-        mark(xd, lb.y0 + ry, shadow ? lb.shadow : s.c(cx, cy), a * gain);
+        const L = inLiquid !== null && inLiquid(xd, ry);
+        const a = A(L, cx, cy); if (!a) continue;
+        mark(xd, lb.y0 + ry, shadow ? lb.shadow : C(L, cx, cy), a * gain);
       }
     }
     const ix = Math.floor(lb.wetDx), fx = lb.wetDx - ix, iy = Math.floor(lb.wetDy), fy = lb.wetDy - iy;
-    const tap = (cx: number, cy: number): number => cx < 0 || cy < 0 || cx >= s.w || cy >= s.h ? 0 : s.a(cx, cy);
+    // The colour comes from the heaviest tap. The firmware weighs the taps in 1/256 steps; use the same
+    // weights for that choice so near-ties resolve alike (a baked shadow puts a dark texel right next to a
+    // bright one, so a flipped tie is a visible pixel, not a rounding step).
+    const wx1 = Math.floor(fx * 256 + 0.5), wx0 = 256 - wx1, wy1 = Math.floor(fy * 256 + 0.5), wy0 = 256 - wy1;
+    const w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
+    const tap = (L: boolean, cx: number, cy: number): number => cx < 0 || cy < 0 || cx >= s.w || cy >= s.h ? 0 : A(L, cx, cy);
     for (let cx = 0; cx <= s.w; cx++) {                       // one extra column: the fractional overhang
       const xd = xg + ix + cx; if (!wet(xd)) continue;
       for (let ry = lb.ry0; ry <= lb.ry1; ry++) {
         const cy = lb.sourceRows[ry] - sourceTop - iy; if (cy < 0 || cy > s.h) continue;
+        const L = inLiquid !== null && inLiquid(xd, ry);
         // destination (cx, cy) samples source (cx - fx, cy - fy): taps at columns cx / cx-1, rows cy / cy-1
-        const a00 = tap(cx, cy) * (1 - fx) * (1 - fy), a10 = tap(cx - 1, cy) * fx * (1 - fy);
-        const a01 = tap(cx, cy - 1) * (1 - fx) * fy, a11 = tap(cx - 1, cy - 1) * fx * fy;
-        const a = a00 + a10 + a01 + a11; if (a < 0.5) continue;
-        const m = Math.max(a00, a10, a01, a11);
-        const c = shadow ? lb.shadow : m === a00 ? s.c(cx, cy) : m === a10 ? s.c(cx - 1, cy) : m === a01 ? s.c(cx, cy - 1) : s.c(cx - 1, cy - 1);
+        const t00 = tap(L, cx, cy), t10 = tap(L, cx - 1, cy), t01 = tap(L, cx, cy - 1), t11 = tap(L, cx - 1, cy - 1);
+        const a = t00 * (1 - fx) * (1 - fy) + t10 * fx * (1 - fy) + t01 * (1 - fx) * fy + t11 * fx * fy; if (a < 0.5) continue;
+        const m00 = t00 * w00, m10 = t10 * w10, m01 = t01 * w01, m11 = t11 * w11, m = Math.max(m00, m10, m01, m11);
+        const c = shadow ? lb.shadow : m === m00 ? C(L, cx, cy) : m === m10 ? C(L, cx - 1, cy) : m === m01 ? C(L, cx, cy - 1) : C(L, cx - 1, cy - 1);
         mark(xd, lb.y0 + ry, c, a * gain);
       }
     }
   }
 }
 /** Image glyph: per-pixel coverage from the pre-scaled sheet. */
-function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
+function drawSpriteGlyph(g: ScaledGlyph | undefined, x: number, lb: Labels, wet: WetFn, mark: MarkFn, inLiquid: InLiquidFn): void {
   if (!g) return;
-  drawGlyph({ w: g.w, h: g.h, a: (cx, cy) => g.a[cy * g.w + cx], c: (cx, cy) => g.c[cy * g.w + cx] }, x, lb, wet, mark);
+  // the shadow is baked into the sprite (scaledGlyphs), so a single pass draws both
+  drawGlyph({
+    w: g.w, h: g.h, a: (cx, cy) => g.a[cy * g.w + cx], c: (cx, cy) => g.c[cy * g.w + cx],
+    aw: (cx, cy) => g.aw[cy * g.w + cx], cw: (cx, cy) => g.cw[cy * g.w + cx],
+  }, x, lb, wet, mark, false, inLiquid);
 }
 /** Bitmap glyph, nearest-neighbour scaled into bw x bh. */
-function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, wet: WetFn, mark: MarkFn): void {
+function drawBitmapGlyph(f: Font, d: number, x: number, lb: Labels, wet: WetFn, mark: MarkFn, inLiquid: InLiquidFn): void {
   const g = f.g[d]; if (!g) return;
   const msb = 1 << (f.w - 1);
-  drawGlyph({
-    w: lb.bw, h: lb.bh,
-    a: (cx, cy) => g[Math.min(f.h - 1, Math.floor((cy * f.h) / lb.bh))] & (msb >> Math.min(f.w - 1, Math.floor((cx * f.w) / lb.bw))) ? 255 : 0,
-    c: (_cx, cy) => lb.rows[cy],
-  }, x, lb, wet, mark);
+  const a = (cx: number, cy: number): number => g[Math.min(f.h - 1, Math.floor((cy * f.h) / lb.bh))] & (msb >> Math.min(f.w - 1, Math.floor((cx * f.w) / lb.bw))) ? 255 : 0;
+  const c = (_cx: number, cy: number): number => lb.rows[cy];
+  drawGlyph({ w: lb.bw, h: lb.bh, a, c, aw: a, cw: c }, x, lb, wet, mark, lb.shadow >= 0, inLiquid);   // no baked shadow: one plane
 }
 function digitRowColors(p: Params, bh: number): Uint16Array {
   const n = Math.max(1, bh), out = new Uint16Array(n);
@@ -483,12 +552,13 @@ function drawLabels(lb: Labels, _p: Params, edges: Edges | null, mark: MarkFn): 
   const mid = edges ? edges.hi.length >> 1 : 0;
   const lo = edges ? edges.lo[mid] : 0, hi = edges ? edges.hi[mid] : 0;
   const wet: WetFn = edges ? (x) => x >= lo && x < hi : () => true;
+  const inLiquid: InLiquidFn = edges ? (x, ry) => x >= edges.lo[ry] && x < edges.hi[ry] : null;
   for (const l of lb.list) {
     let x = l.x0;
     for (let i = 0; i < l.text.length; i++) {
       const d = l.text.charCodeAt(i) - 48;
-      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, lb, wet, mark);
-      else drawBitmapGlyph(lb.font, d, x, lb, wet, mark);
+      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, lb, wet, mark, inLiquid);
+      else drawBitmapGlyph(lb.font, d, x, lb, wet, mark, inLiquid);
       x += l.adv[i] + lb.gap;
     }
   }
@@ -955,7 +1025,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   };
   const drawDigitLayer = (onTop: boolean): void => {
     if (labels && p.digitsOnTop === onTop)
-      drawLabels(labels, p, onTop ? null : bounds, markFn(y0, bounds, p, onTop, p.markContrast * p.digitBright, onTop ? null : pal.dryT));
+      drawLabels(labels, p, onTop ? null : bounds, markFn(y0, bounds, p, onTop, p.markContrast * p.digitBright, onTop ? null : pal.dryT, !!labels.sprite && labels.shadow >= 0));
   };
   drawTickLayer(false);
   drawDigitLayer(false);

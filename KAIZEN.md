@@ -256,3 +256,9 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Parallel PlatformIO builds in the same output directory removed objects during compilation;
   use distinct `PLATFORMIO_BUILD_DIR` paths for concurrent builds.
 - `ble.cpp`: `NimBLEService::start()` is deprecated and now a no-op; remove separately.
+- Digit shadow bake (2026-09-22) only covers sprite fonts; bitmap fonts (`digitFont` < SPRITE_FONT) still
+  draw the shadow as a second glyph pass. Bake them the same way if anyone uses them with a shadow.
+- Baked shadow approximations, both sim and firmware alike: in the wall-band fade rows behind air the
+  two layers used to be scaled per row before compositing (worst ~50/255 on a few edge texels of the
+  host scene set); with `markContrast` > 0 the luma floor now acts on the composite instead of per
+  layer (presets free / cola / champagne / malt / cryo). Revisit only if someone sees it on the panel.

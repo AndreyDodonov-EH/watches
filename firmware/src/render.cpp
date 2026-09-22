@@ -178,12 +178,19 @@ static const int SPRITE_FONT = NUM_FONTS;
 // ---------------------------------------------------------------------------------------------
 // Fixed pool per tube (3 B/px), allocated once at boot (render_init) in PSRAM: deterministic footprint, no
 // heap traffic on param changes. Internal RAM cannot take it: the two DMA strips + BT controller leave
-// <60 KB there. GLYPH_POOL_PX covers the 10 glyphs of a set up to ~4.5x scale (18 KB per tube); a set
-// that does not fit drops the glyphs past the budget (visible, not silent).
-#define GLYPH_POOL_PX 6144
-struct ScaledGlyph { int w, h; uint16_t *c; uint8_t *a; };
+// <60 KB there. GLYPH_POOL_PX is sized for the sliders' worst case (sim PARAM_META): 10 glyphs of at most
+// bw x bh = (5 * 6) x (7 * 6) texels, each grown by the largest shadow offset (4) on the right and below,
+// two planes (behind air / behind liquid) when the shadow is baked in — 31280 texels, ~92 KB per tube.
+// A set that does not fit (values pushed past the sliders over serial) drops the glyphs past the budget
+// (visible, not silent).
+#define GLYPH_POOL_PX (10 * 2 * (5 * 6 + 4) * (7 * 6 + 4))
+// w x h texels (body plus the baked shadow margin); `adv` is the body width the layout advances by.
+// c/a: the glyph as drawn behind air; cw/aw: as drawn behind liquid (the shadow composite depends on the
+// liquid's transparency, see bakeShadow). Without a shadow both pairs alias the same plane.
+struct ScaledGlyph { int w, h, adv; uint16_t *c, *cw; uint8_t *a, *aw; };
 struct ScaledSet {
   int sheet = -1, bw = 0, bh = 0; float brightness = -1, tintAmt = -1, tone = 0; uint32_t tint = 0;
+  int shadow = -2, shadowOff = 0; float shadowA = -1, transK = -1;
   ScaledGlyph g[10] = {};
   uint16_t *poolC = nullptr; uint8_t *poolA = nullptr;
 };
@@ -218,12 +225,15 @@ static uint16_t throughLiquid(uint16_t bg, uint16_t mark, int T, int C) {
 struct Edges { const float *lo, *hi; };
 struct Mark {
   Tube &t; int y0; Edges edges; bool onTop; int T, C;   // T: transparency 1/256, C: contrast 1/1000
-  Mark(Tube &t_, int y0_, Edges e, const Params &p, bool onTop_, float contrast) : t(t_), y0(y0_), edges(e), onTop(onTop_) {
+  bool bakedT;   // the mark's coverage already includes the liquid's transparency (sprite digits with a baked shadow, see bakeShadow)
+  Mark(Tube &t_, int y0_, Edges e, const Params &p, bool onTop_, float contrast, bool bakedT_ = false) : t(t_), y0(y0_), edges(e), onTop(onTop_), bakedT(bakedT_) {
     T = (int)(p.liquidTransparency * 256 + 0.5f); if (T < 0) T = 0; if (T > 256) T = 256;
     C = (int)(contrast * 1000 + 0.5f);
   }
   // covT: coverage in 1/256 (256 = opaque)
   inline void operator()(int x, int y, uint16_t c, int covT = 256, int rel = 0) const;
+  // Whether the mark at (x, tube row ry) is composited through the liquid — the same test operator() applies.
+  inline bool inLiquid(int x, int ry) const { return !onTop && x >= edges.lo[ry] && x < edges.hi[ry]; }
 };
 
 struct Label { int x0; char text[3]; int len; int adv[2]; };
@@ -329,7 +339,7 @@ struct Tube {
   float glassW(const Params &p, int y, int hiTop, float lam) const;
   int highlightTop(const Params &p, float lightDeg) const;
   void buildPalette(const Params &p, float lightDeg, Palette &pal) const;
-  ScaledGlyph *scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone);
+  ScaledGlyph *scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone, int shadow, float shadowA, int shadowOff, float transK);
   bool layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float edgeLight, float fill, Labels &lb);
   void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
   void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
@@ -353,7 +363,7 @@ inline void Mark::operator()(int x, int y, uint16_t c, int covT, int rel) const 
   if (!t.inStrip(x, y)) return;
   int ry = y - y0;
   if (!onTop && x >= edges.lo[ry] && x < edges.hi[ry]) {
-    c = throughLiquid(t.rd(x, y), c, T, C);
+    c = throughLiquid(t.rd(x, y), c, bakedT ? 256 : T, C);   // bakedT: transparency already in the coverage, only the contrast floor applies
     if (rel) { covT = covT * T >> 8; if (covT <= 0) return; }   // rear relief fades with the liquid's opacity (sim markFn)
   } else if (!onTop) { covT = covT * t.pal.dryT[ry] >> 8; if (covT <= 0) return; }   // rear marks vanish behind the wall band
   if (rel > 0) c = embossHi(c);
@@ -449,42 +459,86 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
 }
 
 
-ScaledGlyph *Tube::scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone) {
+// Bake the digit shadow into one plane (w x h texels c/a holding the body at the top-left, see sim
+// bakeShadow): the shadow copy, offset `off` px down-right in the shadow colour at `shadowA`, composited
+// UNDER the body. The draw pass used to blend the two copies one after the other, each at its coverage
+// times the factor k the compositor applies to a mark behind liquid (liquidTransparency; 1 behind air):
+// out = bg(1 - k*s)(1 - k*b) + shadowC*k*s*(1 - k*b) + bodyC*k*b. That is one blend of the composite with
+// alpha A = 1 - (1 - k*s)(1 - k*b) and colour (shadowC*k*s*(1 - k*b) + bodyC*k*b) / A — the transparency
+// INCLUDED, because two layers at k reach an opacity (up to 1 - (1-k)^2) a single mark at k never could.
+// So a plane is baked per context: behind air with k = 1, behind liquid with k = transparency, and the
+// Mark skips its own transparency step for these glyphs (Mark::bakedT). Exact to within one quantisation
+// step at half the per-frame work; the approximations are the wall-band fade rows behind air (their
+// factor varies per row) and a non-zero markContrast (floored on the composite instead of per layer).
+// Texels are visited bottom-right to top-left so the body texel a shadow sample reads, (x-off, y-off),
+// has not been rewritten yet.
+static void bakeShadow(uint16_t *c, uint8_t *a, int w, int h, int bw, int bh, int off, uint16_t shadowC, float shadowA, float k) {
+  const RGB sc = to888(shadowC);
+  for (int y = h - 1; y >= 0; y--) for (int x = w - 1; x >= 0; x--) {
+    const int i = y * w + x;
+    const int as = x >= off && y >= off ? a[(y - off) * w + (x - off)] : 0;
+    const int ab = x < bw && y < bh ? a[i] : 0;
+    if (!as && (!ab || k >= 1)) continue;                // empty, or a body-only texel behind air: unchanged
+    const float s = as * shadowA * (1.0f / 255) * k, b = ab * (1.0f / 255) * k, A = 1 - (1 - s) * (1 - b);
+    if (A <= 0) { c[i] = 0; a[i] = 0; continue; }        // fully transparent (k = 0: opaque liquid hides the mark)
+    const float ws = s * (1 - b) / A, wb = b / A;
+    const RGB bc = ab ? to888(c[i]) : RGB{ 0, 0, 0 };
+    c[i] = q({ sc.r * ws + bc.r * wb, sc.g * ws + bc.g * wb, sc.b * ws + bc.b * wb });
+    a[i] = (uint8_t)jround(A * 255);
+  }
+}
+
+// shadow: 565 colour of the baked digit shadow (-1 = none), shadowA its opacity, shadowOff its px offset,
+// transK the liquid transparency the behind-liquid plane is baked for (clamped float, as in the sim).
+ScaledGlyph *Tube::scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone,
+                                int shadow, float shadowA, int shadowOff, float transK) {
   if (sheetIdx < 0 || sheetIdx >= NUM_SPRITE_SHEETS) return nullptr;
   ScaledSet &S = set;
   if (!S.poolC || !S.poolA) return nullptr;
-  if (S.sheet == sheetIdx && S.bw == bw && S.bh == bh && S.brightness == brightness && S.tint == tintHex && S.tintAmt == tintAmt && S.tone == tone) return S.g;
+  if (S.sheet == sheetIdx && S.bw == bw && S.bh == bh && S.brightness == brightness && S.tint == tintHex && S.tintAmt == tintAmt && S.tone == tone
+      && S.shadow == shadow && S.shadowA == shadowA && S.shadowOff == shadowOff && S.transK == transK) return S.g;
+  const int off = shadow >= 0 ? shadowOff : 0;   // baked shadow margin (right and bottom)
   const SpriteSheet &sp = *SPRITE_SHEETS[sheetIdx];
   RGB tint = hexToRgb(tintHex);
   auto tm = [&](float v, float ch) { return v * (1 - tintAmt) + v * (ch / 255.0f) * tintAmt; };
   float t = fmaxf(-1, fminf(1, tone));
   auto tn = [&](float v) { return t < 0 ? v * (1 + t) : v + (255 - v) * t; };
-  float sy = (float)bh / sp.cellH;
   int used = 0;
   for (int d = 0; d < 10; d++) {
     int gw = (int)fmaxf(1, jround(sp.widths[d] * (float)bw / sp.cellW));
-    float sx = (float)gw / sp.widths[d], cx0 = d * sp.cellW + (sp.cellW - sp.widths[d]) / 2.0f;
-    if (used + gw * bh > GLYPH_POOL_PX) { S.g[d] = { 0, 0, S.poolC, S.poolA }; continue; }   // over budget: glyph dropped
-    S.g[d].w = gw; S.g[d].h = bh;
-    S.g[d].c = S.poolC + used; S.g[d].a = S.poolA + used; used += gw * bh;
-    memset(S.g[d].c, 0, gw * bh * 2); memset(S.g[d].a, 0, gw * bh);
+    float cx0 = d * sp.cellW + (sp.cellW - sp.widths[d]) / 2.0f;
+    const int tw = gw + off, th = bh + off, planes = off > 0 ? 2 : 1;
+    if (used + planes * tw * th > GLYPH_POOL_PX) { S.g[d] = { 0, 0, 0, S.poolC, S.poolC, S.poolA, S.poolA }; continue; }   // over budget: glyph dropped
+    S.g[d].w = tw; S.g[d].h = th; S.g[d].adv = gw;
+    S.g[d].c = S.poolC + used; S.g[d].a = S.poolA + used; used += tw * th;
+    if (planes == 2) { S.g[d].cw = S.poolC + used; S.g[d].aw = S.poolA + used; used += tw * th; }
+    else { S.g[d].cw = S.g[d].c; S.g[d].aw = S.g[d].a; }
+    memset(S.g[d].c, 0, tw * th * 2); memset(S.g[d].a, 0, tw * th);
+    // Box bounds as exact ratios (x * width / gw, not x / sx): the reciprocal form lands a hair below an
+    // integer in float and a hair above in the sim's doubles, dropping the glyph's last sheet column here.
     for (int y = 0; y < bh; y++) for (int x = 0; x < gw; x++) {
-      int X0 = (int)floorf(cx0 + x / sx), X1 = (int)fmaxf(X0 + 1, floorf(cx0 + (x + 1) / sx));
-      int Y0 = (int)floorf(y / sy), Y1 = (int)fmaxf(Y0 + 1, floorf((y + 1) / sy));
+      int X0 = (int)floorf(cx0 + (float)(x * sp.widths[d]) / gw), X1 = (int)fmaxf(X0 + 1, floorf(cx0 + (float)((x + 1) * sp.widths[d]) / gw));
+      int Y0 = (int)floorf((float)(y * sp.cellH) / bh), Y1 = (int)fmaxf(Y0 + 1, floorf((float)((y + 1) * sp.cellH) / bh));
       float r = 0, g = 0, b = 0, al = 0; int n = 0;
       for (int Y = Y0; Y < Y1; Y++) for (int X = X0; X < X1; X++) {
         if (X < 0 || X >= sp.w || Y < 0 || Y >= sp.h) { n++; continue; }
         const uint8_t *px4 = sp.rgba + ((size_t)Y * sp.w + X) * 4; float pa = px4[3];
         r += px4[0] * pa; g += px4[1] * pa; b += px4[2] * pa; al += pa; n++;
       }
-      int k = y * gw + x;
+      int k = y * tw + x;
       if (al > 0) {
         S.g[d].c[k] = q(scale({ tn(tm(r / al, tint.r)), tn(tm(g / al, tint.g)), tn(tm(b / al, tint.b)) }, brightness));
         S.g[d].a[k] = (uint8_t)jround(al / n);
       }
     }
+    if (planes == 2) {
+      memcpy(S.g[d].cw, S.g[d].c, tw * th * 2); memcpy(S.g[d].aw, S.g[d].a, tw * th);
+      bakeShadow(S.g[d].c, S.g[d].a, tw, th, gw, bh, off, (uint16_t)shadow, shadowA, 1.0f);
+      bakeShadow(S.g[d].cw, S.g[d].aw, tw, th, gw, bh, off, (uint16_t)shadow, shadowA, transK);
+    }
   }
   S.sheet = sheetIdx; S.bw = bw; S.bh = bh; S.brightness = brightness; S.tint = tintHex; S.tintAmt = tintAmt; S.tone = tone;
+  S.shadow = shadow; S.shadowA = shadowA; S.shadowOff = shadowOff; S.transK = transK;
   return S.g;
 }
 
@@ -516,10 +570,13 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
   int bw = (int)fmaxf(1, jround((useSprite ? 5 : font->w) * kx));
   int bh = (int)fmaxf(1, jround((useSprite ? 7 : font->h) * ky));
   if (bh > 96) bh = 96;
-  ScaledGlyph *sprite = useSprite ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, p.digitTint, p.digitTintAmount, p.digitTone) : nullptr;
-  int gap = sprite ? (int)fmaxf(1, jround(bw / 5.0f)) : (int)fmaxf(1, jround(kx));
   float shadowA = clampf(p.digitShadowStrength, 0, 1); int shadowOff = (int)fmaxf(1, jround(p.digitShadowOffset));
   int shadow = p.digitShadow && shadowA > 0 ? q(scale(hexToRgb(p.digitShadowColor), p.brightness * p.digitBright)) : -1;
+  // Sprite glyphs carry the shadow baked in (one draw pass); bitmap glyphs still draw it as a second pass.
+  // The behind-liquid plane is baked for the liquid transparency itself (the Mark skips its own step for
+  // these glyphs): the unquantised float, as in the sim, so both bakes round the same way.
+  ScaledGlyph *sprite = useSprite ? scaledGlyphs(idx - SPRITE_FONT, bw, bh, p.brightness * p.digitBright, p.digitTint, p.digitTintAmount, p.digitTone, shadow, shadowA, shadowOff, clampf(p.liquidTransparency, 0, 1)) : nullptr;
+  int gap = sprite ? (int)fmaxf(1, jround(bw / 5.0f)) : (int)fmaxf(1, jround(kx));
   int yBase = y0 + H - 1 - (int)bottom, yTop = yBase - bh + 1;
   // NB: sim uses yBase = y0+H-1-bottom with fractional `bottom` possible; presets use integers.
   if (p.digitsOnTop) { markSourceRows(H, p.topLens, lb.sourceRows, p.lensCurve); memcpy(lb.drySourceRows, lb.sourceRows, sizeof(lb.sourceRows)); }
@@ -543,7 +600,7 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
     else if (i >= 10) { l.text[0] = '0' + i / 10; l.text[1] = '0' + i % 10; l.len = 2; }
     else { l.text[0] = '0' + i; l.len = 1; }
     int w = -gap;
-    for (int k = 0; k < l.len; k++) { l.adv[k] = sprite ? sprite[l.text[k] - '0'].w : bw; w += l.adv[k] + gap; }
+    for (int k = 0; k < l.len; k++) { l.adv[k] = sprite ? sprite[l.text[k] - '0'].adv : bw; w += l.adv[k] + gap; }
     int x0 = (int)jround((float)i * L / ticksN - w / 2.0f);
     int m = (int)jround(p.cornerR);
     l.x0 = x0 < m ? m : x0 > L - w - m ? L - w - m : x0;
@@ -561,6 +618,8 @@ struct SpriteSampler {
   explicit SpriteSampler(const ScaledGlyph &gg) : g(gg), w(gg.w), h(gg.h) {}
   int a(int cx, int cy) const { return g.a[cy * g.w + cx]; }
   uint16_t c(int cx, int cy) const { return g.c[cy * g.w + cx]; }
+  int aw(int cx, int cy) const { return g.aw[cy * g.w + cx]; }        // behind-liquid plane
+  uint16_t cw(int cx, int cy) const { return g.cw[cy * g.w + cx]; }
 };
 struct BitmapSampler {
   const uint8_t *g; const Font &f; const Labels &lb; int w, h, msb;
@@ -571,6 +630,8 @@ struct BitmapSampler {
     return (g[row] & (msb >> col)) ? 255 : 0;
   }
   uint16_t c(int, int cy) const { return lb.rows[cy]; }
+  int aw(int cx, int cy) const { return a(cx, cy); }                  // no baked shadow: one plane
+  uint16_t cw(int cx, int cy) const { return c(cx, cy); }
 };
 // Draw one glyph (see sim drawGlyph). A panel column shows the wet image where it is behind liquid and the dry
 // one where it is behind air, so a source column may feed both and every panel column gets exactly one; a
@@ -591,15 +652,22 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
     dcol[cx] = cx < gw && !wet(xg + cx); if (dcol[cx]) anyDry = true;
     wcol[cx] = wet(xg + ix + cx); if (wcol[cx]) anyWet = true;
   }
-  auto tap = [&](int cx, int cy) -> int { return cx < 0 || cy < 0 || cx >= s.w || cy >= s.h ? 0 : s.a(cx, cy); };
+  // Plane per PIXEL: the behind-liquid plane (aw/cw) exactly where the Mark composites through the liquid,
+  // the behind-air plane elsewhere. The wet/dry column split above decides which copy (shifted or not) a
+  // column shows and is taken at the middle row; the meniscus makes the rows near the walls differ from it,
+  // and there the compositor's per-row test wins — as it did when the shadow was a second pass.
+  auto A = [&](bool L, int cx, int cy) -> int { return L ? s.aw(cx, cy) : s.a(cx, cy); };
+  auto Cc = [&](bool L, int cx, int cy) -> uint16_t { return L ? s.cw(cx, cy) : s.c(cx, cy); };
+  auto tap = [&](bool L, int cx, int cy) -> int { return cx < 0 || cy < 0 || cx >= s.w || cy >= s.h ? 0 : A(L, cx, cy); };
   int a0 = lb.dryRy0 < lb.ry0 ? lb.dryRy0 : lb.ry0, a1 = lb.dryRy1 > lb.ry1 ? lb.dryRy1 : lb.ry1;
   for (int ry = a0; ry <= a1; ry++) {
     int y = y0 + ry;
     int cyD = lb.drySourceRows[ry] - sourceTop;
     if (anyDry && ry >= lb.dryRy0 && ry <= lb.dryRy1 && cyD >= 0 && cyD < s.h) {
       for (int cx = 0; cx < gw; cx++) {
-        if (!dcol[cx]) continue; int a = s.a(cx, cyD); if (!a) continue;
-        mark(xg + cx, y, shadowPass ? (uint16_t)lb.shadow : s.c(cx, cyD), covT(a));
+        if (!dcol[cx]) continue;
+        const bool L = mark.inLiquid(xg + cx, ry); int a = A(L, cx, cyD); if (!a) continue;
+        mark(xg + cx, y, shadowPass ? (uint16_t)lb.shadow : Cc(L, cx, cyD), covT(a));
       }
     }
     int cy = lb.sourceRows[ry] - sourceTop - iy;
@@ -609,22 +677,23 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
         if (cy >= s.h) continue;
         for (int cx = 0; cx < gw; cx++) {
           if (!wcol[cx]) continue;
-          int a = s.a(cx, cy); if (!a) continue;
-          mark(xg + ix + cx, y, shadowPass ? (uint16_t)lb.shadow : s.c(cx, cy), covT(a));
+          const bool L = mark.inLiquid(xg + ix + cx, ry); int a = A(L, cx, cy); if (!a) continue;
+          mark(xg + ix + cx, y, shadowPass ? (uint16_t)lb.shadow : Cc(L, cx, cy), covT(a));
         }
         continue;
       }
       for (int cx = 0; cx <= gw; cx++) {                    // one extra column: the fractional overhang
         if (!wcol[cx]) continue;
         // destination (cx, cy) samples source (cx - fx, cy - fy): taps at columns cx / cx-1, rows cy / cy-1
-        int a00 = tap(cx, cy) * w00, a10 = tap(cx - 1, cy) * w10;
-        int a01 = tap(cx, cy - 1) * w01, a11 = tap(cx - 1, cy - 1) * w11;
+        const bool L = mark.inLiquid(xg + ix + cx, ry);
+        int a00 = tap(L, cx, cy) * w00, a10 = tap(L, cx - 1, cy) * w10;
+        int a01 = tap(L, cx, cy - 1) * w01, a11 = tap(L, cx - 1, cy - 1) * w11;
         int a = (a00 + a10 + a01 + a11 + 32768) >> 16; if (!a) continue;
         uint16_t c;
         if (shadowPass) c = (uint16_t)lb.shadow;
         else {
           int m = a00; if (a10 > m) m = a10; if (a01 > m) m = a01; if (a11 > m) m = a11;
-          c = m == a00 ? s.c(cx, cy) : m == a10 ? s.c(cx - 1, cy) : m == a01 ? s.c(cx, cy - 1) : s.c(cx - 1, cy - 1);
+          c = m == a00 ? Cc(L, cx, cy) : m == a10 ? Cc(L, cx - 1, cy) : m == a01 ? Cc(L, cx, cy - 1) : Cc(L, cx - 1, cy - 1);
         }
         mark(xg + ix + cx, y, c, covT(a));
       }
@@ -633,8 +702,7 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
 }
 void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   SpriteSampler s(g);
-  if (lb.shadow >= 0) drawGlyph(s, x, y0, lb, wet, mark, true);   // shadow copy offset down-right, then the body
-  drawGlyph(s, x, y0, lb, wet, mark, false);
+  drawGlyph(s, x, y0, lb, wet, mark, false);   // the shadow is baked into the sprite (scaledGlyphs)
 }
 void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   BitmapSampler s(f, d, lb);
@@ -1198,7 +1266,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   };
   auto drawDigitLayer = [&](bool onTop) {
     if (haveLabels && p.digitsOnTop == onTop) {
-      Mark digitMark(*this, y0, bounds, p, onTop, p.markContrast * p.digitBright);
+      Mark digitMark(*this, y0, bounds, p, onTop, p.markContrast * p.digitBright, labels.sprite && labels.shadow >= 0);
       drawLabels(y0, labels, Wet(onTop ? nullptr : &bounds, H), digitMark);
     }
   };
