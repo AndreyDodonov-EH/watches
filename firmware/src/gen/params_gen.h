@@ -51,6 +51,10 @@ struct Params {
   float traceFilm;
   float edgeSoft;
   float frontBright;
+  float surfaceBand;
+  float surfaceRim;
+  float surfaceWidth;
+  float surfaceTone;
   float edgeGlow;
   float glowStrength;
   float cornerR;
@@ -165,8 +169,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 159
-#define PARAMS_SCHEMA_CRC 0x0a9e1f7cu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 163
+#define PARAMS_SCHEMA_CRC 0xf22a45b2u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -218,6 +222,10 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"traceFilm", 'f', (uint16_t)offsetof(Params, traceFilm)},
   {"edgeSoft", 'f', (uint16_t)offsetof(Params, edgeSoft)},
   {"frontBright", 'f', (uint16_t)offsetof(Params, frontBright)},
+  {"surfaceBand", 'f', (uint16_t)offsetof(Params, surfaceBand)},
+  {"surfaceRim", 'f', (uint16_t)offsetof(Params, surfaceRim)},
+  {"surfaceWidth", 'f', (uint16_t)offsetof(Params, surfaceWidth)},
+  {"surfaceTone", 'f', (uint16_t)offsetof(Params, surfaceTone)},
   {"edgeGlow", 'f', (uint16_t)offsetof(Params, edgeGlow)},
   {"glowStrength", 'f', (uint16_t)offsetof(Params, glowStrength)},
   {"cornerR", 'f', (uint16_t)offsetof(Params, cornerR)},
@@ -334,7 +342,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  18, // v
+  19, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -381,6 +389,10 @@ static const Params PRESET_1 = {
   0.0f, // traceFilm
   2.6f, // edgeSoft
   21.0f, // frontBright
+  0.5f, // surfaceBand
+  0.6f, // surfaceRim
+  4.0f, // surfaceWidth
+  0.0f, // surfaceTone
   15.0f, // edgeGlow
   0.25f, // glowStrength
   0.0f, // cornerR

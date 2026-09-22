@@ -1,6 +1,61 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-10 (play hold after deliberate tilts, sim + firmware)_
+_Last update: 2026-09-22 (trailing white fringe corrected, sim + firmware)_
+
+## Forward meniscus plan (2026-09-22, from images/thick_meniscus.png + images/fizz_on_edge.jpg)
+
+The trailing edge reads well since the residue; the leading edge was a 2D cutout with a flat
+bright fringe (`frontBright`) and a dim glow. Two realism points, the first done in this session:
+
+1. **Surface band ("film layer"), DONE — `surfaceBand` / `surfaceRim`.** Seen side-on, the meniscus
+   is not a line: the contact ring on the glass wall projects to a (nearly) straight line at
+   `xe + meniscusDepth − bulge`, while the drawn curved profile is the mid-depth section. The lens
+   between them (thick at the centre row, closing to zero at the top/bottom walls, changing with
+   the pressure bulge and contact-lag `cap`) is the visible dish:
+   - concave (wall ring ahead of the profile): `surfaceWidth` limits a shaded band which
+     closes at the wall ring. The inner shoulder blends the body toward the deep liquid colour;
+     a smooth gradient leads to the lit outer rim (`surfaceRim`). `surfaceTone` still shifts the
+     band toward dark liquid or the highlight. Stroke and rim use pixel-footprint coverage, so
+     fractional motion does not snap a full-bright pixel on/off and both ends are symmetric.
+     Both curvature branches fade below 1 px of ring/profile separation, removing the previous
+     discontinuity at 0.5 px. The concave band still fades while a receding edge's wet film is up,
+     and re-forms as the film drains. Its unlit edge darkens without reducing opacity.
+     The surface now composites AFTER residue and the optional highlight inset. The old residue
+     exclusions are removed: faint/re-forming bands blend over the actual smear rather than
+     cutting a hole through it or having residue painted back over their rim. Rear-mark bounds
+     extend only when stroke opacity (including `surfaceBand`) reaches 0.5.
+     No extra firmware buffers, tables or allocations; existing static row arrays are reused.
+     Trailing white fringe (user's white-glass preset): residue/wet film now paints BEFORE the
+     body's anti-alias ramp. Previously it was masked by `(1 - coverage)` over a body already
+     blended against white, leaking white at the junction even with surface shading disabled.
+     Glow blends over the same residue backing; overlapping AA ramps of a tiny bead composite
+     once. Convex noses now share the receding-edge film fade, so a tilt/reversal cannot bypass
+     the fade by changing the surface curvature. Fixture: `sim/tools/fixtures/meniscus-trailing.json`.
+     [Trailing edge before / after](docs/meniscus-trailing-fix.png) uses the supplied settings.
+   - convex (wall ring behind the profile): the nose inside the profile is a thin lens, blended toward a
+     pale "thin liquid" tone (weight 1 − √(1 − s)); the existing soft edge / frontBright keep the rim.
+   Advance vs recede is carried by the bulge sign (`meniscusTiltGain · edgeLight` + `cap`).
+   Not done: the far-wall contact line as a separate visible curve, or physically solved
+   reflection/refraction. The shoulder and rim are an inexpensive shading approximation. Opaque
+   convex liquids get limb darkening instead of the pale lens (weight = `liquidTransparency`).
+   Params **v19**: `surfaceBand` (0.5) / `surfaceRim` (0.6) / `surfaceWidth` (4) / `surfaceTone` (0), migration fills defaults; the NVS
+   schema CRC changed, so the device drops its saved blob on first boot (export first if needed).
+   Verified: sim build and preset checks, PlatformIO build; `npm run check:meniscus` checks
+   symmetry, subpixel motion, flattening, residue, faint-band rear marks, receding edges and
+   gradients, trailing wet-film joins and tiny beads, then compares 54 native/sim frames (max channel difference 9/255; UBSan clean).
+   With residue disabled and neither edge receding, 4000 native strips are byte-identical to
+   the pre-fringe-fix renderer; another 4000 residue-enabled stress frames pass UBSan.
+   Not flashed or benchmarked on-device (bench.py has the `surfaceBand` stage).
+   Visual comparison: [before / after](docs/meniscus-surface-comparison.png).
+2. **Fizz at the surface, TODO.** A bubble reaching the fill edge respawns at the far side
+   (`stepFizz`), so the surface is the one place fizz is never seen; the photo shows the opposite:
+   a dense layer pressed under the surface, a foam ring at the contact line, bubbles stuck to the
+   wall. Design: a bubble reaching the edge *parks* (flag + lifetime in the existing `Fizz`
+   entry, capped count, no new buffers), clamps to the edge profile of its row and follows the
+   edge with a lag, drifts along the meniscus toward the horns (foam ring), pops after a random
+   lifetime; a receding edge leaves parked foam behind on the residue. Separate cheap touch:
+   some bubbles nucleate on the glass and sit still until a random detach time (zero-speed
+   state in the stepper). Fizzy presets only (frizzante, champagne, cola, malt).
 
 ## Play hold (2026-09-10)
 

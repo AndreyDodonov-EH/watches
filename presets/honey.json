@@ -1,5 +1,5 @@
 {
-  "v": 18,
+  "v": 19,
   "tubeHeight": 46,
   "hoursY": 12,
   "minutesY": 185,
@@ -46,6 +46,10 @@
   "traceFilm": 0,
   "edgeSoft": 0,
   "frontBright": 0,
+  "surfaceBand": 0.5,
+  "surfaceRim": 0.6,
+  "surfaceWidth": 4,
+  "surfaceTone": 0,
   "edgeGlow": 19,
   "glowStrength": 0.06,
   "cornerR": 0,
