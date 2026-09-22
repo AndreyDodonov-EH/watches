@@ -48,8 +48,38 @@ const marksOff = render('marks-disabled', { ...marks, surfaceBand: 0 });
 const marksFaint = render('marks-faint', { ...marks, surfaceBand: 0.005 });
 assert(delta(marksOff, marksFaint) <= 9, 'faint band must not switch rear marks to a different plane');
 const receding = render('receding', {}, { filmFree: 1, filmHome: 1 });
-const recedingOff = render('receding-disabled', { surfaceBand: 0 }, { filmFree: 1, filmHome: 1 });
-assert.equal(delta(receding, recedingOff), 0, 'receding concave edge must keep its wet-film-only appearance');
+assert.equal(delta(receding, symmetric), 0, 'wet film must not fade the concave surface: it only changes shape');
+// Receding at speed (dynamic contact angle ~0): the outer dish runs into the trail, no rim or outline
+// past the body's AA ramp; the same edge at rest has its full band back at once, film or not.
+const trail = { traces: true, traceAmount: 2 };
+const fast = render('receding-fast', trail, { fillVel: -30, filmFree: 1 }, base, true);
+const fastOff = render('receding-fast-disabled', { ...trail, surfaceBand: 0 }, { fillVel: -30, filmFree: 1 }, base, true);
+for (let x = 405; x < 409; x++) assert(delta([fast[30 * 536 + x]], [fastOff[30 * 536 + x]]) <= 9, 'receding surface must not outline the trail');
+const stopped = render('receding-stopped', trail, { filmFree: 1 }, base, true);
+assert(delta(stopped.slice(30 * 536 + 403, 30 * 536 + 409), fastOff.slice(30 * 536 + 403, 30 * 536 + 409)) > 9, 'stopped edge must show its band');
+// Rear marks: a band counts as liquid for the mark compositor only where it is >= 0.5 opaque. At rest
+// the whole stroke does; a fast-receding edge's band thins into its trail and must not. Both edges,
+// both fill directions (bounds are in the panel frame, mirrored when remaining).
+const markScene = { ...marks, ticksH: true, ticksM: true, tickStepH: 1, digitParallax: 4 };
+for (const remaining of [false, true]) for (const home of [false, true]) {
+  const recede = remaining ? 1 : -1;
+  const moving = home ? { slugVel: -recede * 30 } : { fillVel: recede * 30 };
+  const ext = (changes, state) => {
+    render(`marks-${remaining}-${home}-${JSON.stringify(state)}-${JSON.stringify(changes)}`, { ...markScene, remaining, ...changes }, state);
+    return { lo: R.markBounds[0].lo[30], hi: R.markBounds[0].hi[30] };
+  };
+  const side = (b) => (home !== remaining ? -b.lo : b.hi);   // bound of the edge under test, outward positive
+  const noBand = side(ext({ surfaceBand: 0 }, moving)), rest = side(ext({}, {})) - side(ext({ surfaceBand: 0 }, {}));
+  const pulled = side(ext({}, moving)) - noBand;
+  assert(rest > 3, `settled band must count as liquid for rear marks (${remaining}/${home}: ${rest})`);
+  assert(pulled <= 1.5, `receding band thinning into its trail must not hide rear marks (${remaining}/${home}: ${pulled})`);
+  // Flattening (meniscus wobble): with the ring a fraction of a px off the profile the band is drawn at
+  // opacity strokeA·tw < 0.5 — no visible colour — so it must not count as liquid for the marks either.
+  for (const meniscusDepth of [0.2, 0.45]) {
+    const flat = side(ext({ meniscusDepth }, {})) - side(ext({ meniscusDepth, surfaceBand: 0 }, {}));
+    assert.equal(flat, 0, `flattening band must not hide rear marks (${remaining}/${home}, depth ${meniscusDepth})`);
+  }
+}
 const gradient = render('gradient', { surfaceRim: 0 });
 assert(new Set(gradient.slice(30 * 536 + 400, 30 * 536 + 406)).size >= 4, 'surface needs shading across its width');
 const covered = render('opaque-residue', { traces: true, traceAmount: 2 }, {}, base, true);
@@ -90,15 +120,18 @@ function half(frame, right) {
     for (let x = right ? 268 : 0; x < (right ? 536 : 268); x++) a.push(frame[y * 536 + x]);
   return a;
 }
-for (const remaining of [false, true]) for (const home of [false, true]) {
+// A wide glow must not move the nose's backing off the wet trail (the sample is taken before the glow).
+for (const remaining of [false, true]) for (const home of [false, true]) for (const edgeGlow of [0, 12]) {
   const sign = (remaining ? -1 : 1) * (home ? -1 : 1);
   const state = { edgeLight: sign * 0.65, cap: sign * 12, acrossTilt: 0.25, angle: 3,
     slugVel: -sign * 80, filmHome: home ? 1 : 0, filmFree: home ? 0 : 1 };
-  const key = `trailing-${remaining}-${home}`;
-  const on = render(key, { remaining }, state, trailingPreset, true);
-  const off = render(key + '-disabled', { remaining, surfaceBand: 0 }, state, trailingPreset, true);
+  const key = `trailing-${remaining}-${home}-glow${edgeGlow}`, glow = { edgeGlow, glowStrength: 0.6 };
+  const on = render(key, { remaining, ...glow }, state, trailingPreset, true);
+  const off = render(key + '-disabled', { remaining, ...glow, surfaceBand: 0 }, state, trailingPreset, true);
   const right = home === remaining;
-  assert.equal(delta(half(on, right), half(off, right)), 0,
+  // The nose stays (motion never fades a surface) but thins toward the wet film behind it, not
+  // the white back: only the clear liquid's faint highlight tint may remain.
+  assert(delta(half(on, right), half(off, right)) <= 9,
     'receding convex surface must not add a white crescent over the wet film');
   assert(delta(half(on, !right), half(off, !right)) > 9, 'advancing surface must remain visible');
 }
