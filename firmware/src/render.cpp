@@ -25,26 +25,56 @@ static inline RGB to888(uint16_t c) {
   return { (float)((r5 << 3) | (r5 >> 2)), (float)((g6 << 2) | (g6 >> 4)), (float)((b5 << 3) | (b5 >> 2)) };
 }
 // Integer lerp between two 565 colours. t is quantised to 1/256; rounding matches the sim's
-// jround(a + (b-a)*t) (arithmetic shift == floor, +128 == round-half-up).
+// jround(a + (b-a)*t), expanding channels to RGB888 and using +128 for round-half-up.
 static inline void expand565(uint16_t c, int &r, int &g, int &b) {
   int r5 = (c >> 11) & 0x1f, g6 = (c >> 5) & 0x3f, b5 = c & 0x1f;
   r = (r5 << 3) | (r5 >> 2); g = (g6 << 2) | (g6 >> 4); b = (b5 << 3) | (b5 >> 2);
 }
-static inline uint16_t blend565(uint16_t a, uint16_t b, float t) {
-  int T = (int)(t * 256 + 0.5f);
-  if (T <= 0) return a;
-  if (T >= 256) return b;
-  int ar, ag, ab, br, bg, bb;
-  expand565(a, ar, ag, ab); expand565(b, br, bg, bb);
-  return rgb565(ar + (((br - ar) * T + 128) >> 8), ag + (((bg - ag) * T + 128) >> 8), ab + (((bb - ab) * T + 128) >> 8));
-}
-// Same blend with the 1/256 fraction already quantised (T = (int)(t * 256 + 0.5f)).
+// Same exact RGB888 interpolation, with red and blue in separate 16-bit lanes.
 static inline uint16_t blend565T(uint16_t a, uint16_t b, int T) {
   if (T <= 0) return a;
   if (T >= 256) return b;
-  int ar, ag, ab, br, bg, bb;
-  expand565(a, ar, ag, ab); expand565(b, br, bg, bb);
-  return rgb565(ar + (((br - ar) * T + 128) >> 8), ag + (((bg - ag) * T + 128) >> 8), ab + (((bb - ab) * T + 128) >> 8));
+  const uint32_t a5 = ((a >> 8) & 0xf8u) | ((uint32_t)(a & 31) << 19);
+  const uint32_t b5 = ((b >> 8) & 0xf8u) | ((uint32_t)(b & 31) << 19);
+  const uint32_t arb = a5 | ((a5 >> 5) & 0x00070007u), brb = b5 | ((b5 >> 5) & 0x00070007u);
+  const uint32_t ag6 = (a >> 5) & 63, bg6 = (b >> 5) & 63;
+  const uint32_t ag = (ag6 << 2) | (ag6 >> 4), bg = (bg6 << 2) | (bg6 >> 4);
+  // A lane never exceeds 255*256+128. Unsigned wrap preserves packed-lane borrows.
+  const uint32_t rb = (arb << 8) + (brb - arb) * (uint32_t)T + 0x00800080u;
+  const uint32_t g = (ag << 8) + (bg - ag) * (uint32_t)T + 128;
+  return (uint16_t)((rb & 0xf800u) | ((g >> 5) & 0x07e0u) | (rb >> 27));
+}
+static inline uint16_t blend565(uint16_t a, uint16_t b, float t) {
+  return blend565T(a, b, (int)(t * 256 + 0.5f));
+}
+// Dried-trace fill of one strip row over [x0, x1): one colour, alpha traceA[x] * rowW / 256 per
+// column. Bit-identical to pxaT/blend565T — a + (((b - a) * T + 128) >> 8) equals
+// floor((a * (256 - T) + b * T + 128) / 256) — at a fraction of the work: r and b ride as two 16-bit
+// lanes of one 32-bit word (a lane peaks at 255 * 256 + 128, never carrying into the other), the
+// foreground expands once, and the pixel is read and written in the strip's byte-swapped layout
+// (r5 at bits 3-7, b5 at 8-12, g6 split: low 3 bits at 13-15, high 3 at 0-2), so no bswap per pixel.
+// noinline: inside drawTube the loop shared a register file with hundreds of locals and spilled every
+// iteration; on its own it stays in registers (17.8 -> 5.7 ms for a fully smeared tube).
+static void __attribute__((noinline)) traceFillRow(uint16_t *row, const uint16_t *traceA, int x0, int x1, int rowW, uint16_t fg) {
+  const uint16_t fgBE = __builtin_bswap16(fg);
+  int fr, fgg, fb; expand565(fg, fr, fgg, fb);
+  const uint32_t frb = (uint32_t)fr | ((uint32_t)fb << 16), fgG = (uint32_t)fgg;
+  for (int x = x0; x < x1; x++) {
+    const int T = (traceA[x] * rowW) >> 8;   // sim: min(1, traceA * rowW)
+    if (T >= 256) { row[x] = fgBE; continue; }
+    if (!T) continue;
+    const uint32_t w = row[x];
+    const uint32_t g6 = ((w & 7) << 3) | (w >> 13);
+    // Position both 5-bit channels together, then replicate their high bits in parallel.
+    const uint32_t rb5 = (w & 0xf8u) | (((w >> 8) & 0x1fu) << 19);
+    const uint32_t rb = rb5 | ((rb5 >> 5) & 0x00070007u);
+    const uint32_t g = (g6 << 2) | (g6 >> 4);
+    // a*(256-T)+b*T == (a<<8)+(b-a)*T, including unsigned wrap of the packed lanes.
+    // One multiply per packed colour instead of two; final lanes and rounding are unchanged.
+    const uint32_t rbo = (rb << 8) + (frb - rb) * (uint32_t)T + 0x00800080u;
+    const uint32_t go = ((g << 8) + (fgG - g) * (uint32_t)T + 128) >> 8;
+    row[x] = (uint16_t)(((rbo >> 8) & 0xF8) | ((rbo >> 27) << 8) | (go >> 5) | (((go >> 2) & 7) << 13));
+  }
 }
 static inline int alphaT(float t) { return (int)(t * 256 + 0.5f); }
 static inline float luma(RGB c) { return 0.299f * c.r + 0.587f * c.g + 0.114f * c.b; }
@@ -163,6 +193,7 @@ struct ScaledSet {
 // Integer version of the sim's throughLiquid (luma in 1/1000 units, blend fractions in 1/256).
 // T = liquidTransparency in 1/256, C = contrast in 1/1000 (both hoisted into Mark).
 static uint16_t throughLiquid(uint16_t bg, uint16_t mark, int T, int C) {
+  if (C <= 0) return blend565T(bg, mark, T);   // no contrast floor: skip both luminance calculations
   int Br, Bg, Bb, Mr, Mg, Mb;
   expand565(bg, Br, Bg, Bb); expand565(mark, Mr, Mg, Mb);
   int cr = Br + (((Mr - Br) * T + 128) >> 8), cg = Bg + (((Mg - Bg) * T + 128) >> 8), cb = Bb + (((Mb - Bb) * T + 128) >> 8);
@@ -555,6 +586,7 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
   bool anyDry = false, anyWet = false;
   int ix = (int)floorf(lb.wetDx), iy = (int)floorf(lb.wetDy);
   int wx1 = (int)((lb.wetDx - ix) * 256 + 0.5f), wx0 = 256 - wx1, wy1 = (int)((lb.wetDy - iy) * 256 + 0.5f), wy0 = 256 - wy1;
+  const int w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
   for (int cx = 0; cx <= gw; cx++) {
     dcol[cx] = cx < gw && !wet(xg + cx); if (dcol[cx]) anyDry = true;
     wcol[cx] = wet(xg + ix + cx); if (wcol[cx]) anyWet = true;
@@ -572,11 +604,21 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
     }
     int cy = lb.sourceRows[ry] - sourceTop - iy;
     if (anyWet && ry >= lb.ry0 && ry <= lb.ry1 && cy >= 0 && cy <= s.h) {
+      // Integer refraction shift: only the current tap contributes, with its original colour.
+      if (wx1 == 0 && wy1 == 0) {
+        if (cy >= s.h) continue;
+        for (int cx = 0; cx < gw; cx++) {
+          if (!wcol[cx]) continue;
+          int a = s.a(cx, cy); if (!a) continue;
+          mark(xg + ix + cx, y, shadowPass ? (uint16_t)lb.shadow : s.c(cx, cy), covT(a));
+        }
+        continue;
+      }
       for (int cx = 0; cx <= gw; cx++) {                    // one extra column: the fractional overhang
         if (!wcol[cx]) continue;
         // destination (cx, cy) samples source (cx - fx, cy - fy): taps at columns cx / cx-1, rows cy / cy-1
-        int a00 = tap(cx, cy) * wx0 * wy0, a10 = tap(cx - 1, cy) * wx1 * wy0;
-        int a01 = tap(cx, cy - 1) * wx0 * wy1, a11 = tap(cx - 1, cy - 1) * wx1 * wy1;
+        int a00 = tap(cx, cy) * w00, a10 = tap(cx - 1, cy) * w10;
+        int a01 = tap(cx, cy - 1) * w01, a11 = tap(cx - 1, cy - 1) * w11;
         int a = (a00 + a10 + a01 + a11 + 32768) >> 16; if (!a) continue;
         uint16_t c;
         if (shadowPass) c = (uint16_t)lb.shadow;
@@ -653,12 +695,21 @@ void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows
       if (emboss) { mark(x - 1, y0 + ry, c, embT, 1); mark(x + w, y0 + ry, c, embT, -1); }
       for (int k = 0; k < w; k++) mark(x + k, y0 + ry, c);
     };
+    // Without parallax every segment is vertical: no lens-depth or line interpolation needed.
+    if (dx == 0 && dy == 0) {
+      for (int ry = outer;; ry += dir) {
+        plot(x0, ry);
+        if (ry == inner) break;
+      }
+      return;
+    }
     int px0, py0; point(outer, px0, py0); plot(px0, py0);
     if (outer == inner) return;
     for (int baseY = outer + dir;; baseY += dir) {
       int px1, py1; point(baseY, px1, py1);
       int n = abs(px1 - px0); if (abs(py1 - py0) > n) n = abs(py1 - py0); if (n < 1) n = 1;
-      for (int j = 1; j <= n; j++) plot((int)jround(px0 + (float)(px1 - px0) * j / n), (int)jround(py0 + (float)(py1 - py0) * j / n));
+      if (n == 1) plot(px1, py1);   // the endpoint is already integral (also preserves repeated points)
+      else for (int j = 1; j <= n; j++) plot((int)jround(px0 + (float)(px1 - px0) * j / n), (int)jround(py0 + (float)(py1 - py0) * j / n));
       px0 = px1; py0 = py1;
       if (baseY == inner) break;
     }
@@ -990,8 +1041,10 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     }
   }
 
-  // 3c: wet film left by a receding edge (see sim step 3c)
-  if (hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02f || (p.freeLiquid && s.filmHome > 0.02f))) {
+  // 3c: wet film left by a receding edge (see sim step 3c). In trace mode the film is the wet band
+  // of 3d instead (full liquid at the edge, thinning into the residue), so this faint one is skipped.
+  const bool traceMode = p.traces && p.traceAmount > 0 && st.trace;
+  if (!traceMode && hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02f || (p.freeLiquid && s.filmHome > 0.02f))) {
     const float yc = (H - 1) / 2.0f;
     for (int ry = 0; ry < H; ry++) {
       float d = (ry - yc) / yc, rowW = 0.4f + 0.6f * d * d;
@@ -1004,42 +1057,100 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   }
 
   // 3d: dried traces — residue on the glass where an edge receded (blood smear, syrup coating,
-  // legs); see sim step 3d. Drawn AFTER the glow / wet film — they paint the dry side with plain
-  // overwrite and would wipe the smear off the band next to the edge — and only on the dry side:
-  // an edge that advanced back over residue covers it again. Residue buffer is panel-frame; the
-  // mirrored render flips the index.
-  if (p.traces && p.traceAmount > 0 && st.trace && st.traceHi > st.traceLo) {
-    const float yc = (H - 1) / 2.0f;
-    // All loops run only over the occupied residue range (physics keeps [traceLo, traceHi) tight):
-    // panel range mirrored into the render frame, widened ±4 for the blur reach (and 4 more for
-    // the columns the blur reads); columns outside the range are guaranteed zero, never touched.
-    const int r0 = p.remaining ? L - st.traceHi : st.traceLo, r1 = p.remaining ? L - st.traceLo : st.traceHi;
-    const int a0 = r0 - 4 < 0 ? 0 : r0 - 4, a1 = r1 + 4 > L ? L : r1 + 4;
-    const int c0 = a0 - 4 < 0 ? 0 : a0 - 4, c1 = a1 + 4 > L ? L : a1 + 4;
-    for (int x = c0; x < c1; x++) traceRaw[x] = st.trace[p.remaining ? L - 1 - x : x];
-    // +-4 px triangular blur before the streak texture (see sim): tapers the smear's outer end
-    // (dense turnaround deposit next to bare glass) into a tide mark instead of a 1-px cliff
-    for (int x = a0; x < a1; x++) {
-      uint32_t acc = 5u * traceRaw[x];
-      for (int d = 1; d <= 4; d++) {
-        const int m = x < d ? 0 : x - d, q2 = x > L - 1 - d ? L - 1 : x + d;
-        acc += (uint32_t)(5 - d) * (traceRaw[m] + traceRaw[q2]);
-      }
-      const float v = acc * (1.0f / 25.0f);
-      // 1/256 units with headroom: traceAmount may exceed 1 (opacity boost) and the sim clamps only
-      // AFTER the row weight below, so the column value keeps the excess (a uint8 cap here made
-      // heavy residue lighter on the board than in the sim)
-      float a = v > 0 ? traceGamma(v * (1.0f / TRACE_FULL)) * 256.0f * p.traceAmount * traceStreak(x + (uint32_t)idx * 6151u) : 0.0f;
-      traceA[x] = (uint16_t)(fminf(65535.0f, a) + 0.5f);
+  // legs); see sim step 3d. Drawn AFTER the glow (it paints the dry side with plain overwrite).
+  // The residue sits UNDER the liquid: each pixel gets it at (1 - liquid coverage), so the
+  // anti-aliased meniscus ramps from liquid to residue, not to the bare tube back, and fully
+  // covered columns get none. Wet band: over the first wetFilm px behind a receding edge the
+  // residue's alpha and colour ramp up to the liquid's own, gated by filmFree/filmHome (~1 while
+  // the edge recedes, draining once it stops). Residue buffer is panel-frame; the mirrored render
+  // flips the index.
+  if (traceMode) {
+    const float yc = (H - 1) / 2.0f, hw = softW * 0.5f;
+    const int N = p.wetFilm > 0 ? (int)fmaxf(1, jround(p.wetFilm)) : 0;
+    const bool bandR = hasLiquid && N > 0 && s.filmFree > 0.02f;
+    const bool bandL = hasLiquid && N > 0 && p.freeLiquid && s.filmHome > 0.02f;
+    const float invSoftW = softW > 0 ? 1.0f / softW : 0.0f;
+    const float invN = N > 0 ? 1.0f / N : 0.0f;
+    // Columns that may receive residue or band: the occupied residue range (physics keeps
+    // [traceLo, traceHi) tight) mirrored into the render frame, plus each band's reach over all rows.
+    // Permanent film (traceFilm, see sim): every column carries residue of at least that level, so
+    // the range is the whole tube and the per-column value floors at the film's gamma-lifted alpha.
+    const float filmG = p.traceFilm > 0 ? traceGamma(fminf(1.0f, p.traceFilm)) : 0.0f;
+    int lo = L, hi = 0;
+    if (filmG > 0) { lo = 0; hi = L; }
+    else if (st.traceHi > st.traceLo) { lo = p.remaining ? L - st.traceHi : st.traceLo; hi = p.remaining ? L - st.traceLo : st.traceHi; }
+    if (bandL || bandR) for (int ry = 0; ry < H; ry++) {
+      if (bandL) { int a = (int)floorf(edgesL[ry] - N), b = (int)ceilf(edgesL[ry] + hw) + 1; if (a < lo) lo = a; if (b > hi) hi = b; }
+      if (bandR) { int a = (int)floorf(edges[ry] - hw), b = (int)ceilf(edges[ry] + N) + 1; if (a < lo) lo = a; if (b > hi) hi = b; }
     }
-    for (int ry = 0; ry < H; ry++) {
-      float d = (ry - yc) / yc;
-      int rowW = (int)((0.4f + 0.6f * d * d) * 256.0f + 0.5f), y = y0 + ry;
-      int xi = (int)ceilf(edges[ry]), xiL = (int)floorf(edgesL[ry]);   // liquid where xiL < x < xi
+    if (hi > lo) {
+      // widened +-4 for the blur reach (and 4 more for the columns the blur reads); columns outside
+      // the residue range are guaranteed zero and the band only reads its own columns.
+      const int a0 = lo - 4 < 0 ? 0 : lo - 4, a1 = hi + 4 > L ? L : hi + 4;
+      const int c0 = a0 - 4 < 0 ? 0 : a0 - 4, c1 = a1 + 4 > L ? L : a1 + 4;
+      for (int x = c0; x < c1; x++) traceRaw[x] = st.trace[p.remaining ? L - 1 - x : x];
+      // +-4 px triangular blur before the streak texture (see sim): tapers the smear's outer end
+      // (dense turnaround deposit next to bare glass) into a tide mark instead of a 1-px cliff
       for (int x = a0; x < a1; x++) {
-        if (x > xiL && x < xi) continue;
-        int a = (traceA[x] * rowW) >> 8; if (a > 256) a = 256;   // sim: min(1, traceA * rowW)
-        if (a) pxaT(x, y, pal.traceRows[ry], a);
+        uint32_t acc = 5u * traceRaw[x];
+        for (int d = 1; d <= 4; d++) {
+          const int m = x < d ? 0 : x - d, q2 = x > L - 1 - d ? L - 1 : x + d;
+          acc += (uint32_t)(5 - d) * (traceRaw[m] + traceRaw[q2]);
+        }
+        const float v = acc * (1.0f / 25.0f);
+        // 1/256 units with headroom: traceAmount may exceed 1 (opacity boost) and the sim clamps only
+        // AFTER the row weight below, so the column value keeps the excess (a uint8 cap here made
+        // heavy residue lighter on the board than in the sim)
+        const float g = fmaxf(v > 0 ? traceGamma(v * (1.0f / TRACE_FULL)) : 0.0f, filmG);
+        float a = g > 0 ? g * 256.0f * p.traceAmount * traceStreak(x + (uint32_t)idx * 6151u) : 0.0f;
+        traceA[x] = (uint16_t)(fminf(65535.0f, a) + 0.5f);
+      }
+      for (int ry = 0; ry < H; ry++) {
+        float d = (ry - yc) / yc;
+        int rowW = (int)((0.4f + 0.6f * d * d) * 256.0f + 0.5f), y = y0 + ry;
+        const float ex = edges[ry], exL = edgesL[ry], xm = (ex + exL) * 0.5f;
+        const int xr = (int)jround(ex), xrL = (int)jround(exL);   // hard edge: liquid where xrL <= x < xr
+        // Row split into segments so the per-pixel coverage/band math only runs near the edges (see
+        // sim): [a0, pl1) plain residue . [zl0, zl1) home-edge zone . [zl1, zr0) fully covered,
+        // skipped . [zr0, zr1) time-edge zone . [pr0, a1) plain residue.
+        int pl1 = a1, zl0 = a1, zl1 = a1, zr0 = a1, zr1 = a1, pr0 = a1;
+        if (hasLiquid) {
+          const float dl = bandL ? fmaxf(N, hw) : hw, dr = bandR ? fmaxf(N, hw) : hw;
+          auto clampx = [a0, a1](int v) { return v < a0 ? a0 : v > a1 ? a1 : v; };
+          pl1 = clampx((int)floorf(exL - dl - 0.5f) + 1);
+          const int sk0 = clampx(softW > 0 ? (int)ceilf(exL + hw - 0.5f) : xrL);       // first fully covered column
+          const int sk1 = clampx(softW > 0 ? (int)floorf(ex - hw - 0.5f) + 1 : xr);   // one past the last
+          pr0 = clampx((int)ceilf(ex + dr - 0.5f));
+          zl0 = pl1; zl1 = sk0 < pr0 ? sk0 : pr0; zr0 = sk1 > zl1 ? sk1 : zl1; zr1 = pr0;
+        }
+        // Plain residue is the hot loop of a smeared tube (up to L x H blends a frame): it writes the
+        // strip row directly — y is inside the strip (drawTube's y0 is baseY), [a0, a1) inside [0, PANEL_W).
+        static_assert(TUBE_LENGTH_PX <= PANEL_W, "trace columns index the strip row directly");
+        uint16_t *const row = FB + ry * PANEL_W;
+        traceFillRow(row, traceA, a0, pl1, rowW, pal.traceRows[ry]);
+        traceFillRow(row, traceA, pr0, a1, rowW, pal.traceRows[ry]);
+        for (int seg = 0; seg < 2; seg++) {
+          const int z0 = seg ? zr0 : zl0, z1 = seg ? zr1 : zl1;
+          for (int x = z0; x < z1; x++) {
+            // liquid coverage of this pixel as step 3 painted it: full inside, the soft-edge ramp across each edge
+            // Both coverage ramps share a width: take the smaller numerator before scaling and
+            // clamp once. Reciprocals above avoid software float division in this pixel loop.
+            const float cr = ex + hw - x - 0.5f, cl = x + 0.5f - exL + hw;
+            const float cov = softW > 0
+              ? clampf((cr < cl ? cr : cl) * invSoftW, 0, 1)
+              : (x >= xrL && x < xr ? 1.0f : 0.0f);
+            if (cov >= 1) continue;
+            // wet band on each edge's own half: 1 at (and inside) the contact line, 0 at N px out
+            const float b = x + 0.5f < xm
+              ? (bandL ? s.filmHome * clampf(1 - (exL - x - 0.5f) * invN, 0, 1) : 0.0f)
+              : (bandR ? s.filmFree * clampf(1 - (x + 0.5f - ex) * invN, 0, 1) : 0.0f);
+            float a = (float)traceA[x] * rowW * (1.0f / 65536.0f);
+            uint16_t c = pal.traceRows[ry];
+            if (b > 0) { a += (1 - a) * b; c = blend565(c, pal.rows[ry], b); }
+            a *= 1 - cov;
+            if (a >= 1.0f / 255) pxa(x, y, c, fminf(1, a));
+          }
+        }
       }
     }
   }

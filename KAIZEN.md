@@ -229,3 +229,30 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   2 s later (device.py even sleeps 2.5 s on close to let it land), so `p!` is not the only destructive
   command — a plain param set silently replaces the saved copy too. A read-only "try this value without
   saving" path (or a `--no-save`/session-only flag in device.py) would make board experiments safe.
+- Thin dark curved arcs run across the olive-oil tubes at fixed columns (visible with traces off, so not
+  residue); source not identified — check the glass / lens overlays.
+- The residue wet band tapers linearly over `wetFilm` px; a preset wanting a longer fade than its film
+  would need its own width param.
+- Sim `blend565`/`pxa` allocate three tuples per pixel; the residue pass calls it for every dry-side
+  column of the residue range every frame. An integer 565 blend (like the firmware's `blend565T`)
+  would cut the GC churn when a smear covers the whole tube.
+- `tools/device.py` close from WSL: the python.exe bridge does not exit within `wait(5)` after stdin
+  closes, so every session ends in `TimeoutExpired` (params were already restored; unclear whether the
+  port then closes with the RTS-then-DTR order). Make the bridge exit on EOF, or kill it and re-check
+  the reset banner.
+- `tools/bench.py` cannot measure the dried-trace stage: the pinned scene (d0, inputGain 0) has no
+  receding edge, so the residue dries out within `traceDry` and `--stage traces=0` reads ~0. A residue
+  scene needs `traceDry` pinned high and a demo-speed drain first (see the scratch tracepin.py recipe).
+- `traceFilm` (permanent film) costs ~9 ms per fully dry tube (every dry pixel goes through the
+  blend: ~57 cycles/px, close to the loop's op count; the 5.7 ms "fully smeared" figure was helped
+  by the opaque fast path). Cheaper design if the film becomes always-on: bake it into the tube
+  back — a per-row film-over-back LUT keyed by a quantized streak level (8 levels x H), paint the
+  back with it in step 1 and blend only pixels that are not the plain back (marks). Needs the sim
+  mirrored; ~0 per-pixel cost.
+- `x` pixel dumps over the Windows bridge can be incomplete despite an `END` marker
+  (108/120 complete rows during the 2026-09-22 residue benchmark); reject incomplete
+  captures before comparing pixels. The existing bridge-close timeout also recurred after
+  settings were successfully restored and verified.
+- Parallel PlatformIO builds in the same output directory removed objects during compilation;
+  use distinct `PLATFORMIO_BUILD_DIR` paths for concurrent builds.
+- `ble.cpp`: `NimBLEService::start()` is deprecated and now a no-op; remove separately.

@@ -87,6 +87,7 @@ function check(id: string, p: Params, m: Material): string[] {
     want(p.traceFollow >= 0 && p.traceFollow <= 1, `traceFollow ${p.traceFollow} not in [0, 1]`);
     want(p.traceStain >= 0.05 && p.traceStain <= 0.7, `traceStain ${p.traceStain} not in [0.05, 0.7]`);
     want(p.traceThin >= 0 && p.traceThin <= 3, `traceThin ${p.traceThin} not in [0, 3]`);
+    want(p.traceFilm >= 0 && p.traceFilm <= 1, `traceFilm ${p.traceFilm} not in [0, 1]`);
     // drain-back tracks viscosity: thin liquids snap back, syrup barely crawls
     if (m.viscosity === 'viscous') want(p.traceFollow <= 0.15, `viscous: traceFollow ${p.traceFollow} > 0.15`);
     if (m.viscosity === 'watery') want(p.traceFollow >= 0.2, `watery: traceFollow ${p.traceFollow} < 0.2`);

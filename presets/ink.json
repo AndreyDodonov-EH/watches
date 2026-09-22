@@ -43,6 +43,7 @@
   "traceFollow": 0.5,
   "traceStain": 0.4,
   "traceThin": 1.5,
+  "traceFilm": 0,
   "edgeSoft": 0,
   "frontBright": 0,
   "edgeGlow": 19,

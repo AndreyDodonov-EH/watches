@@ -175,7 +175,11 @@ else `display_init` fails at boot before `ble_init`.
   (edge speed thins the deposit; at 1, 100 px/s halves it — `TRACE_THIN_REF_PX_S`),
   `traceFollow` 1/s (drain-back rate at 25 px from the liquid),
   `traceStain` 0..1 (fraction of a fresh deposit the drain-back leaves behind; on-screen stain
-  opacity ≈ traceStain × traceAmount).
+  opacity ≈ traceStain × traceAmount),
+  `traceFilm` 0..1 (2026-09-22: permanent film over the whole glass as a residue level — the tube
+  never looks perfectly clean; render-only floor of the per-column value after the blur, so it
+  gets the streak, wall weight, under-liquid coverage and wet band like any residue; forces the
+  full column range, i.e. the dry side is blended every frame: ~5.7 ms worst case per tube).
   Params v15 unchanged (additive keys; NVS CRC changes → stored params fall back to the preset).
 - Physics (sim `stepTube` / fw `stepTube`, identical): per-tube residue `Uint16Array(536)` (8.8
   fixed point, high byte renders) in **panel-frame columns**; an edge that receded saturates
@@ -202,9 +206,14 @@ else `display_init` fails at boot before `ble_init`.
   would otherwise drown in the opacity stack) × `traceStreak(x + idx·6151)` (same integer hash both
   sides — static vertical texture, 0.82–1: subtle, not stripes) × wall weight `0.4 + 0.6·d²`, colour = liquid row
   × 0.85 (dried). Drawn late
-  because the glow/wet-film passes paint the dry side with plain overwrite — drawn earlier they
-  wiped the smear off the band next to the edge (`edgeGlow` px gap); pixels under the column are
-  skipped so an edge that advanced back over residue covers it again. Cost bound: per-column alpha
+  because the glow pass paints the dry side with plain overwrite — drawn earlier it wiped the smear
+  off the band next to the edge (`edgeGlow` px gap). The residue is composited UNDER the liquid:
+  per pixel × (1 − liquid coverage as step 3 painted it), so the anti-aliased meniscus ramps liquid →
+  residue instead of liquid → tube back (no dark seam), and fully covered columns get none (an edge
+  that advanced back over residue covers it again). Wet band: over the first `wetFilm` px behind a
+  receding edge the residue's alpha and colour ramp up to the liquid's own (weight
+  `film × (1 − d/wetFilm)`, gated by `filmFree`/`filmHome`), so the liquid thins out into its trail
+  with no visible edge while it recedes; the faint step-3c film is skipped in trace mode. Cost bound: per-column alpha
   precomputed, rows skip a=0; fw uses the integer `pxaT` path; the gamma is a lerped 256-entry LUT
   (fw `LUT_traceGamma` built in `buildLuts`, sim mirrors) — no powf per column.
 - Perf: `TubeState.traceLo/traceHi` track the occupied column range (deposits widen it, the decay
