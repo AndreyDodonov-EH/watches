@@ -71,6 +71,8 @@
   "fizzAcrossGain": 1.05,
   "fizzFlatRise": 0.45,
   "fizzSquash": 2,
+  "fizzEdgeRise": 0.3,
+  "fizzFoamLife": 6,
   "fizzSpeed": 40,
   "ticksH": true,
   "tickStepH": 1,

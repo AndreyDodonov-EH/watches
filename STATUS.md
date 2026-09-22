@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-22 (trailing white fringe corrected, sim + firmware)_
+_Last update: 2026-09-22 (fizz foam in the meniscus front, sim + firmware)_
 
 ## Forward meniscus plan (2026-09-22, from images/thick_meniscus.png + images/fizz_on_edge.jpg)
 
@@ -47,15 +47,73 @@ bright fringe (`frontBright`) and a dim glow. Two realism points, the first done
    the pre-fringe-fix renderer; another 4000 residue-enabled stress frames pass UBSan.
    Not flashed or benchmarked on-device (bench.py has the `surfaceBand` stage).
    Visual comparison: [before / after](docs/meniscus-surface-comparison.png).
-2. **Fizz at the surface, TODO.** A bubble reaching the fill edge respawns at the far side
-   (`stepFizz`), so the surface is the one place fizz is never seen; the photo shows the opposite:
-   a dense layer pressed under the surface, a foam ring at the contact line, bubbles stuck to the
-   wall. Design: a bubble reaching the edge *parks* (flag + lifetime in the existing `Fizz`
-   entry, capped count, no new buffers), clamps to the edge profile of its row and follows the
-   edge with a lag, drifts along the meniscus toward the horns (foam ring), pops after a random
-   lifetime; a receding edge leaves parked foam behind on the residue. Separate cheap touch:
-   some bubbles nucleate on the glass and sit still until a random detach time (zero-speed
-   state in the stepper). Fizzy presets only (frizzante, champagne, cola, malt).
+2. **Fizz at the surface, DONE — `fizzEdgeRise` / `fizzFoamLife` (params v20).** A bubble
+   reaching the fill edge used to respawn at the far side, so the surface was the one place fizz
+   was never seen; the photo shows the opposite. Now:
+   - `fizzEdgeRise` (0..1, default 0.3): the face-up rise gets a component toward the *exposed*
+     surface, so bubbles reach it at rest. The exposed surface is the time edge, or the home edge
+     of a free slug whose time edge sits against the far end (the user's `remaining` + `freeLiquid`
+     + `freeHomeK` 0 look: the visible meniscus there is `edgeXL`, the time edge is at the panel
+     border). `drawTube` publishes both per-row surfaces and an exposed mask for the stepper.
+   - `fizzFoamLife` (s, default 6, 0 = old respawn): a bubble reaching an exposed surface parks
+     *on* the meniscus: caught as its rim comes within 2 px of the surface profile (with a
+     concave surface band, its inner rim: the foam floats on the liquid, not out on the band that
+     climbs the wall to the contact ring), it glides on until its centre sits on the profile, half
+     out of the liquid, so the
+     foam forms the surface instead of collecting behind it; later arrivals pack behind
+     (`Fizz.life` ≠ 0, sign = which edge; no new buffers beyond the per-row fronts). Free bubbles
+     are checked with their whole disc (the tightest row), not the centre: a rim within 2 px of
+     the profile is caught at the foam surface and recycled at any other edge, respawning inside
+     the liquid of its new row; the render clips free-bubble pixels to the liquid (one-frame lag of
+     a fast slosh) and clamps foam to the current profile. Before, tilting showed big bubbles
+     poking up to 4 px past the edge and foam lagging a receding surface by up to 10 px (tilt
+     harness: 46 → 1–3 cut, 0 outside, per 500 frames). Over a concave surface band the foam is
+     seen through the liquid wedge climbing the front glass: veiled by the band (`FOAM_VEIL` 0.7 ×
+     band opacity at the profile, fading to 0 at its outer rim). The column-end respawn (`len` = column − 6 px) no longer fires for a bubble heading
+     to a surface: it used to recycle them before they reached the front on the middle rows, so
+     foam could only park on the rows where the meniscus falls back (behind a convex dome).
+     Parked bubbles follow the surface (lag behind an advance, pushed back by a
+     recession), slide along the meniscus toward the higher contact line — the horns, where the
+     foam ring forms — and pack: stopped behind a bubble in front (second layer), pushed apart
+     from one beside, slide blocked by a touching neighbour so they line the surface. Pairs among
+     parked bubbles only (≤ 64², 50 Hz, trivial). Life is random ±50 %; shaking counts it down
+     4× faster; tilting the surface down (rise pointing away) releases the foam into the flow.
+     The last 0.3 s is the pop: the disc swells 1.6× and fades, breaking the surface.
+   - Fizzy presets: frizzante/champagne/cola (`fizzEdgeRise` 0.5, life 4–5), cryo (0.6, 2 s:
+     boiling), honey/molten (0.2, 15–20 s: trapped air). Everything else inherits the defaults;
+     with 8 slow bubbles the default look accumulates only occasionally.
+   - Verified: sim build/tsc/check:presets, `npm run check:meniscus` (54 native/sim frames, max
+     channel delta 9/255, UBSan clean; fizz is off there), a sanitized host stress of
+     renderTube + stepFizz (9600 steps, 24 scenarios incl. mid-run `tubeHeight` changes and
+     empty/full columns, ASan+UBSan clean, ~22 k parked-bubble-steps), PlatformIO build (+1 KB
+     static: `life` per bubble). Browser runs: frizzante forms a ring at both corners, the user's
+     preset lines the visible (home) meniscus, along-tilt toward the surface holds the foam,
+     away releases it within 2 s. Not flashed or benchmarked on-device.
+     Foam-in-meniscus follow-up: headless sim runs (frizzante, cola, the user's convex preset with
+     more bubbles) show the foam on the band / dome front; a sanitized native stress of the
+     firmware (50 scenarios, ~124 k parked-bubble-steps, concave/convex/flat, free/pinned,
+     remaining, `tubeHeight` change mid-run) keeps every parked disc inside the front, ASan+UBSan
+     clean; check:meniscus unchanged (54 frames, max delta 9/255); PlatformIO build OK.
+     Limits raised: `fizzCount` UI max 60 → 120, `fizzSize` UI max 8 → 16. Pool per tube (sim
+     `FIZZ_MAX`, firmware `MAX_FIZZ`) = 240, the sliders' worst case (120 × up to 2 with
+     agitation ≤ 1); a count pushed past it over serial is capped and reported (sim console warning,
+     firmware `error fizz pool:` line per new peak via `fizzOverflow()`). Not benchmarked on the
+     device: 240 size-16 discs per tube are far beyond the old worst-case fizz pixel work.
+   - Review round (four issues, all fixed and re-measured in sim and native firmware):
+     band veil is weighted by each pixel's footprint over the band (the foam added a 136/255 step
+     per 0.02 px edge move with the old per-pixel-centre test, 8/255 now); a bubble is recycled or
+     caught only when the flow carries it into a surface, otherwise its centre just rides the
+     surface (released foam drifts back in instead of respawning: 0 teleports); packing is a
+     pairwise relaxation after the wall/front clamps, swept front to back (3 sweeps), the rear one
+     stepping back when both are pinned, forward creep capped at the rise speed, and a free bubble
+     touching the foam joins it at the back (120 × 8 px bubbles, 3000 ticks: overlaps > 25 % in
+     17–100 ticks, mostly the initial mass catch, vs 2929 before; ~0.01 pairs/tick after warm-up).
+     Every bubble is drawn with its centre inside this frame's surfaces (at most half out, like
+     the foam); the per-pixel free-bubble clip is gone. A free bubble joins only foam parked on the
+     side it heads for (not the other edge's, nor foam still to be released that tick): reversing a
+     free slug caught 23 bubbles for the wrong surface before, 0 after (native, 40 runs).
+   Not done: foam left on the residue behind a receding edge, bubbles nucleating on the glass
+   (zero-speed state) — see KAIZEN.
 
 ## Play hold (2026-09-10)
 

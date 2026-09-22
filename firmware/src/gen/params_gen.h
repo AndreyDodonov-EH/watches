@@ -77,6 +77,8 @@ struct Params {
   float fizzAcrossGain;
   float fizzFlatRise;
   float fizzSquash;
+  float fizzEdgeRise;
+  float fizzFoamLife;
   bool ticksH;
   float tickStepH;
   float tickMajorEveryH;
@@ -169,8 +171,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 163
-#define PARAMS_SCHEMA_CRC 0xf22a45b2u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 165
+#define PARAMS_SCHEMA_CRC 0xff6fcefdu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -248,6 +250,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"fizzAcrossGain", 'f', (uint16_t)offsetof(Params, fizzAcrossGain)},
   {"fizzFlatRise", 'f', (uint16_t)offsetof(Params, fizzFlatRise)},
   {"fizzSquash", 'f', (uint16_t)offsetof(Params, fizzSquash)},
+  {"fizzEdgeRise", 'f', (uint16_t)offsetof(Params, fizzEdgeRise)},
+  {"fizzFoamLife", 'f', (uint16_t)offsetof(Params, fizzFoamLife)},
   {"ticksH", 'b', (uint16_t)offsetof(Params, ticksH)},
   {"tickStepH", 'f', (uint16_t)offsetof(Params, tickStepH)},
   {"tickMajorEveryH", 'f', (uint16_t)offsetof(Params, tickMajorEveryH)},
@@ -342,7 +346,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  19, // v
+  20, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -415,6 +419,8 @@ static const Params PRESET_1 = {
   1.0f, // fizzAcrossGain
   0.3f, // fizzFlatRise
   1.0f, // fizzSquash
+  0.3f, // fizzEdgeRise
+  6.0f, // fizzFoamLife
   true, // ticksH
   1.0f, // tickStepH
   3.0f, // tickMajorEveryH

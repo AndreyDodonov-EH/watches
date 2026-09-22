@@ -633,18 +633,44 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
   }
 }
 
-export interface Fizz { x: number; y: number; v: number; }   // px in the liquid frame; v = size/speed factor
+/** px in the liquid frame; v = size/speed factor; life ≠ 0 = parked under a surface, |life| s left before it
+ *  pops: > 0 under the time edge, < 0 under the home edge of a free slug. */
+export interface Fizz { x: number; y: number; v: number; life: number; }
 export const fizz: Fizz[][] = [[], []];
+// Bubbles per tube (firmware MAX_FIZZ): the sliders' worst case, fizzCount 120 doubled by full agitation.
+// A count pushed past the sliders is capped and reported, not silently dropped.
+const FIZZ_MAX = 240;
+let fizzOverflowPeak = 0;
+const foamOrder = new Int16Array(FIZZ_MAX);   // settleFoam's sweep order (parked, front first)
 const fizzLen = [0, 0];   // liquid length px per tube, set by drawTube
+/** Per tube, set by drawTube: the surface front per row in the liquid frame — the profile (edges − xs,
+ *  edgesL − xs), which is also the inner rim of a concave surface band: foam floats on the liquid there,
+ *  not out on the band that climbs the wall to the contact ring — for the time edge and the home edge,
+ *  and which of them is exposed (bit 1 = time edge short of the far end, bit 2 =
+ *  home edge of a free slug off the near end). Fizz parks only in an exposed surface. */
+const fizzSurf: Float32Array[] = [new Float32Array(0), new Float32Array(0)];
+const fizzSurfL: Float32Array[] = [new Float32Array(0), new Float32Array(0)];
+const fizzExposed = [0, 0];
+// Foam constants (mirrored in firmware/src/render.cpp): the pop's swell + fade time, slide speed along the
+// surface as a fraction of fizzSpeed per px/row of meniscus slope, lag rate behind an advancing surface
+// (also how a caught bubble glides onto the surface), how far short of the profile a free bubble's rim is
+// caught (or recycled, at a surface foam can't form on), and how much of a concave surface band veils the
+// foam behind it at the profile (the liquid wedge climbing the front glass, thinning to nothing at the ring).
+// FOAM_RELAX: packing sweeps per step.
+const FOAM_POP_T = 0.3, FOAM_SLIDE = 0.5, FOAM_FOLLOW = 6, FOAM_CATCH = 2, FOAM_VEIL = 0.7, FOAM_RELAX = 3;
 
 /** `fizzCount` is the count for a full tube; density stays constant as the column shortens.
  *  Shake nucleates bubbles: up to 2x with agitation, shrinking back as it decays. */
 function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
   const arr = fizz[i];
   fizzLen[i] = len;
-  const want = Math.min(64, Math.floor(p.fizzCount * (len / TUBE_LENGTH_PX) * (1 + (agitation < 0.05 ? 0 : agitation))));
+  let want = Math.floor(p.fizzCount * (len / TUBE_LENGTH_PX) * (1 + (agitation < 0.05 ? 0 : agitation)));
+  if (want > FIZZ_MAX) {
+    if (want > fizzOverflowPeak) { fizzOverflowPeak = want; console.warn(`fizz pool: ${want} bubbles requested, ${FIZZ_MAX} fit`); }
+    want = FIZZ_MAX;
+  }
   const H = tubeLayout(p).H;
-  while (arr.length < want) { const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v }); }
+  while (arr.length < want) { const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v, life: 0 }); }
   if (arr.length > want) arr.length = want;
 }
 /** Bubble radius px for size factor `v`. */
@@ -664,25 +690,146 @@ function fizzSpawnY(p: Params, H: number, v: number): number {
 }
 /** Fizz rises against the in-plane gravity (`along`, `across`) at `fizzSpeed` px/s on both axes:
  *  along-tilt drives it toward the high end (`fizzDriftGain`), across-tilt toward the high edge (`fizzAcrossGain`).
- *  Out-of-plane gravity (face up) reads as a slow screen-up rise (`fizzFlatRise`); shake speeds everything up.
- *  A bubble leaving the liquid on either axis respawns at the low side of that axis. */
+ *  Out-of-plane gravity (face up) reads as a slow screen-up rise (`fizzFlatRise`) plus a drift toward the
+ *  exposed surface (`fizzEdgeRise`: the time edge, or the home edge of a free slug whose time edge sits
+ *  against the far end); shake speeds everything up.
+ *  A bubble leaving the liquid on either axis respawns at the low side of that axis — except at an exposed
+ *  surface the rise points at: with `fizzFoamLife` > 0 it parks in it (see settleFoam) and pops later. */
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
   if (p.remaining) along = -along; // fizz lives in the mirrored liquid frame (see drawTube)
   const speed = p.fizzSpeed * (1 + 3 * agitation);
   const up = Math.sqrt(Math.max(0, 1 - along * along - across * across));
   const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain));
   const vy = -speed * ((1 - Math.abs(a)) * up * p.fizzFlatRise + a);   // screen up = -y
-  const vx = -speed * Math.max(-1, Math.min(1, along * p.fizzDriftGain));
+  const vxTilt = -speed * Math.max(-1, Math.min(1, along * p.fizzDriftGain));
   const H = tubeLayout(p).H;
   for (let i = 0; i < 2; i++) {
-    const len = fizzLen[i];
+    const len = fizzLen[i], surf = fizzSurf[i], surfL = fizzSurfL[i], exposed = fizzExposed[i];
+    if (surf.length !== H || len <= 0) continue;   // no surfaces for this height yet (drawTube publishes them)
+    const dir = exposed & 1 ? 1 : exposed & 2 ? -1 : 0;   // +x = the time edge
+    const vx = vxTilt + speed * up * p.fizzEdgeRise * dir;
+    // The surface the rise heads for, if exposed and foam is on: +1 time edge, -1 home edge, 0 none.
+    const side = p.fizzFoamLife <= 0 ? 0 : vx > 0 && exposed & 1 ? 1 : vx < 0 && exposed & 2 ? -1 : 0;
+    // Respawn at a random x in the liquid of the new row, or just inside the edge the flow comes from.
+    const respawn = (f: Fizz, at: number): void => {
+      const r = fizzR(p, f.v), lo = -discFit(surfL, H, f.y, r, -1) + FOAM_CATCH, hi = discFit(surf, H, f.y, r, 1) - FOAM_CATCH;
+      f.x = hi <= lo ? (lo + hi) / 2 : at < 0 ? lo + Math.random() * (hi - lo) : at > 0 ? lo : hi;
+    };
     for (const f of fizz[i]) {
+      if (f.life !== 0) {
+        const was = f.life > 0 ? 1 : -1;
+        if (was !== side) {   // the surface tilted away: the foam releases into the flow, from where it is drawn
+          f.x = was * Math.min(was * f.x, foamFront(was > 0 ? surf : surfL, H, f.y, was));
+          f.life = 0;
+        }
+        else {
+          const left = Math.abs(f.life) - dt * (1 + 3 * agitation);   // shaking pops the foam
+          if (left <= 0) { f.life = 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, -1); }
+          else f.life = side * left;
+          continue;
+        }
+      }
       f.y += vy * f.v * dt;
       f.x += vx * f.v * dt;
       // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
       const hide = fizzHideY(p, f.v);
-      if (f.y < hide || f.y >= H - hide) { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; f.x = Math.random() * len; }
-      else if (f.x < 0 || f.x > len) { f.x = vx < 0 ? len : 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); }
+      if (f.y < hide || f.y >= H - hide) { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; respawn(f, -1); continue; }
+      // The flow carrying its rim within FOAM_CATCH of a surface (the whole disc, so big bubbles never poke
+      // through), or into the foam already there (it joins at the back, not rising through it): at the
+      // surface the rise heads for it parks for a random life around fizzFoamLife and glides onto it
+      // (settleFoam); anywhere else it is recycled at the side the flow comes from. A bubble the flow does
+      // not carry into a surface only rides it, centre held inside — released foam, one moving along a
+      // curved meniscus — and floats half out like the foam until it drifts back in.
+      const r = fizzR(p, f.v);
+      const outR = vx > 0 && f.x > discFit(surf, H, f.y, r, 1) - FOAM_CATCH, outL = vx < 0 && -f.x > discFit(surfL, H, f.y, r, -1) - FOAM_CATCH;
+      if ((side > 0 && outR) || (side < 0 && outL) || (side !== 0 && touchesFoam(fizz[i], f, r, p, side))) f.life = side * p.fizzFoamLife * (0.5 + Math.random());
+      else if (outR || outL) { f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, vx < 0 ? 0 : 1); }
+      else f.x = Math.max(-foamFront(surfL, H, f.y, -1), Math.min(foamFront(surf, H, f.y, 1), f.x));
+    }
+    if (side !== 0) settleFoam(fizz[i], p, H, speed, side > 0 ? surf : surfL, side, dt);
+  }
+}
+/** Furthest centre (in u = side · x) a bubble of radius r at row y can take with its whole disc inside the
+ *  surface `surf` (liquid frame): the tightest row of the disc. */
+function discFit(surf: Float32Array, H: number, y: number, r: number, side: number): number {
+  const a = Math.max(0, Math.ceil(y - r)), b = Math.min(H - 1, Math.floor(y + r));
+  if (a > b) return foamFront(surf, H, y, side) - r;
+  let u = Infinity;
+  for (let iy = a; iy <= b; iy++) { const dy = iy - y; u = Math.min(u, side * surf[iy] - Math.sqrt(Math.max(0, r * r - dy * dy))); }
+  return u;
+}
+/** A free bubble f (radius r) touching foam parked on `side` — not foam on the other edge, nor foam this
+ *  tick is still to release (its life still carries the old side). */
+function touchesFoam(arr: Fizz[], f: Fizz, r: number, p: Params, side: number): boolean {
+  for (const g of arr) {
+    if (g.life * side <= 0) continue;
+    const m = r + fizzR(p, g.v) + 0.5, dx = g.x - f.x, dy = g.y - f.y;
+    if (Math.abs(dx) < m && Math.abs(dy) < m && dx * dx + dy * dy < m * m) return true;
+  }
+  return false;
+}
+/** Surface front `surf` (liquid frame) at float row y, in u = side · x: where a parked bubble's centre sits. */
+function foamFront(surf: Float32Array, H: number, y: number, side: number): number {
+  const yc = Math.max(0, Math.min(H - 1, y)), i = Math.floor(yc), j = Math.min(H - 1, i + 1);
+  return side * (surf[i] + (surf[j] - surf[i]) * (yc - i));
+}
+/** Parked bubbles: each sits centred on the surface front — foam floats half out of the liquid — lagging
+ *  behind an advance (and gliding on after being caught), pushed back by a recession; slides along the
+ *  meniscus toward the higher contact line — the corners, where the foam ring forms — and packs: late
+ *  arrivals fill the meniscus from its front backward. Pairs among the parked only.
+ *  Works in u = side · x, so the home edge (side -1) is the time edge mirrored. */
+function settleFoam(arr: Fizz[], p: Params, H: number, speed: number, surf: Float32Array, side: number, dt: number): void {
+  const wall = fizzWall(p), follow = Math.min(1, FOAM_FOLLOW * dt);
+  // In the bore and not past the front of its row.
+  const place = (f: Fizz, u: number, y: number): void => {
+    const lo = wall + fizzR(p, f.v), hi = H - lo;
+    f.y = hi <= lo ? H / 2 : Math.max(lo, Math.min(hi, y));
+    f.x = side * Math.min(u, foamFront(surf, H, f.y, side));
+  };
+  for (const f of arr) {
+    if (f.life === 0) continue;
+    const r = fizzR(p, f.v), fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
+    const tu = foamFront(surf, H, f.y, side);
+    let u = side * f.x;
+    u = u < tu ? u + Math.min((tu - u) * follow, speed * dt) : tu;   // buoyancy: no faster than the rise
+    const slope = side * (surf[Math.min(H - 1, fy + 1)] - surf[Math.max(0, fy - 1)]) / 2;   // px per row, + = surface leads toward +y
+    let slide = FOAM_SLIDE * speed * Math.max(-1, Math.min(1, 2 * slope)) * dt;
+    for (const g of arr) {   // touching a neighbour on the slide side: line up along the surface
+      if (g === f || g.life === 0 || slide * (g.y - f.y) <= 0) continue;
+      const m = r + fizzR(p, g.v) + 0.5, du = side * g.x - u, dy = g.y - f.y;
+      if (du * du + dy * dy < m * m) { slide = 0; break; }
+    }
+    place(f, u, f.y + slide);
+  }
+  // Pack: pairwise relaxation, positions carried over between ticks, swept front to back (parked sorted
+  // by u, the front-most first). An overlapping pair is pushed apart along the line between them, then
+  // clamped to the bore and the front; whatever overlap the clamps leave (both pinned: at the front, at a
+  // wall) the rear one takes by stepping back, where nothing stops it — into bubbles the sweep has yet to
+  // visit, so one sweep settles most of the layers and they grow backward.
+  let n = 0;
+  for (let i = 0; i < arr.length; i++) if (arr[i].life !== 0) foamOrder[n++] = i;
+  for (let it = 0; it < FOAM_RELAX; it++) {
+    for (let a = 1; a < n; a++) {   // insertion sort: nearly sorted from the last step
+      const k = foamOrder[a], uk = side * arr[k].x; let b = a - 1;
+      while (b >= 0 && side * arr[foamOrder[b]].x < uk) { foamOrder[b + 1] = foamOrder[b]; b--; }
+      foamOrder[b + 1] = k;
+    }
+    for (let a = 0; a < n; a++) {
+      const f = arr[foamOrder[a]], rf = fizzR(p, f.v);
+      for (let b = a + 1; b < n; b++) {
+        const g = arr[foamOrder[b]];
+        const m = rf + fizzR(p, g.v) + 0.5;
+        let du = side * (g.x - f.x), dy = g.y - f.y;
+        if (Math.abs(du) >= m || Math.abs(dy) >= m || du * du + dy * dy >= m * m) continue;
+        const d = Math.sqrt(du * du + dy * dy), k = (m - d) / 2;
+        const nu = d > 1e-4 ? du / d : -1, ny = d > 1e-4 ? dy / d : 0;   // coincident: g (later in the sweep) steps back
+        place(f, side * f.x - k * nu, f.y - k * ny);
+        place(g, side * g.x + k * nu, g.y + k * ny);
+        du = side * (g.x - f.x); dy = g.y - f.y;
+        if (du * du + dy * dy >= m * m) continue;
+        const [front, rear] = du > 0 ? [g, f] : [f, g];
+        place(rear, side * front.x - Math.sqrt(Math.max(0, m * m - dy * dy)), rear.y);
+      }
     }
   }
 }
@@ -810,10 +957,15 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Cache the two curved edges before composing the backing and liquid. The
   // home edge `edgesL` sits on the end cap (x <= 0) unless the liquid is free.
   const edges = new Float32Array(H), edgesL = new Float32Array(H), capX0 = new Int16Array(H);
+  // Surface fronts for stepFizz: per-row profiles in the liquid frame, and which of them is exposed.
+  const surf = fizzSurf[idx].length === H ? fizzSurf[idx] : (fizzSurf[idx] = new Float32Array(H));
+  const surfL = fizzSurfL[idx].length === H ? fizzSurfL[idx] : (fizzSurfL[idx] = new Float32Array(H));
+  fizzExposed[idx] = (xe < L - 0.5 ? 1 : 0) | (p.freeLiquid && xs > 0.5 ? 2 : 0);
   for (let ry = 0; ry < H; ry++) {
     const ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK);
     const exL = p.freeLiquid ? edgeXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK) : 0;
     edges[ry] = ex; edgesL[ry] = exL;
+    surf[ry] = ex - xs; surfL[ry] = exL - xs;
     let x0 = 0;
     if (p.cornerR > 0) { // rounded left end cap
       const r = Math.min(p.cornerR, H / 2), yc = (H - 1) / 2, dy = Math.abs(ry - yc);
@@ -1179,17 +1331,30 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     const mag = lensMagRows(H, p);
     for (const f of fizz[idx]) {
       const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
-      if (f.x + xs < edgesL[fy] + 2 || f.x + xs >= edges[fy] - 2) continue;   // render-frame edges
-      const r = fizzR(p, f.v);
+      // Centres stay inside this frame's surfaces (the stepper ran on an older one, so a receding surface
+      // pushes them back here): whatever touches a surface floats at most half out of it, like the foam.
+      const fx = Math.max(-foamFront(surfL, H, f.y, -1), Math.min(foamFront(surf, H, f.y, 1), f.x));
+      // A parked bubble in its last FOAM_POP_T s pops: swells and fades out, breaking the surface.
+      const pop = f.life !== 0 && Math.abs(f.life) < FOAM_POP_T ? Math.abs(f.life) / FOAM_POP_T : 1;
+      const r = fizzR(p, f.v) * (1 + 0.6 * (1 - pop));
       const m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
       for (let iy = Math.floor(f.y - ry - 1); iy <= Math.ceil(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
-        const wallT = pal.dryT[iy];   // bubbles live in the bore: invisible where the ray only sees the wall band
+        const wallT = pal.dryT[iy] * pop;   // bubbles live in the bore: invisible where the ray only sees the wall band
         if (wallT <= 0) continue;
-        for (let ix = Math.floor(f.x - r - 1); ix <= Math.ceil(f.x + r); ix++) {
-          const dx = ix + 0.5 - f.x, dy = (iy + 0.5 - f.y) * m;
-          const d = Math.sqrt(dx * dx + dy * dy), cov = Math.min(1, r + 0.5 - d) * wallT;
+        // Past the profile a bubble is seen through the concave band's front-glass wedge, thickest at the
+        // profile and gone at the band's outer rim.
+        const sR = surf[iy], sL = surfL[iy], bR = strokeR[iy], bL = strokeL[iy];   // stroke widths: 0 where no band is drawn
+        for (let ix = Math.floor(fx - r - 1); ix <= Math.ceil(fx + r); ix++) {
+          const dx = ix + 0.5 - fx, dy = (iy + 0.5 - f.y) * m;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          let cov = Math.min(1, r + 0.5 - d) * wallT;
           if (cov <= 0) continue;
+          // Veil by the pixel's footprint over each band [profile, profile ± width]: continuous as the edge moves.
+          if (ix + 1 > sR && bR > 0) { const a1 = Math.min(ix + 1, sR + bR), a0 = Math.max(ix, sR);
+            if (a1 > a0) cov *= 1 - FOAM_VEIL * strokeAR * (a1 - a0) * (1 - ((a0 + a1) / 2 - sR) / bR); }
+          if (ix < sL && bL > 0) { const a1 = Math.min(ix + 1, sL), a0 = Math.max(ix, sL - bL);
+            if (a1 > a0) cov *= 1 - FOAM_VEIL * strokeAL * (a1 - a0) * (1 - (sL - (a0 + a1) / 2) / bL); }
           const cx = dx - off, cy = dy - off, dc = Math.sqrt(cx * cx + cy * cy);
           pxa(mapX(ix + xsI), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }
