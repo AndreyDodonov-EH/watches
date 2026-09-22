@@ -25,7 +25,7 @@ FIELDS = [
   ('meniscusK','float'),('meniscusDamp','float'),('meniscusInertia','float'),('contactLag','float'),('wetFilm','float'),('traces','bool'),('traceAmount','float'),('traceDry','float'),('traceFollow','float'),('traceStain','float'),('traceThin','float'),('traceFilm','float'),('edgeSoft','float'),
  ('frontBright','float'),('surfaceBand','float'),('surfaceRim','float'),('surfaceWidth','float'),('surfaceTone','float'),('edgeGlow','float'),('glowStrength','float'),('cornerR','float'),('edgeLightGain','float'),
  ('bubble','bool'),('bubbleW','float'),('bubbleH','float'),('bubbleGap','float'),('bubbleY','float'),('bubbleDark','float'),('bubbleRollGain','float'),('bubbleTiltGain','float'),
- ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSizeVar','float'),('fizzShadeOff','float'),('fizzSpeed','float'),('fizzDriftGain','float'),('fizzAcrossGain','float'),('fizzFlatRise','float'),('fizzSquash','float'),
+ ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSizeVar','float'),('fizzShadeOff','float'),('fizzSpeed','float'),('fizzDriftGain','float'),('fizzAcrossGain','float'),('fizzFlatRise','float'),('fizzSquash','float'),('fizzEdgeRise','float'),('fizzFoamLife','float'),
  ('ticksH','bool'),('tickStepH','float'),('tickMajorEveryH','float'),('tickMinorHeightH','float'),('tickMajorHeightH','float'),
  ('tickMinorWidthH','float'),('tickMajorWidthH','float'),('tickColorH','rgb'),('tickMajorColorH','rgb'),('tickPosH','float'),
  ('ticksM','bool'),('tickStepM','float'),('tickMajorEveryM','float'),('tickMinorHeightM','float'),('tickMajorHeightM','float'),

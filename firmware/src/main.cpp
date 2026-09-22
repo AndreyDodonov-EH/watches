@@ -271,6 +271,10 @@ static void liquid_tick() {
   }
   renderBoth();
   frames++;
+  {   // fizz asked past its fixed pool (params pushed past the sliders): say so once per new peak
+    static int reported = 0; const int over = fizzOverflow();
+    if (over > reported) { reported = over; out.printf("error fizz pool: %d bubbles requested, fixed pool holds fewer (capped)\n", over); }
+  }
   if (millis() - fpsT0 >= 2000) {
     fps = frames * 1000.0f / (millis() - fpsT0);
     renderMs = renderUs / 1000.0f / frames; waitMs = waitUs / 1000.0f / frames;

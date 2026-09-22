@@ -7,6 +7,8 @@
 
 // Fizz animation state (sim: stepFizz), call at PHYS_HZ.
 void stepFizz(const Params &p, float dt, float along = 0, float across = 0, float agitation = 0);
+// Largest fizz count requested past the fixed pool since boot (0 = everything fitted); main reports it.
+int fizzOverflow();
 // Tube geometry from params, clamped to the panel and the strip buffer (sim: tubeLayout).
 struct TubeLayout { int H, yH, yM; bool operator!=(const TubeLayout &o) const { return H != o.H || yH != o.yH || yM != o.yM; } };
 TubeLayout tubeLayout(const Params &p);

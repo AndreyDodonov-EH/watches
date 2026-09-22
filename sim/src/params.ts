@@ -73,7 +73,7 @@ export interface Params {
   // --- fizz (small drifting bubbles, like the reference photo) ---
   fizz: boolean;
   fizzCount: number;
-  fizzSize: number;      // px (1..8)
+  fizzSize: number;      // px (1..16)
   fizzSizeVar: number;   // 0..1, per-bubble size spread (bigger ones rise faster)
   fizzShadeOff: number;  // 0..1, dark core offset toward lower-right, fraction of radius
   fizzSpeed: number;
@@ -81,6 +81,8 @@ export interface Params {
   fizzAcrossGain: number; // 0..2, across-tilt → on-screen rise direction (1 = rises toward the physically high edge)
   fizzFlatRise: number;   // 0..1, on-screen rise speed when the face points up (bubbles rise toward the viewer)
   fizzSquash: number;     // 0.5..2, extra vertical pre-squash on fizz discs at mid-height, fading to 1 at the edges
+  fizzEdgeRise: number;   // 0..1, face-up rise toward the fill edge (the surface) as a fraction of fizzSpeed, so bubbles reach it at rest
+  fizzFoamLife: number;   // s, mean time a bubble sits parked under the surface before it pops (0 = never parks, the old respawn)
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
@@ -182,7 +184,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 19;
+export const PARAMS_VERSION = 20;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -257,6 +259,8 @@ export const DEFAULT_PARAMS: Params = {
   fizzAcrossGain: 1,
   fizzFlatRise: 0.3,
   fizzSquash: 1,
+  fizzEdgeRise: 0.3,
+  fizzFoamLife: 6,
   fizzSpeed: 14,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 16, tickMinorWidthH: 1, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMinorWidthM: 1, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
@@ -417,7 +421,7 @@ export const PRESET_FRIZZANTE: Partial<Params> = {
   glassHi: '#dfeef4', glassBody: 0.12, glassHiBright: 0.55, glassReflect: 0.28, glassRim: 0.75, glassOverLiquid: 0.7,
   highlightH: 8, highlightBright: 0.9, highlightSharp: 3, shadeDepth: 0.45,
   meniscusDepth: 6, meniscusPow: 2.4,
-  fizz: true, fizzCount: 50, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 42, fizzFlatRise: 0.5, fizzSquash: 1.3,
+  fizz: true, fizzCount: 50, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 42, fizzFlatRise: 0.5, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 4,
   liquidTransparency: 0.85, markContrast: 20,
   tickStepM: 1, tickMajorEveryM: 5, tickColorH: '#9fb8c2', tickMajorColorH: '#ffffff', tickColorM: '#8fa9b4', tickMajorColorM: '#ffffff',
   digitFont: 9, digitTintAmount: 0, digitTone: 0,
@@ -493,7 +497,7 @@ export const PRESET_HONEY: Partial<Params> = {
   highlightH: 14, highlightBright: 0.4, highlightSharp: 1.8, shadeDepth: 0.78,
   meniscusDepth: 9, meniscusPow: 2.2,
   traces: true, traceAmount: 0.7, traceDry: 2, traceFollow: 0.08, traceStain: 0.45, traceThin: 0.3,   // syrup coats thickly whatever the speed, crawls back slowly
-  fizz: true, fizzCount: 5, fizzSize: 3, fizzSizeVar: 0.6, fizzShadeOff: 0.5, fizzSpeed: 3, fizzFlatRise: 0.15, fizzDriftGain: 0.4, fizzAcrossGain: 0.8, fizzSquash: 1.4,
+  fizz: true, fizzCount: 5, fizzSize: 3, fizzSizeVar: 0.6, fizzShadeOff: 0.5, fizzSpeed: 3, fizzFlatRise: 0.15, fizzDriftGain: 0.4, fizzAcrossGain: 0.8, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 20,
   liquidTransparency: 0.32,
   tickColorH: '#4a3210', tickMajorColorH: '#5a3e14', tickColorM: '#4a3210', tickMajorColorM: '#5a3e14',
   digitFont: 6, digitTint: '#d4923a', digitTintAmount: 0.5, digitTone: 0,
@@ -507,7 +511,7 @@ export const PRESET_COLA: Partial<Params> = {
   glassHi: '#e8dcd2', glassBody: 0.08, glassHiBright: 0.5, glassReflect: 0.25, glassRim: 0.6, glassOverLiquid: 0.5,
   highlightH: 9, highlightBright: 0.5, highlightSharp: 3, shadeDepth: 0.7,
   meniscusDepth: 5, meniscusPow: 2.6,
-  fizz: true, fizzCount: 40, fizzSize: 1.5, fizzSizeVar: 0.6, fizzSpeed: 36, fizzFlatRise: 0.45, fizzSquash: 1.3,
+  fizz: true, fizzCount: 40, fizzSize: 1.5, fizzSizeVar: 0.6, fizzSpeed: 36, fizzFlatRise: 0.45, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 5,
   liquidTransparency: 0.38, markContrast: 24,
   tickColorH: '#4a3e32', tickMajorColorH: '#5a4a3c', tickColorM: '#4a3e32', tickMajorColorM: '#5a4a3c',
   digitFont: 9, digitTint: '#f3e6c8', digitTintAmount: 0.4, digitTone: 0,
@@ -538,7 +542,7 @@ export const PRESET_CHAMPAGNE: Partial<Params> = {
   glassHi: '#f6ecd0', glassBody: 0.1, glassHiBright: 0.55, glassReflect: 0.3, glassRim: 0.7, glassOverLiquid: 0.55,
   highlightH: 9, highlightBright: 0.55, highlightSharp: 2.6, shadeDepth: 0.55,
   meniscusDepth: 5, meniscusPow: 2.6,
-  fizz: true, fizzCount: 60, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 46, fizzFlatRise: 0.45, fizzSquash: 1.3,
+  fizz: true, fizzCount: 60, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 46, fizzFlatRise: 0.45, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 4,
   liquidTransparency: 0.5, markContrast: 24,
   tickColorH: '#4a3e18', tickMajorColorH: '#5a4c20', tickColorM: '#4a3e18', tickMajorColorM: '#5a4c20',
   digitFont: 11, digitTint: '#e0b45a', digitTintAmount: 0.2, digitTone: 0,
@@ -553,7 +557,7 @@ export const PRESET_CRYO: Partial<Params> = {
   highlightH: 10, highlightBright: 0.45, highlightSharp: 1.8, shadeDepth: 0.45,
   meniscusDepth: 6, meniscusPow: 2.2, meniscusK: 520, meniscusDamp: 4, meniscusInertia: 4, contactLag: 1.5, wetFilm: 8,
   freeDamp: 0.5, freeBounce: 0.3, angleTiltGain: 8, angleGyroGain: 0.5,
-  fizz: true, fizzCount: 55, fizzSize: 1, fizzSizeVar: 0.5, fizzSpeed: 52, fizzFlatRise: 0.6, fizzDriftGain: 1.2, fizzSquash: 1.3,
+  fizz: true, fizzCount: 55, fizzSize: 1, fizzSizeVar: 0.5, fizzSpeed: 52, fizzFlatRise: 0.6, fizzDriftGain: 1.2, fizzSquash: 1.3, fizzEdgeRise: 0.6, fizzFoamLife: 2,
   liquidTransparency: 0.72, markContrast: 20,
   tickColorH: '#3a5060', tickMajorColorH: '#465e70', tickColorM: '#3a5060', tickMajorColorM: '#465e70',
   digitFont: 5, digitTint: '#a6d8ff', digitTintAmount: 0.6, digitTone: 0.15,
@@ -625,7 +629,7 @@ export const PRESET_MOLTEN: Partial<Params> = {
   meniscusDepth: -4, meniscusPow: 2, meniscusK: 400, meniscusDamp: 14, meniscusInertia: 4, contactLag: 0.2, wetFilm: 0,
   freeDamp: 2.5, freeBounce: 0.05,
   edgeSoft: 0, frontBright: 16, edgeGlow: 26, glowStrength: 0.6, edgeLightGain: 1,
-  fizz: true, fizzCount: 10, fizzSize: 2.5, fizzSizeVar: 0.5, fizzShadeOff: 0.4, fizzSpeed: 7, fizzFlatRise: 0.25, fizzDriftGain: 0.6, fizzAcrossGain: 0.8, fizzSquash: 1.4,
+  fizz: true, fizzCount: 10, fizzSize: 2.5, fizzSizeVar: 0.5, fizzShadeOff: 0.4, fizzSpeed: 7, fizzFlatRise: 0.25, fizzDriftGain: 0.6, fizzAcrossGain: 0.8, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 15,
   liquidTransparency: 0.06,
   tickEmboss: 0.35, tickPosH: 2, tickPosM: 2, tickColorH: '#6a5248', tickMajorColorH: '#b39a8c', tickColorM: '#6a5248', tickMajorColorM: '#b39a8c',
   digitFont: 8, digitTint: '#b06a34', digitTintAmount: 0.45, digitTone: 0.3,
@@ -792,6 +796,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   }
   if (from < 17) r.playHold = DEFAULT_PARAMS.playHold;
   if (from < 19) { r.surfaceBand = DEFAULT_PARAMS.surfaceBand; r.surfaceRim = DEFAULT_PARAMS.surfaceRim; r.surfaceWidth = DEFAULT_PARAMS.surfaceWidth; r.surfaceTone = DEFAULT_PARAMS.surfaceTone; }
+  if (from < 20) { r.fizzEdgeRise = DEFAULT_PARAMS.fizzEdgeRise; r.fizzFoamLife = DEFAULT_PARAMS.fizzFoamLife; }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -867,8 +872,8 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   bubbleRollGain: { help: 'Bubble rise toward the high wall per g of across-tilt. 1 = follows the wall.', group: 'Bubble', label: 'bubble rise vs across tilt', min: 0, max: 2, step: 0.05 },
   bubbleTiltGain: { help: 'Bubble slides toward the high end per g of along-tilt, px.', group: 'Bubble', label: 'bubble slides to high end px/g', min: 0, max: 80, step: 1 },
   fizz: { help: 'Small drifting bubbles.', group: 'Bubble' },
-  fizzCount: { help: 'Number of fizz bubbles in a full tube.', group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 60, step: 1 },
-  fizzSize: { help: 'Fizz bubble size, px.', group: 'Bubble', min: 1, max: 8, step: 0.5 },
+  fizzCount: { help: 'Number of fizz bubbles in a full tube.', group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 120, step: 1 },
+  fizzSize: { help: 'Fizz bubble size, px.', group: 'Bubble', min: 1, max: 16, step: 0.5 },
   fizzSizeVar: { help: 'Per-bubble size spread. 0 = all equal; 1 = 0.5x..1.5x. Bigger bubbles rise faster.', group: 'Bubble', label: 'fizz size spread', min: 0, max: 1, step: 0.05 },
   fizzShadeOff: { help: 'Offset of the dark core toward lower-right, as a fraction of radius. Thickens the rim on the lit side.', group: 'Bubble', label: 'fizz shade offset', min: 0, max: 1, step: 0.05 },
   fizzSpeed: { help: 'Fizz rise speed, px/s.', group: 'Bubble', min: 0, max: 60, step: 1 },
@@ -876,6 +881,8 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzAcrossGain: { help: 'Across-tilt → on-screen rise direction. 1 = rises toward the physically high edge.', group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },
   fizzFlatRise: { help: 'On-screen rise speed when the face points up (bubbles rise toward the viewer).', group: 'Bubble', label: 'fizz rise when face up', min: 0, max: 1, step: 0.05 },
   fizzSquash: { help: 'Extra vertical pre-squash on fizz discs at mid-height (fades to none at top/bottom), on top of lens + topLens compensation. >1 flattens the center on screen so the stronger glass magnification there rounds them.', group: 'Bubble', label: 'fizz squash', min: 0.5, max: 2, step: 0.05 },
+  fizzEdgeRise: { help: 'Face-up rise toward the fill edge (the liquid surface) as a fraction of fizz speed, so bubbles reach the surface at rest. 0 = they only rise toward the viewer.', group: 'Bubble', label: 'fizz rise to surface', min: 0, max: 1, step: 0.05 },
+  fizzFoamLife: { help: 'Bubbles reaching the surface park under it (following the meniscus, sliding to its corners and packing into a foam ring) and pop after this many seconds on average (each ±50 %). Shaking pops them faster; tilting the surface down releases them. 0 = respawn at the far end as before.', group: 'Bubble', label: 'foam life s', min: 0, max: 30, step: 0.5 },
   ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
   tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
   tickDryLens: { help: 'Cylinder warp for rear ticks where the tube is empty. Liquid magnifies the middle; air barely lenses, and negative stretches the edges instead, so the scale visibly jumps at the fill edge. Rear parallax is liquid-only.', group: 'Ticks', label: 'dry-side lens', min: -1, max: 1, step: 0.05 },

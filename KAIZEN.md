@@ -287,3 +287,19 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Rear ticks/digits behind air are composited opaque over the film, so the film reads as sitting
   behind the rear-wall marks; physically the inner-wall film is in front of them (should tint them
   like it tints the tube back). Only visible with `traceFilm` and a black back. Not pursued.
+- Foam (parked fizz) is pushed back by a receding surface; the reference photo also shows foam left
+  stuck to the wet glass behind it. Would need parked bubbles drawn outside the liquid over the residue
+  and a short strand life. Not pursued.
+- Fizz nucleating on the glass (bubbles that sit still until a random detach time) is the other cheap
+  touch from the photo; a zero-speed state in the stepper. Not pursued.
+- In `remaining` + `freeLiquid` with `freeHomeK` 0 the slug rests against the near end, so the visible
+  meniscus is the *home* edge (`edgeXL`) and the time edge sits at the panel border; edge-specific
+  effects (edge glow, frontBright, surface band) are tuned per edge and may look mismatched there.
+- `fizzEdgeRise` default 0.3 with the default 8 bubbles at 14 px/s parks a bubble only every minute
+  or so (the vertical wrap re-randomises x); a full ring needs fizzy-preset counts/speeds.
+
+- `render-ref.ts` can't show fizz/foam (one frame, fizz off); a headless "step fizz N s then dump" mode
+  would make foam checks reproducible (used a throwaway copy for the meniscus-foam fix). The run-sim
+  shot (300 ms) is too short for foam to gather.
+- `ensureFizz` column length is `xe − xs − 6`: the 6 px cut predates the meniscus and no longer matches
+  the surface profile (spawn range / home-side respawn). Not pursued.

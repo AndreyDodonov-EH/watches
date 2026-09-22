@@ -1,5 +1,5 @@
 {
-  "v": 19,
+  "v": 20,
   "tubeHeight": 46,
   "hoursY": 12,
   "minutesY": 185,
@@ -71,6 +71,8 @@
   "fizzAcrossGain": 1.05,
   "fizzFlatRise": 0.45,
   "fizzSquash": 1.3,
+  "fizzEdgeRise": 0.5,
+  "fizzFoamLife": 4,
   "fizzSpeed": 46,
   "ticksH": true,
   "tickStepH": 1,
