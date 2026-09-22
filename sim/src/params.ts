@@ -50,6 +50,7 @@ export interface Params {
   traceFollow: number;   // 1/s, drain-back rate of the wet smear toward the liquid at 25 px away (0 = residue stays put)
   traceStain: number;    // 0..1 fraction of a fresh deposit the drain-back leaves behind as stain (0 = drains away completely)
   traceThin: number;     // 0..3 how much edge speed thins the deposit (at 1, 100 px/s halves it): fast smears come out faint, dense near the liquid
+  traceFilm: number;     // 0..1 permanent thin film over the whole glass, as a residue level (0 = bare glass between smears)
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
   frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
   edgeGlow: number;      // px, dim glow fading out past the fill edge (0 = off)
@@ -224,6 +225,7 @@ export const DEFAULT_PARAMS: Params = {
   traceFollow: 0.25,
   traceStain: 0.3,
   traceThin: 1,
+  traceFilm: 0,
   edgeSoft: 2.6,
   frontBright: 21,
   edgeGlow: 15,
@@ -829,13 +831,14 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   meniscusDamp: { help: 'Damping of the surface wobble, 1/s. Below ~2·√K it rings after a flick.', group: 'Meniscus dynamics', label: 'surface damping', min: 0, max: 60, step: 0.5 },
   meniscusInertia: { help: 'How much the forcing on the edge (flick kick, free-slug acceleration) bulges the surface centre ahead of the contact lines: a flick makes the cap bulge, then ring at the surface spring. Hard-capped at 12 px.', group: 'Meniscus dynamics', label: 'bulge per edge forcing', min: 0, max: 10, step: 0.1 },
   contactLag: { help: 'Contact-angle hysteresis: an advancing edge drags its contact lines behind the centre, a receding one leaves them clinging. px per 10 px/s of edge speed.', group: 'Meniscus dynamics', label: 'contact-line lag', min: 0, max: 3, step: 0.05 },
-  wetFilm: { help: 'Trailing wet film a receding edge leaves on the glass, px at full speed (25 px/s); brightest at the walls, drains in ~0.5 s.', group: 'Meniscus dynamics', label: 'wet film px', min: 0, max: 30, step: 1 },
+  wetFilm: { help: 'Trailing wet film a receding edge leaves on the glass, px at full speed (25 px/s); brightest at the walls, drains in ~0.5 s. With traces on it is the band over which the liquid thins out into its residue (full liquid at the edge, residue this many px out).', group: 'Meniscus dynamics', label: 'wet film px', min: 0, max: 30, step: 1 },
   traces: { help: 'A receding edge leaves a residue on the glass where the liquid has been (blood smear, syrup coating, legs); the wet part drains back after the liquid, the stain dries out slowly.', group: 'Meniscus dynamics' },
   traceAmount: { help: 'Opacity of the dried residue at the wall rows (weaker at mid-height), independent of liquid transparency. Values over 1 boost through the streak/height attenuation toward fully opaque (clamped per pixel).', group: 'Meniscus dynamics', label: 'residue amount', min: 0, max: 2, step: 0.05 },
   traceDry: { help: 'Drying time constant of the residue\'s stain, s: it fades to 37% in this many seconds when the watch is flat; tilting the tube along its axis drains the film up to 5× faster.', group: 'Meniscus dynamics', label: 'drying time s', min: 0.1, max: 2, step: 0.05 },
   traceFollow: { help: 'Drain-back: the wet part of the smear is pulled back toward the liquid at this rate (1/s at 25 px away, faster further out), so the residue follows a receded edge before its stain dries in place. 0 = residue stays where deposited. Thin liquids drain fast, syrup barely.', group: 'Meniscus dynamics', label: 'drain-back rate', min: 0, max: 1, step: 0.02 },
   traceStain: { help: 'How intense the leftover stain is: the fraction of a fresh deposit the drain-back leaves behind (scattered 0.7–1 per column), which then dries over traceDry. 0 = the smear drains away completely, 1 = it never thins. On-screen stain opacity ≈ traceStain × traceAmount.', group: 'Meniscus dynamics', label: 'stain intensity', min: 0, max: 1, step: 0.05 },
   traceThin: { help: 'How much the edge\'s speed thins the deposit (at 1, an edge receding at 100 px/s leaves half density). A fast slosh smears a faint film at its far end and the residue densifies toward where the edge slowed — toward the liquid. 0 = every deposit is full density.', group: 'Meniscus dynamics', label: 'speed thinning', min: 0, max: 3, step: 0.05 },
+  traceFilm: { help: 'Permanent thin film over the whole glass, as a residue level: the tube never looks perfectly clean between smears. Rendered exactly like residue that has dried to this level — streaked, strongest at the wall rows, under the liquid, wet band at the edge — so fresh smears stand out above it and its opacity at the walls ≈ traceFilm^0.65 × residue amount (0.05 → ~14% of the residue amount). 0 = bare glass. Needs traces on.', group: 'Meniscus dynamics', label: 'film everywhere', min: 0, max: 1, step: 0.01 },
   edgeSoft: { help: 'Soft edge: anti-aliased ramp width in px, centred on the edge (0 = hard pixel edge, 1 = classic 1-px AA).', group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { help: 'Band just behind the fill edge blended toward liquidHi (bright convex cap), px.', group: 'Shape', min: 0, max: 40, step: 1 },
   edgeGlow: { help: 'Dim glow fading out past the fill edge, px. 0 = off.', group: 'Shape', min: 0, max: 40, step: 1 },

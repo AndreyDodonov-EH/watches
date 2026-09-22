@@ -804,7 +804,10 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
 
   // Step 3c: wet film — a receding edge leaves liquid on the glass past its contact lines: a faint
   // liquid-coloured trail over the glow, strongest at the wall rows, fading with TubeState.film*.
-  if (hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02 || (p.freeLiquid && s.filmHome > 0.02))) {
+  // In trace mode the film is the wet band of step 3d instead (full liquid at the edge, thinning
+  // into the residue), so this faint version is skipped there.
+  const traceMode = p.traces && p.traceAmount > 0 && !!state.trace;
+  if (!traceMode && hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02 || (p.freeLiquid && s.filmHome > 0.02))) {
     const yc = (H - 1) / 2;
     for (let ry = 0; ry < H; ry++) {
       const d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d;
@@ -818,35 +821,91 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
 
   // Step 3d: dried traces — the residue the physics left on the glass where an edge receded
   // (blood smear, syrup coating, legs): per-column residue × streak hash × wall weight, drawn a
-  // touch darker than the live liquid. Drawn AFTER the glow / wet film — they paint the dry side
-  // with plain overwrite and would wipe the smear off the band next to the edge — and only on the
-  // dry side: an edge that advanced back over residue covers it again. The residue buffer is
-  // panel-frame; this render runs mirrored for `remaining`, so the column index flips with it.
-  if (p.traces && p.traceAmount > 0 && state.trace && state.traceHi > state.traceLo) {
-    const yc = (H - 1) / 2;
-    // All loops run only over the occupied residue range (physics keeps [traceLo, traceHi) tight):
-    // panel range mirrored into the render frame, widened ±4 for the blur reach (and 4 more for the
-    // columns the blur reads); columns outside the range are guaranteed zero and never touched.
-    const r0 = p.remaining ? L - state.traceHi : state.traceLo, r1 = p.remaining ? L - state.traceLo : state.traceHi;
-    const a0 = Math.max(0, r0 - 4), a1 = Math.min(L, r1 + 4);
-    const c0 = Math.max(0, a0 - 4), c1 = Math.min(L, a1 + 4);
-    for (let x = c0; x < c1; x++) traceRaw[x] = state.trace[p.remaining ? L - 1 - x : x];
-    // ±4 px triangular blur before the streak texture: the smear's outer end starts where the edge
-    // turned around at ~zero speed (dense deposit next to bare glass) — blurred it tapers like a
-    // tide mark instead of a 1-px cliff. Liquid-covered columns are skipped at draw time anyway.
-    for (let x = a0; x < a1; x++) {
-      let v = 5 * traceRaw[x];
-      for (let d = 1; d <= 4; d++) v += (5 - d) * (traceRaw[Math.max(0, x - d)] + traceRaw[Math.min(L - 1, x + d)]);
-      v *= 1 / 25;
-      traceA[x] = v ? traceGamma(v / TRACE_FULL) * p.traceAmount * traceStreak(x + idx * 6151) : 0;
+  // touch darker than the live liquid. Drawn AFTER the glow — it paints the dry side with plain
+  // overwrite and would wipe the smear off the band next to the edge. The residue sits UNDER the
+  // liquid: each pixel gets it at (1 - liquid coverage), so the anti-aliased meniscus ramps from
+  // liquid to residue, not to the bare tube back (no dark seam along the edge), and columns the
+  // liquid fully covers get none (an edge that advanced back over residue covers it again).
+  // Wet band: over the first `wetFilm` px behind a receding edge the residue's alpha and colour
+  // ramp up to the liquid's own — gated by TubeState.film* (~1 while the edge recedes, draining
+  // once it stops) — so the liquid thins out into its trail instead of ending at a line. The
+  // residue buffer is panel-frame; this render runs mirrored for `remaining`, so the column index
+  // flips with it.
+  if (traceMode) {
+    const yc = (H - 1) / 2, hw = softW / 2;
+    const N = p.wetFilm > 0 ? Math.max(1, Math.round(p.wetFilm)) : 0;
+    const bandR = hasLiquid && N > 0 && s.filmFree > 0.02, bandL = hasLiquid && N > 0 && p.freeLiquid && s.filmHome > 0.02;
+    // Columns that may receive residue or band: the occupied residue range (physics keeps
+    // [traceLo, traceHi) tight) mirrored into the render frame, plus each band's reach over all rows.
+    // Permanent film (traceFilm): every column carries residue of at least that level, so the range
+    // is the whole tube and the per-column value floors at the film's gamma-lifted alpha.
+    const filmG = p.traceFilm > 0 ? traceGamma(Math.min(1, p.traceFilm)) : 0;
+    let lo = L, hi = 0;
+    if (filmG > 0) { lo = 0; hi = L; }
+    else if (state.traceHi > state.traceLo) { lo = p.remaining ? L - state.traceHi : state.traceLo; hi = p.remaining ? L - state.traceLo : state.traceHi; }
+    if (bandL || bandR) for (let ry = 0; ry < H; ry++) {
+      if (bandL) { lo = Math.min(lo, Math.floor(edgesL[ry] - N)); hi = Math.max(hi, Math.ceil(edgesL[ry] + hw) + 1); }
+      if (bandR) { lo = Math.min(lo, Math.floor(edges[ry] - hw)); hi = Math.max(hi, Math.ceil(edges[ry] + N) + 1); }
     }
-    for (let ry = 0; ry < H; ry++) {
-      const d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d, y = y0 + ry;
-      const xi = Math.ceil(edges[ry]), xiL = Math.floor(edgesL[ry]);   // liquid where xiL < x < xi
+    if (hi > lo) {
+      // widened ±4 for the blur reach (and 4 more for the columns the blur reads); columns outside
+      // the residue range are guaranteed zero and the band only reads its own columns.
+      const a0 = Math.max(0, lo - 4), a1 = Math.min(L, hi + 4);
+      const c0 = Math.max(0, a0 - 4), c1 = Math.min(L, a1 + 4);
+      for (let x = c0; x < c1; x++) traceRaw[x] = state.trace[p.remaining ? L - 1 - x : x];
+      // ±4 px triangular blur before the streak texture: the smear's outer end starts where the edge
+      // turned around at ~zero speed (dense deposit next to bare glass) — blurred it tapers like a
+      // tide mark instead of a 1-px cliff.
       for (let x = a0; x < a1; x++) {
-        if (x > xiL && x < xi) continue;
-        const a = traceA[x] * rowW;
-        if (a >= 1 / 255) pxa(x, y, pal.traceRows[ry], Math.min(1, a));
+        let v = 5 * traceRaw[x];
+        for (let d = 1; d <= 4; d++) v += (5 - d) * (traceRaw[Math.max(0, x - d)] + traceRaw[Math.min(L - 1, x + d)]);
+        v *= 1 / 25;
+        const g = Math.max(v ? traceGamma(v / TRACE_FULL) : 0, filmG);
+        traceA[x] = g ? g * p.traceAmount * traceStreak(x + idx * 6151) : 0;
+      }
+      for (let ry = 0; ry < H; ry++) {
+        const d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d, y = y0 + ry;
+        const ex = edges[ry], exL = edgesL[ry], xm = (ex + exL) / 2;
+        const xr = Math.round(ex), xrL = Math.round(exL);   // hard edge: liquid where xrL <= x < xr
+        // Row split into segments so the per-pixel coverage/band math only runs near the edges:
+        // [a0, pl1) plain residue · [zl0, zl1) home-edge zone · [zl1, zr0) fully covered, skipped ·
+        // [zr0, zr1) time-edge zone · [pr0, a1) plain residue. A zone reaches max(N, hw) px out
+        // from its edge (band + soft ramp) and hw px in.
+        let pl1 = a1, zl0 = a1, zl1 = a1, zr0 = a1, zr1 = a1, pr0 = a1;
+        if (hasLiquid) {
+          const dl = bandL ? Math.max(N, hw) : hw, dr = bandR ? Math.max(N, hw) : hw;
+          const clamp = (v: number): number => Math.max(a0, Math.min(a1, v));
+          pl1 = clamp(Math.floor(exL - dl - 0.5) + 1);
+          const sk0 = clamp(softW > 0 ? Math.ceil(exL + hw - 0.5) : xrL);       // first fully covered column
+          const sk1 = clamp(softW > 0 ? Math.floor(ex - hw - 0.5) + 1 : xr);   // one past the last
+          pr0 = clamp(Math.ceil(ex + dr - 0.5));
+          zl0 = pl1; zl1 = Math.min(sk0, pr0); zr0 = Math.max(sk1, zl1); zr1 = pr0;
+        }
+        for (let seg = 0; seg < 2; seg++) {
+          const p0 = seg ? pr0 : a0, p1 = seg ? a1 : pl1;
+          for (let x = p0; x < p1; x++) {
+            const a = traceA[x] * rowW;
+            if (a >= 1 / 255) pxa(x, y, pal.traceRows[ry], Math.min(1, a));
+          }
+        }
+        for (let seg = 0; seg < 2; seg++) {
+          const z0 = seg ? zr0 : zl0, z1 = seg ? zr1 : zl1;
+          for (let x = z0; x < z1; x++) {
+            // liquid coverage of this pixel as step 3 painted it: full inside, the soft-edge ramp across each edge
+            const cov = softW > 0
+              ? Math.min(1, Math.max(0, (ex + hw - x - 0.5) / softW), Math.max(0, (x + 0.5 - exL + hw) / softW))
+              : (x >= xrL && x < xr ? 1 : 0);
+            if (cov >= 1) continue;
+            let a = traceA[x] * rowW, c = pal.traceRows[ry];
+            // wet band on each edge's own half: 1 at (and inside) the contact line, 0 at N px out
+            const b = x + 0.5 < xm
+              ? (bandL ? s.filmHome * Math.min(1, Math.max(0, 1 - (exL - x - 0.5) / N)) : 0)
+              : (bandR ? s.filmFree * Math.min(1, Math.max(0, 1 - (x + 0.5 - ex) / N)) : 0);
+            if (b > 0) { a += (1 - a) * b; c = blend565(c, pal.rows[ry], b); }
+            a *= 1 - cov;
+            if (a >= 1 / 255) pxa(x, y, c, Math.min(1, a));
+          }
+        }
       }
     }
   }
