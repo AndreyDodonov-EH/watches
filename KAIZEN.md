@@ -262,3 +262,21 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   two layers used to be scaled per row before compositing (worst ~50/255 on a few edge texels of the
   host scene set); with `markContrast` > 0 the luma floor now acts on the composite instead of per
   layer (presets free / cola / champagne / malt / cryo). Revisit only if someone sees it on the panel.
+- Step 3e calls `sqrtf` per band pixel (~|meniscusDepth| + bulge px per row per edge). Not measured on
+  the board; a 65-entry sqrt table shared with the sim would make it LUT-only if bench shows it.
+- Meniscus `surfaceWidth` is not derived from the tube diameter; `-big` presets may want a wider band.
+- Sim drawTube allocates `strokeR/strokeL` (and the compositor bounds) per frame like `edges`; fold into
+  one reused scratch set if GC churn ever shows.
+- Concave presets with `meniscusTiltGain·|meniscusDepth|` > `meniscusDepth` (user preset: 2.6 × 4 vs 4)
+  are convex at full tilt, and the dynamic `cap` (±12 px) flips the ring lead's sign through every
+  kick; an underdamped meniscus spring (frizzante: K 475, damp 8) rings the stroke concave↔convex for
+  ~1 s after a stop. Physically the surface does slosh, but the two branches are drawn differently
+  (stroke outside vs nose inside). The renderer now fades below 1 px at the branch transition;
+  revisit the dynamics only if the physical wobble itself is excessive.
+
+- Residue-enabled hard-edge glow now blends over the live backing instead of its clean-glass LUT;
+  measure its on-device cost before considering a different cache. No new buffers allocated.
+- Rear digits crossed by a fast-moving edge (user preset, `remaining`, `digitParallax` on, transparency
+  0.17) show a dark jagged sliver along the contact line for a few frames: the per-pixel plane switch of
+  the baked shadow (behind air vs behind liquid) lands on the parallax-offset shadow texels. Reproduces
+  with `surfaceBand` 0, so it is the shadow-bake compositor, not the surface stroke. Not pursued.

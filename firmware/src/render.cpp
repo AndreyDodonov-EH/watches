@@ -291,6 +291,9 @@ struct RowCache {
   // edge profile terms (sim edgeCap): d = lensRow(row), climbPow = |d|^meniscusPow, bulge = 1 - sqrt(1 - d^2)
   float rowD[TUBE_HEIGHT_MAX], rowClimbPow[TUBE_HEIGHT_MAX], rowBulge[TUBE_HEIGHT_MAX];
   uint16_t hiC;                                                  // front-bright colour
+  uint16_t lensC;                                                // concave surface stroke colour (sim lensC)
+  uint16_t darkC;                                                // deep liquid colour (sim darkC): dark tone target, unlit stroke shade
+  uint16_t toneC; int toneT;                                     // surfaceTone target colour and blend 1/256 (sim toneC/toneK)
 };
 // Edge-effect blend tables: (row, k) -> 565, a function of the palette and lightK only. Rebuilt when
 // lightK moves (exact compare: at rest it is constant, in motion it changes every frame anyway).
@@ -305,7 +308,8 @@ struct Tube {
   Palette pal; RowCache rc; Labels labels; ScaledSet set;
   EffectTable glowT[2];                                       // 0 = time edge, 1 = home edge
   float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
-  float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds when `remaining`
+  float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds for the mark compositor (edges + surface stroke)
+  float strokeR[TUBE_HEIGHT_MAX], strokeL[TUBE_HEIGHT_MAX];   // outward extent of the concave surface stroke per edge (sim strokeR/L)
   Fizz fizz[MAX_FIZZ]; int fizzN = 0; float fizzLen = 0;      // liquid length px, set by drawTube
   uint16_t traceA[TUBE_LENGTH_PX];                            // dried-trace residue alpha per column, 1/256 with headroom (traceAmount > 1)
   uint16_t traceRaw[TUBE_LENGTH_PX];                          // render-frame residue copy, input to the taper blur
@@ -350,6 +354,9 @@ struct Tube {
   inline float fizzSquashRow(const Params &p, int y) const;
   void lensMagRows(const Params &p, float *rows) const;
   inline float edgeCap(int ry, const Params &p, float tilt, float side, float cap) const;
+  inline float wallCap(int ry, const Params &p, float tilt, float side, float cap) const;
+  inline float wallX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
+  inline float wallXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
   inline float edgeX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
   inline float edgeXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
   void buildRowCache(const Params &p, uint32_t gen);
@@ -934,6 +941,23 @@ inline float Tube::edgeXL(int ry, float xs, float tanA, const Params &p, float t
   float skew = tanA * (ry - yc);
   return xs + fminf(1, xs / 8) * (skew - k * edgeCap(ry, p, -tilt, side, -cap));
 }
+// Wall-ring lead: the contact ring all round the bore (edgeCap at u = 1, across sag interpolated
+// by the row's d) — one x per row seen side-on; the visible surface at a row is the lens between
+// edgeCap (the mid-depth section) and this. Meets edgeCap at the wall rows. See sim wallCap.
+inline float Tube::wallCap(int ry, const Params &p, float tilt, float side, float cap) const {
+  float d = rc.rowD[ry];
+  float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f) * (p.meniscusDepth < 0 ? -1 : 1);
+  float bulge = p.meniscusTiltGain * tilt * fabsf(p.meniscusDepth) + cap;
+  return p.meniscusDepth * (1 - asymEff * d) - bulge;
+}
+inline float Tube::wallX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
+  const float yc = (H - 1) / 2.0f;
+  return xe + tanA * (ry - yc) + k * wallCap(ry, p, tilt, side, cap);
+}
+inline float Tube::wallXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
+  const float yc = (H - 1) / 2.0f;
+  return xs + fminf(1, xs / 8) * (tanA * (ry - yc) - k * wallCap(ry, p, -tilt, side, -cap));
+}
 
 
 void Tube::buildRowCache(const Params &p, uint32_t gen) {
@@ -964,7 +988,13 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
     float d = lensRow((ry - yc) / yc, p), u = fabsf(d);
     rc.rowD[ry] = d; rc.rowClimbPow[ry] = powf(u, p.meniscusPow); rc.rowBulge[ry] = 1 - sqrtf(fmaxf(0, 1 - u * u));
   }
-  rc.hiC = q(ambientize(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright), ambientBodyL(p), ambientAmt(p)));
+  RGB hi888 = ambientize(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright), ambientBodyL(p), ambientAmt(p));
+  rc.hiC = q(hi888);
+  // pure liquid colour (no transparency mix) halfway to the highlight: brighter and more saturated than the body
+  RGB liquid888 = scale(hexToRgb(p.liquid), p.brightness * p.liquidBright);
+  rc.lensC = q(mix(liquid888, hi888, 0.55f));
+  rc.darkC = q(scale(liquid888, 0.35f));
+  rc.toneC = p.surfaceTone < 0 ? rc.darkC : rc.hiC; rc.toneT = alphaT(fminf(1, fabsf(p.surfaceTone)));
 }
 
 void Tube::applyLens(const Params &p) {
@@ -1017,121 +1047,21 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   const bool hasLiquid = xe - xs >= 0.5f;   // an empty column draws nothing, not even an AA sliver
   ensureFizz(p, clampf(xe - xs - 6, 0, L), s.agitation);
 
-  // 1 + 3: tube back and liquid column between the two edges (home edge on the end cap unless free)
+  int softW = p.edgeSoft > 0 ? (int)fmaxf(1, jround(p.edgeSoft)) : 0;
+  const bool traceMode = p.traces && p.traceAmount > 0 && st.trace;
+
+  // Tube back and cached edge geometry, before the residue backing and liquid body.
   const int16_t *capX0 = rc.capX0;
   for (int ry = 0; ry < H; ry++) {
     float ex = edgeX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK);
     float exL = p.freeLiquid ? edgeXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK) : 0;
     edges[ry] = ex; edgesL[ry] = exL;
-    int x0 = capX0[ry];
     hspan(y0 + ry, 0, L, pal.tubeBackRows[ry]);
-    if (!hasLiquid) continue;
-    int xi = (int)floorf(ex); float frac = ex - xi;
-    int xiL = (int)floorf(exL); float fracL = exL - xiL;
-    int xa = x0 > xiL + 1 ? x0 : xiL + 1;
-    hspan(y0 + ry, xa, xi, pal.rows[ry]);
-    if (p.edgeSoft > 0) {  // soft edge: a coverage ramp `w` px wide centred on the geometric edge.
-      // The glow (if any) folds into the same per-pixel alpha min(1, cov + g), anchored to the
-      // sub-pixel edge: no integer snapping, so no seam before the glow and no 1-px stepping
-      // while the edge moves. alpha is monotone in x by construction (cov and g both decline).
-      int w = (int)fmaxf(1, jround(p.edgeSoft)); float hw = w * 0.5f;
-      bool glow = p.edgeGlow > 0 && p.glowStrength > 0;
-      int a0 = (int)floorf(ex - hw - 0.5f) + 1;
-      int aEnd = glow ? (int)ceilf(ex + hw - 0.5f + p.edgeGlow) : (int)ceilf(ex + hw - 0.5f) - 1;
-      for (int x = a0; x <= aEnd; x++) {
-        float t = glow ? fmaxf(0, 1 - (x + 0.5f - ex) / p.edgeGlow) : 0;
-        float a = fminf(1, clampf((ex + hw - x - 0.5f) / w, 0, 1) + t * t * p.glowStrength * lightK);
-        if (a <= 0) break;
-        if (a >= 1 && x < xi) continue;   // the span already drew it full
-        if (x >= x0) px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
-      }
-      int b0 = (int)floorf(exL - hw - 0.5f) + 1;
-      int bEnd = glow ? (int)floorf(exL - hw - 0.5f - p.edgeGlow) : b0;  // home edge: glow to the left
-      for (int x = (int)ceilf(exL + hw - 0.5f) - 1; x >= bEnd; x--) {
-        float t = glow ? fmaxf(0, 1 - (exL - (x + 0.5f)) / p.edgeGlow) : 0;
-        float a = fminf(1, clampf((x + 0.5f - exL + hw) / w, 0, 1) + t * t * p.glowStrength * lightKL);
-        if (a <= 0) break;
-        if (x < x0 || x >= xi) continue;
-        if (a >= 1 && x >= xa) continue;
-        px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
-      }
-    } else {
-      if (frac >= 0.5f) px(xi, y0 + ry, pal.rows[ry]);
-      if (fracL < 0.5f && xiL >= x0) px(xiL, y0 + ry, pal.rows[ry]);
-    }
   }
 
-  // 3a: front brightening, weighted by row luma
-  if (hasLiquid && p.frontBright > 0) {
-    const uint16_t hiC = rc.hiC;
-    const uint16_t *fT = nullptr, *fTL = nullptr; const bool tab = false;
-    for (int ry = 0; ry < H; ry++) {
-      int xi = (int)floorf(edges[ry]); float rowK = pal.rowK[ry];
-      int xiL = (int)floorf(edgesL[ry]);
-      for (int k = 1; k <= p.frontBright; k++) {
-        int x = xi - k; if (x < 0) break;
-        if (x >= L) continue;
-        int T; if (tab) T = fT[ry * EFFECT_MAX + k - 1]; else { float t = 1 - k / p.frontBright; T = alphaT(fminf(1, t * t * 0.85f * lightK * rowK)); }
-        px(x, y0 + ry, blend565T(rd(x, y0 + ry), hiC, T));
-      }
-      if (!p.freeLiquid) continue;
-      for (int k = 1; k <= p.frontBright; k++) {   // home edge: lit by the opposite tilt
-        int x = xiL + k; if (x >= xi - p.frontBright) break;
-        if (x < 0 || x >= L) continue;
-        int T; if (tab) T = fTL[ry * EFFECT_MAX + k - 1]; else { float t = 1 - k / p.frontBright; T = alphaT(fminf(1, t * t * 0.85f * lightKL * rowK)); }
-        px(x, y0 + ry, blend565T(rd(x, y0 + ry), hiC, T));
-      }
-    }
-  }
-
-  // 3b: edge glow — a few px past the edge. Hard-edge path only (edgeSoft = 0); with a soft
-  // edge the glow is folded into the step-3 per-pixel alpha.
-  int softW = p.edgeSoft > 0 ? (int)fmaxf(1, jround(p.edgeSoft)) : 0;
-  if (hasLiquid && p.edgeSoft <= 0 && p.edgeGlow > 0 && p.glowStrength > 0) {
-    const uint16_t *gT = effectTable(glowT[0], p, pal, gen, lightK, true);
-    const uint16_t *gTL = p.freeLiquid ? effectTable(glowT[1], p, pal, gen, lightKL, true) : nullptr;
-    const bool tab = gT && (!p.freeLiquid || gTL);
-    for (int ry = 0; ry < H; ry++) {
-      // glow starts at the first px past the RENDERED hard edge (round(ex)), never leaving a
-      // 1-px tube-back gap that flickers as frac crosses 0.5
-      int xg = (int)jround(edges[ry]), xgL = (int)jround(edgesL[ry]) - 1;
-      for (int k = 0; k < p.edgeGlow; k++) {
-        int xr = xg + k, xl = xgL - k;
-        if (xr < L) {
-          uint16_t c; if (tab) c = gT[ry * EFFECT_MAX + k]; else { float t = 1 - k / p.edgeGlow; c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK)); }
-          px(xr, y0 + ry, c);
-        }
-        if (p.freeLiquid && xl >= capX0[ry]) {
-          uint16_t c; if (tab) c = gTL[ry * EFFECT_MAX + k]; else { float t = 1 - k / p.edgeGlow; c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightKL)); }
-          px(xl, y0 + ry, c);
-        }
-      }
-    }
-  }
-
-  // 3c: wet film left by a receding edge (see sim step 3c). In trace mode the film is the wet band
-  // of 3d instead (full liquid at the edge, thinning into the residue), so this faint one is skipped.
-  const bool traceMode = p.traces && p.traceAmount > 0 && st.trace;
-  if (!traceMode && hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02f || (p.freeLiquid && s.filmHome > 0.02f))) {
-    const float yc = (H - 1) / 2.0f;
-    for (int ry = 0; ry < H; ry++) {
-      float d = (ry - yc) / yc, rowW = 0.4f + 0.6f * d * d;
-      int nR = (int)jround(p.wetFilm * s.filmFree), nL = p.freeLiquid ? (int)jround(p.wetFilm * s.filmHome) : 0;
-      int xg = softW > 0 ? (int)ceilf(edges[ry] + softW * 0.5f - 0.5f) : (int)ceilf(edges[ry]);
-      int xgL = softW > 0 ? (int)floorf(edgesL[ry] - softW * 0.5f - 0.5f) : (int)floorf(edgesL[ry]);
-      for (int k = 0; k < nR; k++) if (xg + k < L) pxa(xg + k, y0 + ry, pal.rows[ry], 0.35f * s.filmFree * rowW * (1 - (float)k / nR));
-      for (int k = 0; k < nL; k++) if (xgL - k >= capX0[ry]) pxa(xgL - k, y0 + ry, pal.rows[ry], 0.35f * s.filmHome * rowW * (1 - (float)k / nL));
-    }
-  }
-
-  // 3d: dried traces — residue on the glass where an edge receded (blood smear, syrup coating,
-  // legs); see sim step 3d. Drawn AFTER the glow (it paints the dry side with plain overwrite).
-  // The residue sits UNDER the liquid: each pixel gets it at (1 - liquid coverage), so the
-  // anti-aliased meniscus ramps from liquid to residue, not to the bare tube back, and fully
-  // covered columns get none. Wet band: over the first wetFilm px behind a receding edge the
-  // residue's alpha and colour ramp up to the liquid's own, gated by filmFree/filmHome (~1 while
-  // the edge recedes, draining once it stops). Residue buffer is panel-frame; the mirrored render
-  // flips the index.
+  // Residue and wet film form the backing UNDER the liquid. Paint them first, then
+  // blend the body AA over that backing once. Masking residue by (1 - coverage)
+  // over an already-AA body leaks the bare tube colour at their junction.
   if (traceMode) {
     const float yc = (H - 1) / 2.0f, hw = softW * 0.5f;
     const int N = p.wetFilm > 0 ? (int)fmaxf(1, jround(p.wetFilm)) : 0;
@@ -1200,7 +1130,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
         for (int seg = 0; seg < 2; seg++) {
           const int z0 = seg ? zr0 : zl0, z1 = seg ? zr1 : zl1;
           for (int x = z0; x < z1; x++) {
-            // liquid coverage of this pixel as step 3 painted it: full inside, the soft-edge ramp across each edge
+            // liquid coverage the body pass will paint: full inside, the soft-edge ramp across each edge
             // Both coverage ramps share a width: take the smaller numerator before scaling and
             // clamp once. Reciprocals above avoid software float division in this pixel loop.
             const float cr = ex + hw - x - 0.5f, cl = x + 0.5f - exL + hw;
@@ -1215,11 +1145,138 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
             float a = (float)traceA[x] * rowW * (1.0f / 65536.0f);
             uint16_t c = pal.traceRows[ry];
             if (b > 0) { a += (1 - a) * b; c = blend565(c, pal.rows[ry], b); }
-            a *= 1 - cov;
             if (a >= 1.0f / 255) pxa(x, y, c, fminf(1, a));
           }
         }
       }
+    }
+  }
+
+  // Liquid body and its soft edge, over the residue backing.
+  for (int ry = 0; ry < H; ry++) {
+    const float ex = edges[ry], exL = edgesL[ry];
+    const int x0 = capX0[ry];
+    if (!hasLiquid) continue;
+    int xi = (int)floorf(ex); float frac = ex - xi;
+    int xiL = (int)floorf(exL); float fracL = exL - xiL;
+    int xa = x0 > xiL + 1 ? x0 : xiL + 1;
+    // Preserve the underlay in partially covered pixels until the AA pass blends them.
+    const int solidLo = traceMode && softW > 0 ? (int)fmaxf(xa, ceilf(exL + softW * 0.5f - 0.5f)) : xa;
+    const int solidHi = traceMode && softW > 0 ? (int)fminf(xi, floorf(ex - softW * 0.5f - 0.5f) + 1) : xi;
+    hspan(y0 + ry, solidLo, solidHi, pal.rows[ry]);
+    if (p.edgeSoft > 0) {  // soft edge: a coverage ramp `w` px wide centred on the geometric edge.
+      // The glow (if any) folds into the same per-pixel alpha min(1, cov + g), anchored to the
+      // sub-pixel edge: no integer snapping, so no seam before the glow and no 1-px stepping
+      // while the edge moves. alpha is monotone in x by construction (cov and g both decline).
+      int w = (int)fmaxf(1, jround(p.edgeSoft)); float hw = w * 0.5f;
+      bool glow = p.edgeGlow > 0 && p.glowStrength > 0;
+      // A bead shorter than the two AA ramps composites once using their intersection.
+      if (traceMode && ex - exL < w) {
+        const float reach = hw + (glow ? p.edgeGlow : 0);
+        const int first = (int)fmaxf(x0, floorf(exL - reach)), end = (int)fminf(L, ceilf(ex + reach));
+        for (int x = first; x < end; x++) {
+          const float gr = glow ? fmaxf(0, 1 - (x + 0.5f - ex) / p.edgeGlow) : 0;
+          const float gl = glow ? fmaxf(0, 1 - (exL - x - 0.5f) / p.edgeGlow) : 0;
+          const float ar = fmaxf(0, (ex + hw - x - 0.5f) / w) + gr * gr * p.glowStrength * lightK;
+          const float al = fmaxf(0, (x + 0.5f - exL + hw) / w) + gl * gl * p.glowStrength * lightKL;
+          const float a = fminf(1, fminf(ar, al));
+          if (a > 0) pxa(x, y0 + ry, pal.rows[ry], a);
+        }
+        continue;
+      }
+      int a0 = (int)floorf(ex - hw - 0.5f) + 1;
+      int aEnd = glow ? (int)ceilf(ex + hw - 0.5f + p.edgeGlow) : (int)ceilf(ex + hw - 0.5f) - 1;
+      for (int x = a0; x <= aEnd; x++) {
+        float t = glow ? fmaxf(0, 1 - (x + 0.5f - ex) / p.edgeGlow) : 0;
+        float a = fminf(1, clampf((ex + hw - x - 0.5f) / w, 0, 1) + t * t * p.glowStrength * lightK);
+        if (a <= 0) break;
+        if (a >= 1 && x >= solidLo && x < solidHi) continue;   // the span already drew it full
+        if (x >= x0) {
+          if (traceMode) pxa(x, y0 + ry, pal.rows[ry], a);
+          else px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
+        }
+      }
+      int b0 = (int)floorf(exL - hw - 0.5f) + 1;
+      int bEnd = glow ? (int)floorf(exL - hw - 0.5f - p.edgeGlow) : b0;  // home edge: glow to the left
+      for (int x = (int)ceilf(exL + hw - 0.5f) - 1; x >= bEnd; x--) {
+        float t = glow ? fmaxf(0, 1 - (exL - (x + 0.5f)) / p.edgeGlow) : 0;
+        float a = fminf(1, clampf((x + 0.5f - exL + hw) / w, 0, 1) + t * t * p.glowStrength * lightKL);
+        if (a <= 0) break;
+        if (x < x0 || x >= xi) continue;
+        if (a >= 1 && x >= solidLo && x < solidHi) continue;
+        if (traceMode) pxa(x, y0 + ry, pal.rows[ry], a);
+        else px(x, y0 + ry, blend565(pal.tubeBackRows[ry], pal.rows[ry], a));
+      }
+    } else {
+      if (frac >= 0.5f) px(xi, y0 + ry, pal.rows[ry]);
+      if (fracL < 0.5f && xiL >= x0) px(xiL, y0 + ry, pal.rows[ry]);
+    }
+  }
+
+  // 3a: front brightening, weighted by row luma
+  if (hasLiquid && p.frontBright > 0) {
+    const uint16_t hiC = rc.hiC;
+    const uint16_t *fT = nullptr, *fTL = nullptr; const bool tab = false;
+    for (int ry = 0; ry < H; ry++) {
+      int xi = (int)floorf(edges[ry]); float rowK = pal.rowK[ry];
+      int xiL = (int)floorf(edgesL[ry]);
+      for (int k = 1; k <= p.frontBright; k++) {
+        int x = xi - k; if (x < 0) break;
+        if (x >= L) continue;
+        int T; if (tab) T = fT[ry * EFFECT_MAX + k - 1]; else { float t = 1 - k / p.frontBright; T = alphaT(fminf(1, t * t * 0.85f * lightK * rowK)); }
+        px(x, y0 + ry, blend565T(rd(x, y0 + ry), hiC, T));
+      }
+      if (!p.freeLiquid) continue;
+      for (int k = 1; k <= p.frontBright; k++) {   // home edge: lit by the opposite tilt
+        int x = xiL + k; if (x >= xi - p.frontBright) break;
+        if (x < 0 || x >= L) continue;
+        int T; if (tab) T = fTL[ry * EFFECT_MAX + k - 1]; else { float t = 1 - k / p.frontBright; T = alphaT(fminf(1, t * t * 0.85f * lightKL * rowK)); }
+        px(x, y0 + ry, blend565T(rd(x, y0 + ry), hiC, T));
+      }
+    }
+  }
+
+  // 3b: edge glow — a few px past the edge. Hard-edge path only (edgeSoft = 0); with a soft
+  // edge the glow is folded into the step-3 per-pixel alpha.
+  if (hasLiquid && p.edgeSoft <= 0 && p.edgeGlow > 0 && p.glowStrength > 0) {
+    const uint16_t *gT = traceMode ? nullptr : effectTable(glowT[0], p, pal, gen, lightK, true);
+    const uint16_t *gTL = !traceMode && p.freeLiquid ? effectTable(glowT[1], p, pal, gen, lightKL, true) : nullptr;
+    const bool tab = gT && (!p.freeLiquid || gTL);
+    for (int ry = 0; ry < H; ry++) {
+      // glow starts at the first px past the RENDERED hard edge (round(ex)), never leaving a
+      // 1-px tube-back gap that flickers as frac crosses 0.5
+      int xg = (int)jround(edges[ry]), xgL = (int)jround(edgesL[ry]) - 1;
+      for (int k = 0; k < p.edgeGlow; k++) {
+        int xr = xg + k, xl = xgL - k;
+        if (xr < L) {
+          if (traceMode) { float t = 1 - k / p.edgeGlow; pxa(xr, y0 + ry, pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK)); }
+          else {
+            uint16_t c; if (tab) c = gT[ry * EFFECT_MAX + k]; else { float t = 1 - k / p.edgeGlow; c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightK)); }
+            px(xr, y0 + ry, c);
+          }
+        }
+        if (p.freeLiquid && xl >= capX0[ry]) {
+          if (traceMode) { float t = 1 - k / p.edgeGlow; pxa(xl, y0 + ry, pal.rows[ry], fminf(1, t * t * p.glowStrength * lightKL)); }
+          else {
+            uint16_t c; if (tab) c = gTL[ry * EFFECT_MAX + k]; else { float t = 1 - k / p.edgeGlow; c = blend565(pal.tubeBackRows[ry], pal.rows[ry], fminf(1, t * t * p.glowStrength * lightKL)); }
+            px(xl, y0 + ry, c);
+          }
+        }
+      }
+    }
+  }
+
+  // 3c: wet film left by a receding edge (see sim step 3c). In trace mode the film is the wet band
+  // of 3d instead (full liquid at the edge, thinning into the residue), so this faint one is skipped.
+  if (!traceMode && hasLiquid && p.wetFilm > 0 && (s.filmFree > 0.02f || (p.freeLiquid && s.filmHome > 0.02f))) {
+    const float yc = (H - 1) / 2.0f;
+    for (int ry = 0; ry < H; ry++) {
+      float d = (ry - yc) / yc, rowW = 0.4f + 0.6f * d * d;
+      int nR = (int)jround(p.wetFilm * s.filmFree), nL = p.freeLiquid ? (int)jround(p.wetFilm * s.filmHome) : 0;
+      int xg = softW > 0 ? (int)ceilf(edges[ry] + softW * 0.5f - 0.5f) : (int)ceilf(edges[ry]);
+      int xgL = softW > 0 ? (int)floorf(edgesL[ry] - softW * 0.5f - 0.5f) : (int)floorf(edgesL[ry]);
+      for (int k = 0; k < nR; k++) if (xg + k < L) pxa(xg + k, y0 + ry, pal.rows[ry], 0.35f * s.filmFree * rowW * (1 - (float)k / nR));
+      for (int k = 0; k < nL; k++) if (xgL - k >= capX0[ry]) pxa(xgL - k, y0 + ry, pal.rows[ry], 0.35f * s.filmHome * rowW * (1 - (float)k / nL));
     }
   }
 
@@ -1244,14 +1301,84 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     }
   }
 
-  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi).
-  Edges bounds = p.remaining ? Edges{boundLo, boundHi} : Edges{edgesL, edges};
-  if (p.remaining) {
+  // 3e: meniscus surface, over residue and the inset highlight. Concave bands grade from
+  // a dark inner shoulder to a lit rim with subpixel coverage; convex noses shade inward.
+  // Alpha-over preserves the underlying film while the stroke re-forms. Both branches fade
+  // as the ring meets the profile. See sim step 3e. No extra buffers or allocations.
+  for (int ry = 0; ry < H; ry++) strokeR[ry] = strokeL[ry] = 0;
+  float strokeAR = 0, strokeAL = 0;   // the stroke's opacity per edge
+  if (hasLiquid && p.surfaceBand > 0) {
+    const float hw = softW * 0.5f, transK = clampf(p.liquidTransparency, 0, 1);
+    // opaque from surfaceBand ~0.6 whatever the light; the unlit edge gets a darker stroke; a receding
+    // edge (wet film up) has no stroke at all and it re-forms as the edge settles (see sim)
+    const float bandK = fminf(1, 1.6f * p.surfaceBand);
+    strokeAR = bandK * (1 - s.filmFree);
+    strokeAL = bandK * (1 - s.filmHome);
+    const uint16_t hiC = rc.hiC;
+    auto tone = [&](uint16_t c) -> uint16_t { return rc.toneT > 0 ? blend565T(c, rc.toneC, rc.toneT) : c; };
+    auto surface = [&](int ry, float xm, float xw, int dir, float lk, int xlo, int xhi) -> float {
+      const int y = y0 + ry; const float tw = dir * (xw - xm);   // ring lead in the edge's own outward sense
+      if (tw == 0) return 0;
+      const float lo = fminf(xm, xw), hi = fmaxf(xm, xw);   // pixel centres in [lo, hi)
+      int x0 = (int)ceilf(lo - 0.5f), x1 = (int)ceilf(hi - 0.5f); if (x0 < xlo) x0 = xlo; if (x1 > xhi) x1 = xhi;
+      if (tw > 0) {   // concave: shaded surfaceWidth-px band, clipped to the wall ring
+        // Overlap the body's AA ramp so it joins the shoulder without a bare-glass seam.
+        const float a = (dir > 0 ? strokeAR : strokeAL) * fminf(1, tw);
+        if (a < 1 / 255.0f) return 0;   // below visible opacity: no stroke, rim or extended mark bounds
+        const float shade = 0.6f * (1 - fminf(1, lk));   // unlit edge: toward the deep liquid colour
+        const uint16_t inner = tone(blend565(pal.rows[ry], rc.darkC, 0.3f));
+        const uint16_t outer = tone(blend565(blend565(rc.lensC, pal.rows[ry], 0.2f), rc.darkC, shade));
+        const float wEff = fminf(p.surfaceWidth, tw);
+        const float invWidth = 1 / (wEff + hw);
+        const float rimK = p.surfaceRim * (0.5f + 0.5f * pal.rowK[ry]) * fminf(1, lk) * fminf(1, wEff / 2);
+        // Pixel-footprint coverage for the stroke and rim; no integer-column snapping. See sim.
+        const float cLo = dir > 0 ? xm - hw : xm - wEff, cHi = dir > 0 ? xm + wEff : xm + hw;
+        int xa = (int)floorf(cLo), xb = (int)ceilf(cHi); if (xa < xlo) xa = xlo; if (xb > xhi) xb = xhi;
+        for (int x = xa; x < xb; x++) {
+          const float t = dir * (x + 0.5f - xm);
+          const float lo = fmaxf(t - 0.5f, -hw), hi = fminf(t + 0.5f, wEff);
+          const float coverage = fmaxf(0, hi - lo);
+          if (coverage <= 0) continue;
+          const float u = clampf(((lo + hi) * 0.5f + hw) * invWidth, 0, 1);
+          const uint16_t c = blend565(inner, outer, u * u * (3 - 2 * u));
+          pxa(x, y, c, a * coverage);
+          const float rimCoverage = fmaxf(0, hi - fmaxf(lo, fmaxf(0, wEff - 1)));
+          const float ar = a * rimK * rimCoverage;
+          if (ar >= 1 / 255.0f) pxa(x, y, hiC, fminf(1, ar));
+        }
+        return wEff;
+      } else {   // convex: thin nose inside the profile back to the ring
+        // Tilt/reversal can make a receding edge convex: fade its nose with the wet film
+        // just like the concave band, avoiding a pale crescent from a white tube back.
+        const float noseK = p.surfaceBand * (1 - (dir > 0 ? s.filmFree : s.filmHome));
+        if (noseK < 1 / 255.0f) return 0;
+        const uint16_t c = tone(blend565(blend565(pal.rows[ry], pal.tubeBackRows[ry], 0.55f), hiC, 0.5f * transK));
+        for (int x = x0; x < x1; x++) {
+          float t = dir * (x + 0.5f - xm); if (t > -hw) continue;
+          float a = noseK * fminf(1, -tw) * (1 - sqrtf(fmaxf(0, t / tw)));   // t/tw: 1 at the ring, 0 at the tip
+          if (a >= 1 / 255.0f) pxa(x, y, c, fminf(1, a));
+        }
+        return 0;
+      }
+    };
     for (int ry = 0; ry < H; ry++) {
+      int xi = (int)floorf(edges[ry]), xa = (int)floorf(edgesL[ry]) + 1; if (xa < capX0[ry]) xa = capX0[ry];
+      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L);
+      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi);
+    }
+  }
+
+  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi), the concave
+  // surface stroke included once its opacity reaches 0.5 (including surfaceBand, see sim).
+  Edges bounds{boundLo, boundHi};
+  const bool bsL = strokeAL >= 0.5f, bsR = strokeAR >= 0.5f;
+  for (int ry = 0; ry < H; ry++) {
+    float lo = edgesL[ry] - (bsL ? strokeL[ry] : 0.0f), hi = edges[ry] + (bsR ? strokeR[ry] : 0.0f);
+    if (p.remaining) {
       uint16_t *row = FB + ry * PANEL_W;
       for (int a = 0, b = L - 1; a < b; a++, b--) { uint16_t t = row[a]; row[a] = row[b]; row[b] = t; }
-      boundLo[ry] = L - edges[ry]; boundHi[ry] = L - edgesL[ry];
-    }
+      boundLo[ry] = L - hi; boundHi[ry] = L - lo;
+    } else { boundLo[ry] = lo; boundHi[ry] = hi; }
   }
 
   // Scale marks, all before bubbles.

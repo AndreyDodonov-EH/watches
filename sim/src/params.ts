@@ -53,6 +53,10 @@ export interface Params {
   traceFilm: number;     // 0..1 permanent thin film over the whole glass, as a residue level (0 = bare glass between smears)
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
   frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
+  surfaceBand: number;   // 0..1 visible meniscus surface: shaded concave band or thin convex nose
+  surfaceRim: number;    // 0..1 lit 1-px line on the outer edge of the concave surface stroke
+  surfaceWidth: number;  // px thickness of the concave surface stroke (a bright band following the edge profile; never past the wall contact ring)
+  surfaceTone: number;   // -1..1 surface colour shift: darker (toward the deep liquid colour) .. lighter (toward the highlight); both the concave stroke and the convex nose
   edgeGlow: number;      // px, dim glow fading out past the fill edge (0 = off)
   glowStrength: number;  // 0..1 brightness of the glow at the edge
   cornerR: number;       // px, rounding of the column's left end (tube end cap)
@@ -178,7 +182,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 18;
+export const PARAMS_VERSION = 19;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -228,6 +232,10 @@ export const DEFAULT_PARAMS: Params = {
   traceFilm: 0,
   edgeSoft: 2.6,
   frontBright: 21,
+  surfaceBand: 0.5,
+  surfaceRim: 0.6,
+  surfaceWidth: 4,
+  surfaceTone: 0,
   edgeGlow: 15,
   glowStrength: 0.25,
   cornerR: 0,
@@ -783,6 +791,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
     r.readTiltEnd = DEFAULT_PARAMS.readTiltEnd;
   }
   if (from < 17) r.playHold = DEFAULT_PARAMS.playHold;
+  if (from < 19) { r.surfaceBand = DEFAULT_PARAMS.surfaceBand; r.surfaceRim = DEFAULT_PARAMS.surfaceRim; r.surfaceWidth = DEFAULT_PARAMS.surfaceWidth; r.surfaceTone = DEFAULT_PARAMS.surfaceTone; }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -841,6 +850,10 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   traceFilm: { help: 'Permanent thin film over the whole glass, as a residue level: the tube never looks perfectly clean between smears. Rendered exactly like residue that has dried to this level — streaked, strongest at the wall rows, under the liquid, wet band at the edge — so fresh smears stand out above it and its opacity at the walls ≈ traceFilm^0.65 × residue amount (0.05 → ~14% of the residue amount). 0 = bare glass. Needs traces on.', group: 'Meniscus dynamics', label: 'film everywhere', min: 0, max: 1, step: 0.01 },
   edgeSoft: { help: 'Soft edge: anti-aliased ramp width in px, centred on the edge (0 = hard pixel edge, 1 = classic 1-px AA).', group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { help: 'Band just behind the fill edge blended toward liquidHi (bright convex cap), px.', group: 'Shape', min: 0, max: 40, step: 1 },
+  surfaceBand: { help: 'Intensity of the visible meniscus surface. A concave surface grades from a darker inner shoulder to a lit rim and closes at the walls. It fades while the edge recedes and re-forms as the wet film drains. A convex nose is darker for opaque liquids and paler for clear ones. 0 disables surface shading.', group: 'Shape', label: 'surface band', min: 0, max: 1, step: 0.05 },
+  surfaceRim: { help: 'Strength of the thin lit rim on the concave surface. Moves smoothly with the edge and fades with the surface band. Follows the edge light and row shading. No effect on a convex meniscus.', group: 'Shape', label: 'surface rim', min: 0, max: 1, step: 0.05 },
+  surfaceWidth: { help: 'Thickness of the concave surface stroke, px, measured outward from the edge profile. It never extends past the wall contact ring (meniscusDepth minus the tilt bulge), so it tapers to nothing at the walls.', group: 'Shape', label: 'surface width', min: 1, max: 16, step: 0.5 },
+  surfaceTone: { help: 'Tone of the visible surface: 0 = the shaded shoulder and lit rim (concave) / the limb-darkened or pale nose (convex); negative darkens toward the deep liquid colour, positive lightens toward the highlight.', group: 'Shape', label: 'surface tone', min: -1, max: 1, step: 0.05 },
   edgeGlow: { help: 'Dim glow fading out past the fill edge, px. 0 = off.', group: 'Shape', min: 0, max: 40, step: 1 },
   glowStrength: { help: 'Brightness of the glow at the edge.', group: 'Shape', min: 0, max: 1, step: 0.01 },
   cornerR: { help: 'Rounding of the column left end (tube end cap), px.', group: 'Shape', min: 0, max: 36, step: 1 },
