@@ -832,8 +832,12 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     // Columns that may receive residue or band: the occupied residue range (physics keeps
     // [traceLo, traceHi) tight) mirrored into the render frame, plus each band's reach over all rows.
     // Permanent film (traceFilm): every column carries residue of at least that level, so the range
-    // is the whole tube and the per-column value floors at the film's gamma-lifted alpha.
-    const filmG = p.traceFilm > 0 ? traceGamma(Math.min(1, p.traceFilm)) : 0;
+    // is the whole tube and the per-column value floors at the film's gamma-lifted alpha. A film of
+    // the liquid can't read denser than the liquid column itself, so its alpha (after traceAmount)
+    // is capped at the body's opacity 1 - liquidTransparency — otherwise a clear liquid looks like a
+    // hole in its own film. Smears keep traceAmount's freedom (dried pigment concentrates).
+    const filmCap = 1 - Math.max(0, Math.min(1, p.liquidTransparency));
+    const filmG = p.traceFilm > 0 ? Math.min(traceGamma(Math.min(1, p.traceFilm)), filmCap / p.traceAmount) : 0;
     let lo = L, hi = 0;
     if (filmG > 0) { lo = 0; hi = L; }
     else if (state.traceHi > state.traceLo) { lo = p.remaining ? L - state.traceHi : state.traceLo; hi = p.remaining ? L - state.traceLo : state.traceHi; }

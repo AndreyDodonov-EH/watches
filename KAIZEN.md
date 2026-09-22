@@ -280,3 +280,10 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   0.17) show a dark jagged sliver along the contact line for a few frames: the per-pixel plane switch of
   the baked shadow (behind air vs behind liquid) lands on the parallax-offset shadow texels. Reproduces
   with `surfaceBand` 0, so it is the shadow-bake compositor, not the surface stroke. Not pursued.
+- `traceFilm` on a black tube back: the film carries the liquid's specular highlight band
+  (`traceRows` mixes `liquidHi` at the highlight rows) along the whole dry tube, and its
+  desaturation uses the full `ambientLight` (not transparency-scaled like the body). Reads as a
+  glossy coating; acceptable, but a dried film has no liquid surface to reflect. Not pursued.
+- Rear ticks/digits behind air are composited opaque over the film, so the film reads as sitting
+  behind the rear-wall marks; physically the inner-wall film is in front of them (should tint them
+  like it tints the tube back). Only visible with `traceFilm` and a black back. Not pursued.
