@@ -6,7 +6,7 @@ import {
   rgb565, rgb565to888,
 } from '@spec/layout';
 import type { Params } from './params';
-import { columnLen, TRACE_FULL, type TubeState } from './physics';
+import { columnLen, FILM_FULL_PX_S, TRACE_FULL, type TubeState } from './physics';
 
 export const fb = new Uint16Array(PANEL_W * PANEL_H);
 const lensScratch = new Uint16Array(PANEL_W * TUBE_HEIGHT_MAX);
@@ -650,6 +650,8 @@ const fizzLen = [0, 0];   // liquid length px per tube, set by drawTube
  *  home edge of a free slug off the near end). Fizz parks only in an exposed surface. */
 const fizzSurf: Float32Array[] = [new Float32Array(0), new Float32Array(0)];
 const fizzSurfL: Float32Array[] = [new Float32Array(0), new Float32Array(0)];
+/** Last drawn rear-mark column bounds per tube (panel frame) — read by the regression checks. */
+export const markBounds: Edges[] = [{ lo: new Float32Array(0), hi: new Float32Array(0) }, { lo: new Float32Array(0), hi: new Float32Array(0) }];
 const fizzExposed = [0, 0];
 // Foam constants (mirrored in firmware/src/render.cpp): the pop's swell + fade time, slide speed along the
 // surface as a fraction of fizzSpeed per px/row of meniscus slope, lag rate behind an advancing surface
@@ -874,6 +876,16 @@ function wallCap(ry: number, p: Params, tilt: number, side: number, cap: number)
   const bulge = p.meniscusTiltGain * tilt * Math.abs(p.meniscusDepth) + cap;
   return p.meniscusDepth * (1 - asymEff * d) - bulge;
 }
+/** Rear-mark extent of a concave band: px past the profile over which its opacity
+ *  alpha·(1 − pull·smoothstep(u)) stays >= 0.5, u running 0..1 from hw inside the profile to the
+ *  band's outer edge `w` (closed-form inverse smoothstep). Opaque bands give w, faint ones 0. */
+function bandMarkExtent(alpha: number, pull: number, w: number, hw: number): number {
+  if (alpha < 0.5) return 0;
+  const y = (1 - 0.5 / alpha) / Math.max(1e-6, pull);   // smoothstep value where opacity crosses 0.5
+  if (y >= 1) return w;
+  const u = 0.5 - Math.sin(Math.asin(1 - 2 * y) / 3);
+  return Math.max(0, Math.min(w, u * (w + hw) - hw));
+}
 /** Meniscus amplitude limiter: the caps of a column `len` px long may not exceed half of it in total
  *  (a short slug is a bead, not two crossing scoops). 1 for any column longer than the features. */
 export function capScale(len: number, p: Params, tilt: number, cap: number): number {
@@ -1059,6 +1071,24 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     }
   }
 
+  // Local backing per row and edge for the convex nose (step 3e): the first pixel past the soft
+  // ramp, taken BEFORE the body and its glow paint over it — the bare back or the residue/wet band,
+  // plus the first pixel of the step-3c wet film — so no glow width can move it off the wet trail.
+  const backR = new Uint16Array(H), backL = new Uint16Array(H);
+  if (hasLiquid) {
+    const hw = softW / 2, yc = (H - 1) / 2;
+    const film3c = !traceMode && p.wetFilm > 0;
+    for (let ry = 0; ry < H; ry++) {
+      const y = y0 + ry, d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d;
+      const xr = Math.floor(edges[ry] + hw - 0.5) + 1, xl = Math.ceil(edgesL[ry] - hw - 0.5) - 1;
+      let bR = xr >= 0 && xr < L ? fb[y * PANEL_W + xr] : pal.tubeBackRows[ry];
+      let bL = xl >= capX0[ry] && xl < L ? fb[y * PANEL_W + xl] : pal.tubeBackRows[ry];
+      if (film3c && s.filmFree > 0.02 && Math.round(p.wetFilm * s.filmFree) > 0) bR = blend565(bR, pal.rows[ry], 0.35 * s.filmFree * rowW);
+      if (film3c && p.freeLiquid && s.filmHome > 0.02 && Math.round(p.wetFilm * s.filmHome) > 0) bL = blend565(bL, pal.rows[ry], 0.35 * s.filmHome * rowW);
+      backR[ry] = bR; backL[ry] = bL;
+    }
+  }
+
   // Liquid body and its soft edge, over the residue backing.
   for (let ry = 0; ry < H; ry++) {
     const ex = edges[ry], exL = edgesL[ry], x0 = capX0[ry];
@@ -1217,24 +1247,30 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   }
 
   // Step 3e: meniscus surface, over residue and the inset highlight. Normal alpha-over
-  // compositing keeps the underlying film visible as a receding edge's surface re-forms;
-  // no separate residue mask can expose bare glass before the surface becomes opaque.
+  // compositing blends the surface over the actual smear; no separate residue mask can
+  // expose bare glass under a faint band.
   // Concave: a dark inner shoulder grades into a lit outer rim, clipped to the wall ring.
   // Pixel-footprint coverage keeps both ends symmetric and the rim smooth during motion.
   // Convex: shade the thin nose inside the profile, leaving the existing soft ramp intact.
   // Both branches fade as ring and profile meet, avoiding a pop at the curvature sign change.
   // Per-row stroke extents also tell the rear-mark compositor where the surface is liquid.
   const strokeR = new Float32Array(H), strokeL = new Float32Array(H);
-  let strokeAR = 0, strokeAL = 0;   // the stroke's opacity per edge
+  const markR = new Float32Array(H), markL = new Float32Array(H);   // rear-mark extent: stroke part >= 0.5 opaque
+  let strokeA = 0, pullR = 0, pullL = 0, markW = 0;   // the stroke's opacity; receding pull per edge
   if (hasLiquid && p.surfaceBand > 0) {
     const hw = softW / 2, transK = Math.max(0, Math.min(1, p.liquidTransparency));
     // Opaque from surfaceBand ~0.6 whatever the light (the edge lit by the opposite tilt gets a
-    // darker stroke, not a translucent one), but only on a settled or advancing edge: a receding
-    // contact line pulls a thin film and the dish flattens, so the lens band is gone while the wet
-    // film is up (TubeState.film*, fast attack, ~0.5 s drain) and re-forms as the edge settles.
-    const bandK = Math.min(1, 1.6 * p.surfaceBand);
-    strokeAR = bandK * (1 - s.filmFree);
-    strokeAL = bandK * (1 - s.filmHome);
+    // darker stroke, not a translucent one). Motion never fades it: the interface is always there,
+    // only its shape moves — a receding line clings and deepens the dish, an advancing one flattens
+    // it (TubeState.cap), and it springs back with a wobble as the edge settles.
+    strokeA = Math.min(1, 1.6 * p.surfaceBand);
+    // Dynamic contact angle: a line receding at speed pulls a wet film and meets the glass at ~0°
+    // (collapsed by half the full-film speed). The dish is then liquid thinning into its film — no
+    // limb-dark shoulder, no rim — so the band takes the liquid's own colour and runs out into the
+    // trail along the dish. Instantaneous edge speed, not the draining film: once the line stops the
+    // angle is back and so are shoulder and rim — nothing fades in afterwards. 0..1 per edge.
+    const recede = p.remaining ? 1 : -1, sat = (v: number): number => Math.max(0, Math.min(1, 2 * v / FILM_FULL_PX_S));
+    pullR = sat(recede * (s.fillVel + s.slugVel)); pullL = p.freeLiquid ? sat(-recede * s.slugVel) : 0;
     const surface = (ry: number, xm: number, xw: number, dir: number, lk: number, xlo: number, xhi: number): number => {
       const y = y0 + ry, tw = dir * (xw - xm);   // ring lead in the edge's own outward sense
       if (tw === 0) return 0;
@@ -1242,14 +1278,16 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const x0 = Math.max(xlo, Math.ceil(lo - 0.5)), x1 = Math.min(xhi, Math.ceil(hi - 0.5));
       if (tw > 0) {   // concave: shaded surfaceWidth-px band, clipped to the wall ring
         // Overlap the body's AA ramp so it joins the shoulder without a bare-glass seam.
-        const a = (dir > 0 ? strokeAR : strokeAL) * Math.min(1, tw);
+        const a = strokeA * Math.min(1, tw);
         if (a < 1 / 255) return 0;   // below visible opacity: no stroke, rim or extended mark bounds
         const shade = 0.6 * (1 - Math.min(1, lk));   // unlit edge: toward the deep liquid colour
         const inner = tone(blend565(pal.rows[ry], darkC, 0.3));
         const outer = tone(blend565(blend565(lensC, pal.rows[ry], 0.2), darkC, shade));
         const wEff = Math.min(p.surfaceWidth, tw);
         const invWidth = 1 / (wEff + hw);
-        const rimK = p.surfaceRim * (0.5 + 0.5 * rowKs[ry]) * Math.min(1, lk) * Math.min(1, wEff / 2);
+        const pull = dir > 0 ? pullR : pullL;
+        markW = bandMarkExtent(a, pull, wEff, hw);
+        const rimK = p.surfaceRim * (0.5 + 0.5 * rowKs[ry]) * Math.min(1, lk) * Math.min(1, wEff / 2) * (1 - pull);
         // Integrate pixel footprints, including the rim, instead of snapping to a last column.
         const cLo = dir > 0 ? xm - hw : xm - wEff, cHi = dir > 0 ? xm + wEff : xm + hw;
         for (let x = Math.max(xlo, Math.floor(cLo)), xb = Math.min(xhi, Math.ceil(cHi)); x < xb; x++) {
@@ -1258,8 +1296,9 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
           const coverage = Math.max(0, hi - lo);
           if (coverage <= 0) continue;
           const u = Math.max(0, Math.min(1, ((lo + hi) / 2 + hw) * invWidth));
-          const c = blend565(inner, outer, u * u * (3 - 2 * u));
-          pxa(x, y, c, a * coverage);
+          const us = u * u * (3 - 2 * u);
+          const c = blend565(inner, outer, us);
+          pxa(x, y, pull > 0 ? blend565(c, pal.rows[ry], pull) : c, a * coverage * (1 - pull * us));
           const rimCoverage = Math.max(0, hi - Math.max(lo, Math.max(0, wEff - 1)));
           const ar = a * rimK * rimCoverage;
           if (ar >= 1 / 255) pxa(x, y, hiC, Math.min(1, ar));
@@ -1267,11 +1306,12 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
         return wEff;
       } else {   // convex: thin nose inside the profile back to the ring — limb-darkened for an
         // opaque liquid (the surface turns away from the viewer), pale for a clear one (nothing left to absorb)
-        // A tilted/reversing trailing edge can be convex too. Fade its nose with the same
-        // wet-film state as the concave band, or a white tube back leaves a pale crescent.
-        const noseK = p.surfaceBand * (1 - (dir > 0 ? s.filmFree : s.filmHome));
-        if (noseK < 1 / 255) return 0;
-        const c = tone(blend565(blend565(pal.rows[ry], pal.tubeBackRows[ry], 0.55), hiC, 0.5 * transK));
+        // The thin nose shows what is behind it: the local backing (bare tube back, or the wet film /
+        // residue a receding edge left — liquid-coloured, so a trailing convex nose never thins to a
+        // pale crescent), sampled before the body and glow. Motion never fades it.
+        const noseK = p.surfaceBand;
+        const back = dir > 0 ? backR[ry] : backL[ry];
+        const c = tone(blend565(blend565(pal.rows[ry], back, 0.55), hiC, 0.5 * transK));
         for (let x = x0; x < x1; x++) {
           const t = dir * (x + 0.5 - xm); if (t > -hw) continue;
           const a = noseK * Math.min(1, -tw) * (1 - Math.sqrt(Math.max(0, t / tw)));   // t/tw: 1 at the ring, 0 at the tip
@@ -1282,18 +1322,17 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     };
     for (let ry = 0; ry < H; ry++) {
       const xi = Math.floor(edges[ry]), xa = Math.max(capX0[ry], Math.floor(edgesL[ry]) + 1);
-      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L);
-      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi);
+      markW = 0; strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L); markR[ry] = markW;
+      if (p.freeLiquid) { markW = 0; strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi); markL[ry] = markW; }
     }
   }
 
   // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi), the concave
-  // surface stroke included once its opacity reaches 0.5. A faint surfaceBand must not
-  // switch the rear marks to the wet plane just because the wet film has finished draining.
-  const bounds: Edges = { lo: new Float32Array(H), hi: new Float32Array(H) };
-  const bsL = strokeAL >= 0.5, bsR = strokeAR >= 0.5;
+  // surface stroke included only as far as its opacity reaches 0.5: a faint surfaceBand, or the
+  // outer part of a receding edge's band thinning into its trail, must not hide marks as liquid.
+  const bounds: Edges = markBounds[idx] = { lo: new Float32Array(H), hi: new Float32Array(H) };
   for (let ry = 0; ry < H; ry++) {
-    const lo = edgesL[ry] - (bsL ? strokeL[ry] : 0), hi = edges[ry] + (bsR ? strokeR[ry] : 0);
+    const lo = edgesL[ry] - markL[ry], hi = edges[ry] + markR[ry];
     if (p.remaining) {
       const row = (y0 + ry) * PANEL_W;
       for (let a = 0, b = L - 1; a < b; a++, b--) { const t = fb[row + a]; fb[row + a] = fb[row + b]; fb[row + b] = t; }
@@ -1343,7 +1382,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
         const wallT = pal.dryT[iy] * pop;   // bubbles live in the bore: invisible where the ray only sees the wall band
         if (wallT <= 0) continue;
         // Past the profile a bubble is seen through the concave band's front-glass wedge, thickest at the
-        // profile and gone at the band's outer rim.
+        // profile and gone at the band's outer rim; a receding edge's band thins out the same way it is drawn.
         const sR = surf[iy], sL = surfL[iy], bR = strokeR[iy], bL = strokeL[iy];   // stroke widths: 0 where no band is drawn
         for (let ix = Math.floor(fx - r - 1); ix <= Math.ceil(fx + r); ix++) {
           const dx = ix + 0.5 - fx, dy = (iy + 0.5 - f.y) * m;
@@ -1352,9 +1391,9 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
           if (cov <= 0) continue;
           // Veil by the pixel's footprint over each band [profile, profile ± width]: continuous as the edge moves.
           if (ix + 1 > sR && bR > 0) { const a1 = Math.min(ix + 1, sR + bR), a0 = Math.max(ix, sR);
-            if (a1 > a0) cov *= 1 - FOAM_VEIL * strokeAR * (a1 - a0) * (1 - ((a0 + a1) / 2 - sR) / bR); }
+            if (a1 > a0) { const q = ((a0 + a1) / 2 - sR) / bR; cov *= 1 - FOAM_VEIL * strokeA * (a1 - a0) * (1 - q) * (1 - pullR * q); } }
           if (ix < sL && bL > 0) { const a1 = Math.min(ix + 1, sL), a0 = Math.max(ix, sL - bL);
-            if (a1 > a0) cov *= 1 - FOAM_VEIL * strokeAL * (a1 - a0) * (1 - (sL - (a0 + a1) / 2) / bL); }
+            if (a1 > a0) { const q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - FOAM_VEIL * strokeA * (a1 - a0) * (1 - q) * (1 - pullL * q); } }
           const cx = dx - off, cy = dy - off, dc = Math.sqrt(cx * cx + cy * cy);
           pxa(mapX(ix + xsI), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }

@@ -77,6 +77,15 @@ static void __attribute__((noinline)) traceFillRow(uint16_t *row, const uint16_t
   }
 }
 static inline int alphaT(float t) { return (int)(t * 256 + 0.5f); }
+// Rear-mark extent of a concave band: px past the profile where alpha * (1 - pull * smoothstep(u))
+// stays >= 0.5 (closed-form inverse smoothstep). See sim bandMarkExtent.
+static inline float bandMarkExtent(float alpha, float pull, float w, float hw) {
+  if (alpha < 0.5f) return 0;
+  const float y = (1 - 0.5f / alpha) / fmaxf(1e-6f, pull);
+  if (y >= 1) return w;
+  const float u = 0.5f - sinf(asinf(1 - 2 * y) / 3);
+  return clampf(u * (w + hw) - hw, 0, w);
+}
 static inline float luma(RGB c) { return 0.299f * c.r + 0.587f * c.g + 0.114f * c.b; }
 
 // Ambient-light desaturation (params.ambientLight, sim ambientize): a colour brighter than the
@@ -325,6 +334,8 @@ struct Tube {
   float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
   float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds for the mark compositor (edges + surface stroke)
   float strokeR[TUBE_HEIGHT_MAX], strokeL[TUBE_HEIGHT_MAX];   // outward extent of the concave surface stroke per edge (sim strokeR/L)
+  float markR[TUBE_HEIGHT_MAX], markL[TUBE_HEIGHT_MAX];       // part of that stroke >= 0.5 opaque: rear-mark bounds (sim markR/L)
+  uint16_t backR[TUBE_HEIGHT_MAX], backL[TUBE_HEIGHT_MAX];    // local backing past each edge before body/glow: convex nose (sim backR/L)
   Fizz fizz[MAX_FIZZ]; int fizzN = 0; float fizzLen = 0;      // liquid length px, set by drawTube
   float fizzSurf[TUBE_HEIGHT_MAX], fizzSurfL[TUBE_HEIGHT_MAX]; // liquid-frame surface front per row (profile = edges - xs, the inner rim of a surface band), time / home edge, set by drawTube: where foam parks
   uint8_t fizzExposed = 0;                                    // bit 1 = time edge short of the far end, bit 2 = home edge of a free slug off the near end
@@ -1299,6 +1310,22 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     }
   }
 
+  // Local backing per row and edge for the convex nose (3e): first pixel past the soft ramp, before the
+  // body and glow paint it, plus the first pixel of the 3c wet film. See sim.
+  if (hasLiquid) {
+    const float hw = softW * 0.5f, yc = (H - 1) / 2.0f;
+    const bool film3c = !traceMode && p.wetFilm > 0;
+    for (int ry = 0; ry < H; ry++) {
+      const int y = y0 + ry; const float d = (ry - yc) / yc, rowW = 0.4f + 0.6f * d * d;
+      const int xr = (int)floorf(edges[ry] + hw - 0.5f) + 1, xl = (int)ceilf(edgesL[ry] - hw - 0.5f) - 1;
+      uint16_t bR = xr >= 0 && xr < L && inStrip(xr, y) ? rd(xr, y) : pal.tubeBackRows[ry];
+      uint16_t bL = xl >= capX0[ry] && xl < L && inStrip(xl, y) ? rd(xl, y) : pal.tubeBackRows[ry];
+      if (film3c && s.filmFree > 0.02f && jround(p.wetFilm * s.filmFree) > 0) bR = blend565(bR, pal.rows[ry], 0.35f * s.filmFree * rowW);
+      if (film3c && p.freeLiquid && s.filmHome > 0.02f && jround(p.wetFilm * s.filmHome) > 0) bL = blend565(bL, pal.rows[ry], 0.35f * s.filmHome * rowW);
+      backR[ry] = bR; backL[ry] = bL;
+    }
+  }
+
   // Liquid body and its soft edge, over the residue backing.
   for (int ry = 0; ry < H; ry++) {
     const float ex = edges[ry], exL = edgesL[ry];
@@ -1450,17 +1477,21 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
 
   // 3e: meniscus surface, over residue and the inset highlight. Concave bands grade from
   // a dark inner shoulder to a lit rim with subpixel coverage; convex noses shade inward.
-  // Alpha-over preserves the underlying film while the stroke re-forms. Both branches fade
-  // as the ring meets the profile. See sim step 3e. No extra buffers or allocations.
-  for (int ry = 0; ry < H; ry++) strokeR[ry] = strokeL[ry] = 0;
-  float strokeAR = 0, strokeAL = 0;   // the stroke's opacity per edge
+  // Alpha-over blends the stroke over the actual smear. Both branches fade as the ring
+  // meets the profile. See sim step 3e. No extra buffers or allocations.
+  for (int ry = 0; ry < H; ry++) strokeR[ry] = strokeL[ry] = markR[ry] = markL[ry] = 0;
+  float strokeA = 0, pullR = 0, pullL = 0, markW = 0;   // the stroke's opacity; receding pull per edge
   if (hasLiquid && p.surfaceBand > 0) {
     const float hw = softW * 0.5f, transK = clampf(p.liquidTransparency, 0, 1);
-    // opaque from surfaceBand ~0.6 whatever the light; the unlit edge gets a darker stroke; a receding
-    // edge (wet film up) has no stroke at all and it re-forms as the edge settles (see sim)
-    const float bandK = fminf(1, 1.6f * p.surfaceBand);
-    strokeAR = bandK * (1 - s.filmFree);
-    strokeAL = bandK * (1 - s.filmHome);
+    // opaque from surfaceBand ~0.6 whatever the light; the unlit edge gets a darker stroke; motion
+    // never fades it, only reshapes the dish through TubeState.cap (see sim)
+    strokeA = fminf(1, 1.6f * p.surfaceBand);
+    // dynamic contact angle: a receding line (~0° by half the full-film speed) is liquid thinning into
+    // its film — liquid colour, no shoulder or rim; instantaneous edge speed, so both are back once the
+    // line stops (see sim)
+    const float recede = p.remaining ? 1 : -1;
+    pullR = clampf(2 * recede * (s.fillVel + s.slugVel) / FILM_FULL_PX_S, 0, 1);
+    pullL = p.freeLiquid ? clampf(-2 * recede * s.slugVel / FILM_FULL_PX_S, 0, 1) : 0.0f;
     const uint16_t hiC = rc.hiC;
     auto tone = [&](uint16_t c) -> uint16_t { return rc.toneT > 0 ? blend565T(c, rc.toneC, rc.toneT) : c; };
     auto surface = [&](int ry, float xm, float xw, int dir, float lk, int xlo, int xhi) -> float {
@@ -1470,14 +1501,16 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       int x0 = (int)ceilf(lo - 0.5f), x1 = (int)ceilf(hi - 0.5f); if (x0 < xlo) x0 = xlo; if (x1 > xhi) x1 = xhi;
       if (tw > 0) {   // concave: shaded surfaceWidth-px band, clipped to the wall ring
         // Overlap the body's AA ramp so it joins the shoulder without a bare-glass seam.
-        const float a = (dir > 0 ? strokeAR : strokeAL) * fminf(1, tw);
+        const float a = strokeA * fminf(1, tw);
         if (a < 1 / 255.0f) return 0;   // below visible opacity: no stroke, rim or extended mark bounds
         const float shade = 0.6f * (1 - fminf(1, lk));   // unlit edge: toward the deep liquid colour
         const uint16_t inner = tone(blend565(pal.rows[ry], rc.darkC, 0.3f));
         const uint16_t outer = tone(blend565(blend565(rc.lensC, pal.rows[ry], 0.2f), rc.darkC, shade));
         const float wEff = fminf(p.surfaceWidth, tw);
         const float invWidth = 1 / (wEff + hw);
-        const float rimK = p.surfaceRim * (0.5f + 0.5f * pal.rowK[ry]) * fminf(1, lk) * fminf(1, wEff / 2);
+        const float pull = dir > 0 ? pullR : pullL;
+        markW = bandMarkExtent(a, pull, wEff, hw);
+        const float rimK = p.surfaceRim * (0.5f + 0.5f * pal.rowK[ry]) * fminf(1, lk) * fminf(1, wEff / 2) * (1 - pull);
         // Pixel-footprint coverage for the stroke and rim; no integer-column snapping. See sim.
         const float cLo = dir > 0 ? xm - hw : xm - wEff, cHi = dir > 0 ? xm + wEff : xm + hw;
         int xa = (int)floorf(cLo), xb = (int)ceilf(cHi); if (xa < xlo) xa = xlo; if (xb > xhi) xb = xhi;
@@ -1487,19 +1520,20 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
           const float coverage = fmaxf(0, hi - lo);
           if (coverage <= 0) continue;
           const float u = clampf(((lo + hi) * 0.5f + hw) * invWidth, 0, 1);
-          const uint16_t c = blend565(inner, outer, u * u * (3 - 2 * u));
-          pxa(x, y, c, a * coverage);
+          const float us = u * u * (3 - 2 * u);
+          const uint16_t c = blend565(inner, outer, us);
+          pxa(x, y, pull > 0 ? blend565(c, pal.rows[ry], pull) : c, a * coverage * (1 - pull * us));
           const float rimCoverage = fmaxf(0, hi - fmaxf(lo, fmaxf(0, wEff - 1)));
           const float ar = a * rimK * rimCoverage;
           if (ar >= 1 / 255.0f) pxa(x, y, hiC, fminf(1, ar));
         }
         return wEff;
       } else {   // convex: thin nose inside the profile back to the ring
-        // Tilt/reversal can make a receding edge convex: fade its nose with the wet film
-        // just like the concave band, avoiding a pale crescent from a white tube back.
-        const float noseK = p.surfaceBand * (1 - (dir > 0 ? s.filmFree : s.filmHome));
-        if (noseK < 1 / 255.0f) return 0;
-        const uint16_t c = tone(blend565(blend565(pal.rows[ry], pal.tubeBackRows[ry], 0.55f), hiC, 0.5f * transK));
+        // The thin nose shows the local backing sampled before body and glow (bare back, or a receding
+        // edge's liquid-coloured film / residue: no pale crescent). Motion never fades it. See sim.
+        const float noseK = p.surfaceBand;
+        const uint16_t back = dir > 0 ? backR[ry] : backL[ry];
+        const uint16_t c = tone(blend565(blend565(pal.rows[ry], back, 0.55f), hiC, 0.5f * transK));
         for (int x = x0; x < x1; x++) {
           float t = dir * (x + 0.5f - xm); if (t > -hw) continue;
           float a = noseK * fminf(1, -tw) * (1 - sqrtf(fmaxf(0, t / tw)));   // t/tw: 1 at the ring, 0 at the tip
@@ -1510,17 +1544,16 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     };
     for (int ry = 0; ry < H; ry++) {
       int xi = (int)floorf(edges[ry]), xa = (int)floorf(edgesL[ry]) + 1; if (xa < capX0[ry]) xa = capX0[ry];
-      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L);
-      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi);
+      markW = 0; strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L); markR[ry] = markW;
+      if (p.freeLiquid) { markW = 0; strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi); markL[ry] = markW; }
     }
   }
 
   // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi), the concave
-  // surface stroke included once its opacity reaches 0.5 (including surfaceBand, see sim).
+  // surface stroke included only as far as its opacity reaches 0.5 (faint or receding band, see sim).
   Edges bounds{boundLo, boundHi};
-  const bool bsL = strokeAL >= 0.5f, bsR = strokeAR >= 0.5f;
   for (int ry = 0; ry < H; ry++) {
-    float lo = edgesL[ry] - (bsL ? strokeL[ry] : 0.0f), hi = edges[ry] + (bsR ? strokeR[ry] : 0.0f);
+    float lo = edgesL[ry] - markL[ry], hi = edges[ry] + markR[ry];
     if (p.remaining) {
       uint16_t *row = FB + ry * PANEL_W;
       for (int a = 0, b = L - 1; a < b; a++, b--) { uint16_t t = row[a]; row[a] = row[b]; row[b] = t; }
@@ -1578,9 +1611,9 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
           if (cov <= 0) continue;
           // Veil by the pixel's footprint over each band [profile, profile +- width]: continuous as the edge moves.
           if (ix + 1 > sR && bR > 0) { const float a1 = fminf(ix + 1, sR + bR), a0 = fmaxf(ix, sR);
-            if (a1 > a0) cov *= 1 - FOAM_VEIL * strokeAR * (a1 - a0) * (1 - ((a0 + a1) / 2 - sR) / bR); }
+            if (a1 > a0) { const float q = ((a0 + a1) / 2 - sR) / bR; cov *= 1 - FOAM_VEIL * strokeA * (a1 - a0) * (1 - q) * (1 - pullR * q); } }
           if (ix < sL && bL > 0) { const float a1 = fminf(ix + 1, sL), a0 = fmaxf(ix, sL - bL);
-            if (a1 > a0) cov *= 1 - FOAM_VEIL * strokeAL * (a1 - a0) * (1 - (sL - (a0 + a1) / 2) / bL); }
+            if (a1 > a0) { const float q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - FOAM_VEIL * strokeA * (a1 - a0) * (1 - q) * (1 - pullL * q); } }
           float cx = dx - off, cy = dy - off, dc = sqrtf(cx * cx + cy * cy);
           pxa(mapX(ix + xsI), y0 + iy, r >= 1.5f && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }

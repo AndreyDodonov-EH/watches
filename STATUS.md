@@ -18,8 +18,18 @@ bright fringe (`frontBright`) and a dim glow. Two realism points, the first done
      band toward dark liquid or the highlight. Stroke and rim use pixel-footprint coverage, so
      fractional motion does not snap a full-bright pixel on/off and both ends are symmetric.
      Both curvature branches fade below 1 px of ring/profile separation, removing the previous
-     discontinuity at 0.5 px. The concave band still fades while a receding edge's wet film is up,
-     and re-forms as the film drains. Its unlit edge darkens without reducing opacity.
+     discontinuity at 0.5 px. The concave band no longer fades with the wet film (2026-09-22: a
+     re-forming interface read as a fade-in while settling); motion only reshapes it through `cap`
+     (a receding line deepens the dish). Dynamic contact angle: a line receding at speed (pull = instantaneous
+     edge speed / 12.5 px/s, not the draining film) meets the glass tangentially, so the dish is liquid
+     thinning into its film: band colour → liquid row by pull, alpha × (1 − pull·u) across the band, rim
+     × (1 − pull) — no dark shoulder or lit outline over the trail; both are back the moment the line stops. Rear-mark bounds extend only over the part of the stroke
+     whose drawn opacity a·(1 − pull·smoothstep) is ≥ 0.5 (`bandMarkExtent`, closed-form inverse
+     smoothstep; per-row `markR/L`), so a thinning receding band doesn't hide ticks/digits as liquid;
+     the foam veil follows the same pull profile. `a` is the curvature-adjusted opacity strokeA·min(1, tw),
+     so a flattening/wobbling band (tw < 0.5 px at full strokeA) never hides a mark it doesn't visibly
+     cover. Checks: bounds per edge × fill direction via `markBounds` (sim test hook), receding and
+     flattening (depth 0.2 / 0.45). Its unlit edge darkens without reducing opacity.
      The surface now composites AFTER residue and the optional highlight inset. The old residue
      exclusions are removed: faint/re-forming bands blend over the actual smear rather than
      cutting a hole through it or having residue painted back over their rim. Rear-mark bounds
@@ -29,8 +39,12 @@ bright fringe (`frontBright`) and a dim glow. Two realism points, the first done
      body's anti-alias ramp. Previously it was masked by `(1 - coverage)` over a body already
      blended against white, leaking white at the junction even with surface shading disabled.
      Glow blends over the same residue backing; overlapping AA ramps of a tiny bead composite
-     once. Convex noses now share the receding-edge film fade, so a tilt/reversal cannot bypass
-     the fade by changing the surface curvature. Fixture: `sim/tools/fixtures/meniscus-trailing.json`.
+     once. Convex noses never fade either (2026-09-22): the thin nose blends toward the local backing
+     (`backR/L`, first pixel past the AA ramp, sampled after the residue/wet band and BEFORE the body
+     and glow, plus the first step-3c wet-film pixel in non-trace mode) — bare back, or the receding
+     edge's liquid-coloured wet film / residue — so no glow width can bring back a white crescent
+     (checked with edgeGlow 0 and 12, both edges, both fill directions). Firmware: +4 static
+     per-row arrays in the render context (2×float, 2×uint16 × TUBE_HEIGHT_MAX). Fixture: `sim/tools/fixtures/meniscus-trailing.json`.
      [Trailing edge before / after](docs/meniscus-trailing-fix.png) uses the supplied settings.
    - convex (wall ring behind the profile): the nose inside the profile is a thin lens, blended toward a
      pale "thin liquid" tone (weight 1 − √(1 − s)); the existing soft edge / frontBright keep the rim.
