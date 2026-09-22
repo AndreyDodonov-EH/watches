@@ -1072,8 +1072,11 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     // Columns that may receive residue or band: the occupied residue range (physics keeps
     // [traceLo, traceHi) tight) mirrored into the render frame, plus each band's reach over all rows.
     // Permanent film (traceFilm, see sim): every column carries residue of at least that level, so
-    // the range is the whole tube and the per-column value floors at the film's gamma-lifted alpha.
-    const float filmG = p.traceFilm > 0 ? traceGamma(fminf(1.0f, p.traceFilm)) : 0.0f;
+    // the range is the whole tube and the per-column value floors at the film's gamma-lifted alpha,
+    // capped (after traceAmount) at the body's opacity 1 - liquidTransparency so a clear liquid
+    // never reads thinner than its own film.
+    const float filmCap = 1 - clampf(p.liquidTransparency, 0, 1);
+    const float filmG = p.traceFilm > 0 ? fminf(traceGamma(fminf(1.0f, p.traceFilm)), filmCap / p.traceAmount) : 0.0f;
     int lo = L, hi = 0;
     if (filmG > 0) { lo = 0; hi = L; }
     else if (st.traceHi > st.traceLo) { lo = p.remaining ? L - st.traceHi : st.traceLo; hi = p.remaining ? L - st.traceLo : st.traceHi; }
