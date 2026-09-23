@@ -166,9 +166,10 @@ static void __attribute__((noinline)) discRow(uint16_t *row, int ixa, int ixb, c
   }
 }
 // Step 3e concave surface band over [xa, xb): pixel-footprint stroke from the inner shoulder to the outer
-// colour, thinned by the receding pull, plus the lit rim. See sim.
+// colour at interior opacity `fill` (surfaceFill), thinned by the receding pull, the blick (`blickK`: this
+// row's specular weight, peaking mid-dish) and the lit rim. See sim.
 static void __attribute__((noinline)) bandRow(uint16_t *row, int xa, int xb, float xm, int dir, float hw, float wEff, float invWidth,
-                                              float a, float pull, float rimK, uint16_t inner, uint16_t outer, uint16_t liquid, uint16_t hiC) {
+                                              float a, float fill, float blickK, float pull, float rimK, uint16_t inner, uint16_t outer, uint16_t liquid, uint16_t hiC, uint16_t rimC) {
   if (xa < 0) xa = 0; if (xb > PANEL_W) xb = PANEL_W;
   const float rimLo = fmx(0, wEff - 1);
   for (int x = xa; x < xb; x++) {
@@ -179,20 +180,24 @@ static void __attribute__((noinline)) bandRow(uint16_t *row, int xa, int xb, flo
     const float u = clampf(((lo + hi) * 0.5f + hw) * invWidth, 0, 1);
     const float us = u * u * (3 - 2 * u);
     const uint16_t c = blend565(inner, outer, us);
-    rowPxa(row, x, pull > 0 ? blend565(c, liquid, pull) : c, a * coverage * (1 - pull * us));
+    const float af = a * fill * coverage * (1 - pull * us);
+    const float ab = a * blickK * coverage * 4 * u * (1 - u);
     const float rimCoverage = fmx(0, hi - fmx(lo, rimLo));
     const float ar = a * rimK * rimCoverage;
-    if (ar >= 1 / 255.0f) rowPxa(row, x, hiC, fmn(1, ar));
+    // fill, blick and rim composite as ONE write per pixel (premultiplied sum), so the fixed-point
+    // rounding is taken once; a single layer takes the plain path (see sim). The division runs only
+    // on multi-layer pixels: the 1-2 rim px per row and the blick rows.
+    RGB P{0, 0, 0}; float A = 0; int nL = 0; uint16_t cLast = 0;
+    auto layer = [&](uint16_t col, float al) {
+      if (al < 1 / 255.0f) return;
+      const RGB C = to888(col); const float k = 1 - al;
+      P.r = P.r * k + C.r * al; P.g = P.g * k + C.g * al; P.b = P.b * k + C.b * al;
+      A = A * k + al; nL++; cLast = col;
+    };
+    layer(pull > 0 ? blend565(c, liquid, pull) : c, af); layer(hiC, fmn(1, ab)); layer(rimC, fmn(1, ar));
+    if (nL == 1) rowPxa(row, x, cLast, A);
+    else if (nL > 1) { const float inv = 1 / A; rowPxa(row, x, q({P.r * inv, P.g * inv, P.b * inv}), A); }
   }
-}
-// Rear-mark extent of a concave band: px past the profile where alpha * (1 - pull * smoothstep(u))
-// stays >= 0.5 (closed-form inverse smoothstep). See sim bandMarkExtent.
-static inline float bandMarkExtent(float alpha, float pull, float w, float hw) {
-  if (alpha < 0.5f) return 0;
-  const float y = (1 - 0.5f / alpha) / fmx(1e-6f, pull);
-  if (y >= 1) return w;
-  const float u = 0.5f - sinf(asinf(1 - 2 * y) / 3);
-  return clampf(u * (w + hw) - hw, 0, w);
 }
 static inline float luma(RGB c) { return 0.299f * c.r + 0.587f * c.g + 0.114f * c.b; }
 
@@ -339,7 +344,12 @@ static uint16_t throughLiquid(uint16_t bg, uint16_t mark, int T, int C) {
 
 // rel = +1 / -1: emboss highlight / shadow of body colour c, derived after the liquid pass.
 // Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi.
-struct Edges { const float *lo, *hi; };
+// Concave surface band of one tube for the rear-mark compositor (render frame, before the `remaining`
+// mirror; 0 = time edge, dir +1, 1 = home edge, dir -1): per row the profile x, the outward stroke width
+// (0 = no band) and the fill / blick / rim weights, stroke opacity included. See sim BandInfo / markFn.
+struct BandInfo { const float *xm[2], *w[2], *fill[2], *blick[2], *rim[2]; float pull[2], hw; bool mirror; int L; };
+// Liquid body bounds per tube row (panel frame) plus, when drawn, the surface band past them.
+struct Edges { const float *lo, *hi; const BandInfo *band = nullptr; };
 struct Mark {
   Tube &t; int y0; Edges edges; bool onTop; int T, C;   // T: transparency 1/256, C: contrast 1/1000
   bool bakedT;   // the mark's coverage already includes the liquid's transparency (sprite digits with a baked shadow, see bakeShadow)
@@ -349,6 +359,9 @@ struct Mark {
   }
   // covT: coverage in 1/256 (256 = opaque)
   inline void operator()(int x, int y, uint16_t c, int covT = 256, int rel = 0) const;
+  // A rear mark within the concave surface band's footprint (see sim markFn); false when the pixel is outside
+  // it, or inside the body where the band lets everything through — the plain paths then apply.
+  bool bandMark(int x, int y, int ry, uint16_t c, int covT, int rel, bool inside) const;
   // Whether the mark at (x, tube row ry) is composited through the liquid — the same test operator() applies.
   inline bool inLiquid(int x, int ry) const { return !onTop && x >= edges.lo[ry] && x < edges.hi[ry]; }
 };
@@ -411,6 +424,7 @@ struct Fizz { float x, y, v, life; };
 #define FOAM_FOLLOW 6.0f
 #define FOAM_CATCH 2.0f
 #define FOAM_VEIL 0.7f
+#define BLICK_H 0.18f   // surface blick tent half-height / tube height (sim BLICK_H)
 #define FOAM_RELAX 3   // packing sweeps per step
 
 // Everything that depends only on (params, H): rebuilt when the generation counter moves.
@@ -442,7 +456,7 @@ struct Tube {
   float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
   float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds for the mark compositor (edges + surface stroke)
   float strokeR[TUBE_HEIGHT_MAX], strokeL[TUBE_HEIGHT_MAX];   // outward extent of the concave surface stroke per edge (sim strokeR/L)
-  float markR[TUBE_HEIGHT_MAX], markL[TUBE_HEIGHT_MAX];       // part of that stroke >= 0.5 opaque: rear-mark bounds (sim markR/L)
+  float bandFill[2][TUBE_HEIGHT_MAX], bandBlick[2][TUBE_HEIGHT_MAX], bandRim[2][TUBE_HEIGHT_MAX];   // its layer weights per row, 0 = time edge, 1 = home: rear-mark compositor (sim BandInfo)
   uint16_t backR[TUBE_HEIGHT_MAX], backL[TUBE_HEIGHT_MAX];    // local backing past each edge before body/glow: convex nose (sim backR/L)
   Fizz fizz[MAX_FIZZ]; int fizzN = 0; float fizzLen = 0;      // liquid length px, set by drawTube
   float fizzSurf[TUBE_HEIGHT_MAX], fizzSurfL[TUBE_HEIGHT_MAX]; // liquid-frame surface front per row (profile = edges - xs, the inner rim of a surface band), time / home edge, set by drawTube: where foam parks
@@ -505,13 +519,62 @@ static Tube tubes[2];
 inline void Mark::operator()(int x, int y, uint16_t c, int covT, int rel) const {
   if (!t.inStrip(x, y)) return;
   int ry = y - y0;
-  if (!onTop && x >= edges.lo[ry] && x < edges.hi[ry]) {
+  const bool inside = !onTop && x >= edges.lo[ry] && x < edges.hi[ry];
+  if (!onTop && edges.band && bandMark(x, y, ry, c, covT, rel, inside)) return;
+  if (inside) {
     c = throughLiquid(t.rd(x, y), c, bakedT ? 256 : T, C);   // bakedT: transparency already in the coverage, only the contrast floor applies
     if (rel) { covT = covT * T >> 8; if (covT <= 0) return; }   // rear relief fades with the liquid's opacity (sim markFn)
   } else if (!onTop) { covT = covT * t.pal.dryT[ry] >> 8; if (covT <= 0) return; }   // rear marks vanish behind the wall band
   if (rel > 0) c = embossHi(c);
   else if (rel < 0) c = embossLo(c);
   t.wr(x, y, covT >= 256 ? c : blend565T(t.rd(x, y), c, covT));
+}
+// The concave surface band's footprint at a rear-mark pixel — it overlaps the body by hw inside the profile:
+// its rim and blick stay on top of the mark (the write is scaled by what they let through; approximation as
+// in the sim: the layers' own colour also yields by that share). Past the body the rear wall is seen through
+// the dish: the mark is liquid-tinted as far as the fill is opaque there (its own per-pixel opacity, no
+// threshold), dry for the rest; the band's plane is the behind-air one, so the coverage never has the
+// transparency baked in and the wet part applies it itself. The wet/dry colour mix and the blend over the
+// pixel are taken in 888 and rounded ONCE (parity with the sim). Out of the hot operator (noinline): the
+// divisions run only on the few mark pixels under a band.
+bool __attribute__((noinline)) Mark::bandMark(int x, int y, int ry, uint16_t c, int covT, int rel, bool inside) const {
+  const BandInfo &b = *edges.band;
+  const int xr = b.mirror ? b.L - 1 - x : x;
+  const float hw = b.hw;
+  // the edge whose footprint (hw inside the profile to the stroke width past it) can hold this pixel
+  const int side = xr + 0.5f > b.xm[0][ry] - hw ? 0 : 1;
+  const float wEff = b.w[side][ry];   // 0: no band on that side; a far pixel gets no coverage below
+  if (wEff <= 0) return false;
+  const float tt = (side == 0 ? 1 : -1) * (xr + 0.5f - b.xm[side][ry]);
+  const float lo = fmx(tt - 0.5f, -hw), hi = fmn(tt + 0.5f, wEff), coverage = hi - lo;
+  if (coverage <= 0) return false;
+  const float u = clampf(((lo + hi) * 0.5f + hw) / (wEff + hw), 0, 1), us = u * u * (3 - 2 * u);
+  const float ab = fmn(1, b.blick[side][ry] * coverage * 4 * u * (1 - u));
+  const float ar = fmn(1, b.rim[side][ry] * fmx(0, hi - fmx(lo, fmx(0, wEff - 1))));
+  const float through = (1 - ab) * (1 - ar);
+  if (inside) {
+    if (through >= 1) return false;   // nothing on top here: the plain body path, byte-identical
+    c = throughLiquid(t.rd(x, y), c, bakedT ? 256 : T, C);
+    if (rel) covT = covT * T >> 8;
+    covT = (int)(covT * through + 0.5f); if (covT <= 0) return true;
+    if (rel > 0) c = embossHi(c); else if (rel < 0) c = embossLo(c);
+    t.wr(x, y, covT >= 256 ? c : blend565T(t.rd(x, y), c, covT));
+    return true;
+  }
+  const float wet = fmn(1, b.fill[side][ry] * coverage * (1 - b.pull[side] * us));
+  const float cov = covT * (1 / 256.0f);
+  const float aw = cov * wet * (rel ? T * (1 / 256.0f) : 1), ad = cov * (1 - wet) * (t.pal.dryT[ry] * (1 / 256.0f));
+  const float al = (aw + ad) * through;
+  if (al < 1 / 255.0f) return true;
+  const uint16_t bg = t.rd(x, y);
+  RGB M = to888(c);
+  if (aw > 0) {
+    const RGB CT = to888(throughLiquid(bg, c, T, C));
+    M = ad > 0 ? mix(M, CT, aw / (aw + ad)) : CT;
+  }
+  if (rel > 0) M = to888(embossHi(q(M))); else if (rel < 0) M = to888(embossLo(q(M)));
+  t.wr(x, y, al >= 1 ? q(M) : q(mix(to888(bg), M, al)));
+  return true;
 }
 
 // Glass wall shading weight 0..1 per row (sim: glassW): ambient cylinder shade, specular tent on the
@@ -1576,8 +1639,11 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   // a dark inner shoulder to a lit rim with subpixel coverage; convex noses shade inward.
   // Alpha-over blends the stroke over the actual smear. Both branches fade as the ring
   // meets the profile. See sim step 3e. No extra buffers or allocations.
-  for (int ry = 0; ry < H; ry++) strokeR[ry] = strokeL[ry] = markR[ry] = markL[ry] = 0;
-  float strokeA = 0, pullR = 0, pullL = 0, markW = 0;   // the stroke's opacity; receding pull per edge
+  for (int ry = 0; ry < H; ry++) {
+    strokeR[ry] = strokeL[ry] = 0;
+    bandFill[0][ry] = bandFill[1][ry] = bandBlick[0][ry] = bandBlick[1][ry] = bandRim[0][ry] = bandRim[1][ry] = 0;
+  }
+  float strokeA = 0, pullR = 0, pullL = 0, veilA = 0;   // the stroke's opacity; receding pull per edge; foam veil opacity
   if (hasLiquid && p.surfaceBand > 0) {
     const float hw = softW * 0.5f, transK = clampf(p.liquidTransparency, 0, 1);
     // opaque from surfaceBand ~0.6 whatever the light; the unlit edge gets a darker stroke; motion
@@ -1589,6 +1655,13 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     const float recede = p.remaining ? 1 : -1;
     pullR = clampf(2 * recede * (s.fillVel + s.slugVel) / FILM_FULL_PX_S, 0, 1);
     pullL = p.freeLiquid ? clampf(-2 * recede * s.slugVel / FILM_FULL_PX_S, 0, 1) : 0.0f;
+    // interior opacity of the dish (surfaceFill; rim and blick keep their own) and the blick's per-row
+    // weight: a tent centred at the light angle's highlight row, BLICK_H of the tube tall (see sim blickRow)
+    const float fill = clampf(p.surfaceFill, 0, 1);
+    veilA = FOAM_VEIL * strokeA * fill;
+    const float yc = (H - 1) / 2.0f, blickY = yc - yc * sinf(s.light * (float)M_PI / 180), blickInvH = 1 / fmx(2, BLICK_H * H);
+    auto blickRow = [&](int ry) -> float {
+      return p.surfaceBlick > 0 ? p.surfaceBlick * fmx(0, 1 - fabsf(ry - blickY) * blickInvH) : 0.0f; };
     const uint16_t hiC = rc.hiC;
     auto tone = [&](uint16_t c) -> uint16_t { return rc.toneT > 0 ? blend565T(c, rc.toneC, rc.toneT) : c; };
     auto surface = [&](int ry, float xm, float xw, int dir, float lk, int xlo, int xhi) -> float {
@@ -1599,19 +1672,26 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       if (tw > 0) {   // concave: shaded surfaceWidth-px band, clipped to the wall ring
         // Overlap the body's AA ramp so it joins the shoulder without a bare-glass seam.
         const float a = strokeA * fmn(1, tw);
-        if (a < 1 / 255.0f) return 0;   // below visible opacity: no stroke, rim or extended mark bounds
+        if (a < 1 / 255.0f) return 0;   // below visible opacity: no stroke, rim or band for the marks
         const float shade = 0.6f * (1 - fmn(1, lk));   // unlit edge: toward the deep liquid colour
         const uint16_t inner = tone(blend565(pal.rows[ry], rc.darkC, 0.3f));
         const uint16_t outer = tone(blend565(blend565(rc.lensC, pal.rows[ry], 0.2f), rc.darkC, shade));
         const float wEff = fmn(p.surfaceWidth, tw);
         const float invWidth = 1 / (wEff + hw);
         const float pull = dir > 0 ? pullR : pullL;
-        markW = bandMarkExtent(a, pull, wEff, hw);
-        const float rimK = p.surfaceRim * (0.5f + 0.5f * pal.rowK[ry]) * fmn(1, lk) * fmn(1, wEff / 2) * (1 - pull);
+        const float blickK = blickRow(ry) * fmn(1, lk) * (1 - pull);
+        // the ring is a thin liquid lens: lit (light side, row shaded) over a dark back, a deep liquid tone
+        // at light-independent opacity over a light one; backK blends the two (sim rimK / rimC). Float
+        // mixes once per row, like the sim's blend565.
+        const float backK = fmn(1, luma(to888(pal.tubeBackRows[ry])) / 255.0f);
+        const float rimK = p.surfaceRim * fmn(1, wEff / 2) * (1 - pull) * ((1 - backK) * (0.5f + 0.5f * pal.rowK[ry]) * fmn(1, lk) + backK);
+        const uint16_t rimC = q(mix(to888(hiC), to888(q(mix(to888(pal.rows[ry]), to888(rc.darkC), 0.75f))), backK));
+        const int side = dir > 0 ? 0 : 1;   // layer weights for the rear-mark compositor (Mark::bandMark)
+        bandFill[side][ry] = a * fill; bandBlick[side][ry] = a * blickK; bandRim[side][ry] = a * rimK;
         // Pixel-footprint coverage for the stroke and rim; no integer-column snapping. See sim.
         const float cLo = dir > 0 ? xm - hw : xm - wEff, cHi = dir > 0 ? xm + wEff : xm + hw;
         int xa = (int)ffloor(cLo), xb = (int)fceil(cHi); if (xa < xlo) xa = xlo; if (xb > xhi) xb = xhi;
-        bandRow(FB + ry * PANEL_W, xa, xb, xm, dir, hw, wEff, invWidth, a, pull, rimK, inner, outer, pal.rows[ry], hiC);
+        bandRow(FB + ry * PANEL_W, xa, xb, xm, dir, hw, wEff, invWidth, a, fill, blickK, pull, rimK, inner, outer, pal.rows[ry], hiC, rimC);
         return wEff;
       } else {   // convex: thin nose inside the profile back to the ring
         // The thin nose shows the local backing sampled before body and glow (bare back, or a receding
@@ -1630,16 +1710,19 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     };
     for (int ry = 0; ry < H; ry++) {
       int xi = (int)ffloor(edges[ry]), xa = (int)ffloor(edgesL[ry]) + 1; if (xa < capX0[ry]) xa = capX0[ry];
-      markW = 0; strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L); markR[ry] = markW;
-      if (p.freeLiquid) { markW = 0; strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi); markL[ry] = markW; }
+      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L);
+      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi);
     }
   }
 
-  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi), the concave
-  // surface stroke included only as far as its opacity reaches 0.5 (faint or receding band, see sim).
-  Edges bounds{boundLo, boundHi};
+  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi): the body only. The
+  // concave band past it is composited per pixel by its own layer opacities (Mark::bandMark, render
+  // frame), so a faint or receding band never hides a mark as liquid and there is no threshold (see sim).
+  const BandInfo band{{edges, edgesL}, {strokeR, strokeL}, {bandFill[0], bandFill[1]}, {bandBlick[0], bandBlick[1]},
+                      {bandRim[0], bandRim[1]}, {pullR, pullL}, softW * 0.5f, p.remaining, L};
+  Edges bounds{boundLo, boundHi, hasLiquid && p.surfaceBand > 0 ? &band : nullptr};
   for (int ry = 0; ry < H; ry++) {
-    float lo = edgesL[ry] - markL[ry], hi = edges[ry] + markR[ry];
+    float lo = edgesL[ry], hi = edges[ry];
     if (p.remaining) {
       uint16_t *row = FB + ry * PANEL_W;
       for (int a = 0, b = L - 1; a < b; a++, b--) { uint16_t t = row[a]; row[a] = row[b]; row[b] = t; }
@@ -1689,7 +1772,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       d.fx = fx; d.r = r; d.off = off; d.kc = kc;
       d.in2 = rIn >= 1 ? rIn * rIn * (1 - 1e-4f) : -1; d.out2 = rOut * rOut * (1 + 1e-4f);
       d.core = r >= 1.5f && kc > 0; d.core2Lo = kc * kc * (1 - 1e-4f); d.core2Hi = kc * kc * (1 + 1e-4f);
-      d.veilA = FOAM_VEIL * strokeA; d.pullR = pullR; d.pullL = pullL;
+      d.veilA = veilA; d.pullR = pullR; d.pullL = pullL;
       d.mirror = p.remaining; d.xsI = xsI; d.L = L; d.cIn = pal.bubbleIn[fy]; d.cRim = pal.bubbleRim;
       const int ixa = (int)ffloor(fx - r - 1), ixb = (int)fceil(fx + r);
       for (int iy = (int)ffloor(f.y - ry - 1); iy <= (int)fceil(f.y + ry); iy++) {

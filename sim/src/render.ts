@@ -362,17 +362,61 @@ function throughLiquid(bg: number, mark: number, p: Params, contrast: number, tr
 /** `bakedT`: the mark's coverage already includes the liquid's transparency (sprite digits with a baked shadow,
  *  see bakeShadow), so behind liquid only the contrast floor applies. */
 function markFn(y0: number, edges: Edges, p: Params, onTop: boolean, contrast: number, dryT: Float32Array | null = null, bakedT = false): MarkFn {
-  const H = edges.hi.length;
+  const H = edges.hi.length, band = onTop ? undefined : edges.band;
+  const transK = Math.max(0, Math.min(1, p.liquidTransparency));
   return (x, y, c, cov = 1, rel = 0) => {
     const ry = y - y0;
     if (ry < 0 || ry >= H || x < 0 || x >= PANEL_W) return;
     const inside = x >= edges.lo[ry] && x < edges.hi[ry];
-    if (!onTop && inside) {
-      c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast, bakedT ? 1 : p.liquidTransparency);
-      // The glass-cut relief is on the rear wall too: it fades with the liquid's opacity (invisible
-      // through an opaque liquid) while its colour still derives from the floored through-liquid body.
-      if (rel !== 0) cov *= Math.max(0, Math.min(1, p.liquidTransparency));
-    } else if (!onTop && dryT) cov *= dryT[ry];
+    if (!onTop) {
+      // The concave surface band's footprint at this pixel — it overlaps the body by hw inside the
+      // profile: how much its rim and blick let through (they stay on top of every rear mark) and, past
+      // the body, the fill's own opacity there. (Approximation: the layers' own colour also yields to the
+      // mark by that share; exact compositing would need the back as it was before the band.)
+      let through = 1, wet = 0, under = false;
+      if (band) {
+        const xr = band.mirror ? band.L - 1 - x : x, hw = band.hw;
+        // the edge whose footprint (hw inside the profile to the stroke width past it) can hold this pixel
+        const side: 0 | 1 = xr + 0.5 > band.xm[0][ry] - hw ? 0 : 1;
+        const wEff = band.w[side][ry];   // 0: no band on that side; a far pixel gets no coverage below
+        if (wEff > 0) {
+          const t = (side === 0 ? 1 : -1) * (xr + 0.5 - band.xm[side][ry]);
+          const lo = Math.max(t - 0.5, -hw), hi = Math.min(t + 0.5, wEff), coverage = hi - lo;
+          if (coverage > 0) {
+            const u = Math.max(0, Math.min(1, ((lo + hi) / 2 + hw) / (wEff + hw))), us = u * u * (3 - 2 * u);
+            const ab = Math.min(1, band.blick[side][ry] * coverage * 4 * u * (1 - u));
+            const ar = Math.min(1, band.rim[side][ry] * Math.max(0, hi - Math.max(lo, Math.max(0, wEff - 1))));
+            through = (1 - ab) * (1 - ar);
+            if (!inside) { wet = Math.min(1, band.fill[side][ry] * coverage * (1 - band.pull[side] * us)); under = true; }
+          }
+        }
+      }
+      if (inside) {
+        c = throughLiquid(fb[y * PANEL_W + x], c, p, contrast, bakedT ? 1 : transK);
+        // The glass-cut relief is on the rear wall too: it fades with the liquid's opacity (invisible
+        // through an opaque liquid) while its colour still derives from the floored through-liquid body.
+        if (rel !== 0) cov *= transK;
+        cov *= through;
+      } else if (under) {
+        // Under the band past the body the rear wall is seen through the dish: the mark is liquid-tinted
+        // as far as the fill is opaque there (its own per-pixel opacity — no threshold to jump), dry for
+        // the rest. The band's plane is the behind-air one, so the coverage never has the transparency
+        // baked in and the wet part applies it itself. The wet/dry colour mix and the blend over the pixel
+        // are taken in 888 and rounded ONCE (parity: each extra 565 rounding stacks between renderers).
+        const i = y * PANEL_W + x;
+        const aw = cov * wet * (rel !== 0 ? transK : 1), ad = cov * (1 - wet) * (dryT ? dryT[ry] : 1);
+        const al = (aw + ad) * through;
+        if (al < 1 / 255) return;
+        let M = rgb565to888(c);
+        if (aw > 0) {
+          const CT = rgb565to888(throughLiquid(fb[i], c, p, contrast, transK));
+          M = ad > 0 ? mix(M, CT, aw / (aw + ad)) : CT;
+        }
+        if (rel !== 0) M = rgb565to888(embossOf(q(M), rel));
+        fb[i] = al >= 1 ? q(M) : q(mix(rgb565to888(fb[i]), M, al));
+        return;
+      } else if (dryT) cov *= dryT[ry];
+    }
     if (rel !== 0) c = embossOf(c, rel);
     pxa(x, y, c, cov);
   };
@@ -461,7 +505,16 @@ function layoutLabels(y0: number, p: Params, ticksN: number, acrossTilt: number,
 }
 
 /** Liquid column bounds per tube row in panel coordinates: liquid where lo <= x < hi. */
-export interface Edges { lo: Float32Array; hi: Float32Array; }
+/** Concave surface band of one tube for the rear-mark compositor (render frame, i.e. before the
+ *  `remaining` mirror; index 0 = time edge, dir +1, 1 = home edge, dir -1). Per row: the profile x,
+ *  the outward stroke width (0 = no band) and the fill / blick / rim weights, stroke opacity included. */
+export interface BandInfo {
+  xm: [Float32Array, Float32Array]; w: [Float32Array, Float32Array];
+  fill: [Float32Array, Float32Array]; blick: [Float32Array, Float32Array]; rim: [Float32Array, Float32Array];
+  pull: [number, number]; hw: number; mirror: boolean; L: number;
+}
+/** Liquid body bounds per tube row (panel frame) plus, when drawn, the surface band past them. */
+export interface Edges { lo: Float32Array; hi: Float32Array; band?: BandInfo; }
 /** Which column is behind liquid: `wet(x)`; always true when digits are on top or edges are unknown. */
 type WetFn = (x: number) => boolean;
 /** Coverage (0..255) and colour of glyph pixel (cx, cy); both only defined inside w x h. */
@@ -660,6 +713,8 @@ const fizzExposed = [0, 0];
 // foam behind it at the profile (the liquid wedge climbing the front glass, thinning to nothing at the ring).
 // FOAM_RELAX: packing sweeps per step.
 const FOAM_POP_T = 0.3, FOAM_SLIDE = 0.5, FOAM_FOLLOW = 6, FOAM_CATCH = 2, FOAM_VEIL = 0.7, FOAM_RELAX = 3;
+/** Half-height of the surface blick's row tent as a fraction of the tube height (firmware BLICK_H). */
+const BLICK_H = 0.18;
 
 /** `fizzCount` is the count for a full tube; density stays constant as the column shortens.
  *  Shake nucleates bubbles: up to 2x with agitation, shrinking back as it decays. */
@@ -876,16 +931,6 @@ function wallCap(ry: number, p: Params, tilt: number, side: number, cap: number)
   const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(p.meniscusDepth);
   const bulge = p.meniscusTiltGain * tilt * Math.abs(p.meniscusDepth) + cap;
   return p.meniscusDepth * (1 + asymEff * d) - bulge;
-}
-/** Rear-mark extent of a concave band: px past the profile over which its opacity
- *  alpha·(1 − pull·smoothstep(u)) stays >= 0.5, u running 0..1 from hw inside the profile to the
- *  band's outer edge `w` (closed-form inverse smoothstep). Opaque bands give w, faint ones 0. */
-function bandMarkExtent(alpha: number, pull: number, w: number, hw: number): number {
-  if (alpha < 0.5) return 0;
-  const y = (1 - 0.5 / alpha) / Math.max(1e-6, pull);   // smoothstep value where opacity crosses 0.5
-  if (y >= 1) return w;
-  const u = 0.5 - Math.sin(Math.asin(1 - 2 * y) / 3);
-  return Math.max(0, Math.min(w, u * (w + hw) - hw));
 }
 /** Meniscus amplitude limiter: the caps of a column `len` px long may not exceed half of it in total
  *  (a short slug is a bead, not two crossing scoops). 1 for any column longer than the features. */
@@ -1167,6 +1212,10 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   { let lmax = 1;
     for (let ry = 0; ry < H; ry++) { rowKs[ry] = luma(rgb565to888(pal.rows[ry])); lmax = Math.max(lmax, rowKs[ry]); }
     for (let ry = 0; ry < H; ry++) rowKs[ry] /= lmax; }
+  // Backdrop luma per row (0..1) for the surface rim: the contact ring on the far glass is a thin liquid
+  // lens — it reflects the highlight over a dark back and shows as a liquid-tinted line over a light one.
+  const backKs = new Float32Array(H);
+  for (let ry = 0; ry < H; ry++) backKs[ry] = Math.min(1, luma(rgb565to888(pal.tubeBackRows[ry])) / 255);
 
   // Step 3a: front brightening — last `frontBright` px before the edge lerp toward the highlight colour (per row).
   if (hasLiquid && p.frontBright > 0) {
@@ -1254,10 +1303,13 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Pixel-footprint coverage keeps both ends symmetric and the rim smooth during motion.
   // Convex: shade the thin nose inside the profile, leaving the existing soft ramp intact.
   // Both branches fade as ring and profile meet, avoiding a pop at the curvature sign change.
-  // Per-row stroke extents also tell the rear-mark compositor where the surface is liquid.
+  // Per-row stroke extents and layer weights also tell the rear-mark compositor what the surface
+  // covers and how opaque each of its layers is there (markFn, BandInfo).
   const strokeR = new Float32Array(H), strokeL = new Float32Array(H);
-  const markR = new Float32Array(H), markL = new Float32Array(H);   // rear-mark extent: stroke part >= 0.5 opaque
-  let strokeA = 0, pullR = 0, pullL = 0, markW = 0;   // the stroke's opacity; receding pull per edge
+  const bandFill: [Float32Array, Float32Array] = [new Float32Array(H), new Float32Array(H)];
+  const bandBlick: [Float32Array, Float32Array] = [new Float32Array(H), new Float32Array(H)];
+  const bandRim: [Float32Array, Float32Array] = [new Float32Array(H), new Float32Array(H)];
+  let strokeA = 0, pullR = 0, pullL = 0, veilA = 0;   // the stroke's opacity; receding pull per edge; foam veil opacity
   if (hasLiquid && p.surfaceBand > 0) {
     const hw = softW / 2, transK = Math.max(0, Math.min(1, p.liquidTransparency));
     // Opaque from surfaceBand ~0.6 whatever the light (the edge lit by the opposite tilt gets a
@@ -1272,6 +1324,23 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     // angle is back and so are shoulder and rim — nothing fades in afterwards. 0..1 per edge.
     const recede = p.remaining ? 1 : -1, sat = (v: number): number => Math.max(0, Math.min(1, 2 * v / FILM_FULL_PX_S));
     pullR = sat(recede * (s.fillVel + s.slugVel)); pullL = p.freeLiquid ? sat(-recede * s.slugVel) : 0;
+    // Interior opacity of the dish (surfaceFill): the rim and the blick keep their own opacity, so at 0 the
+    // surface is drawn by its rim alone. The blick is the room light reflected in the dish: a tent of rows
+    // centred where the highlight sits for the light angle (the same cylinder point as highlightTop), its
+    // own height (BLICK_H of the tube: independent of highlightH, so it exists with the body strip off),
+    // peaking mid-dish across the band.
+    const fill = Math.max(0, Math.min(1, p.surfaceFill));
+    veilA = FOAM_VEIL * strokeA * fill;   // a see-through dish does not veil the foam behind it
+    const yc = (H - 1) / 2, blickY = yc - yc * Math.sin((s.light * Math.PI) / 180), blickInvH = 1 / Math.max(2, BLICK_H * H);
+    const blickRow = (ry: number): number => p.surfaceBlick > 0 ? p.surfaceBlick * Math.max(0, 1 - Math.abs(ry - blickY) * blickInvH) : 0;
+    // one-write layer compositor for the band pixel loop (see there); P premultiplied 888, A alpha
+    const P: [number, number, number] = [0, 0, 0]; let A = 0, nL = 0, cLast = 0;
+    const layer = (col: number, al: number): void => {
+      if (al < 1 / 255) return;
+      const C = rgb565to888(col), k = 1 - al;
+      P[0] = P[0] * k + C[0] * al; P[1] = P[1] * k + C[1] * al; P[2] = P[2] * k + C[2] * al;
+      A = A * k + al; nL++; cLast = col;
+    };
     const surface = (ry: number, xm: number, xw: number, dir: number, lk: number, xlo: number, xhi: number): number => {
       const y = y0 + ry, tw = dir * (xw - xm);   // ring lead in the edge's own outward sense
       if (tw === 0) return 0;
@@ -1280,15 +1349,22 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       if (tw > 0) {   // concave: shaded surfaceWidth-px band, clipped to the wall ring
         // Overlap the body's AA ramp so it joins the shoulder without a bare-glass seam.
         const a = strokeA * Math.min(1, tw);
-        if (a < 1 / 255) return 0;   // below visible opacity: no stroke, rim or extended mark bounds
+        if (a < 1 / 255) return 0;   // below visible opacity: no stroke, rim or band for the marks
         const shade = 0.6 * (1 - Math.min(1, lk));   // unlit edge: toward the deep liquid colour
         const inner = tone(blend565(pal.rows[ry], darkC, 0.3));
         const outer = tone(blend565(blend565(lensC, pal.rows[ry], 0.2), darkC, shade));
         const wEff = Math.min(p.surfaceWidth, tw);
         const invWidth = 1 / (wEff + hw);
         const pull = dir > 0 ? pullR : pullL;
-        markW = bandMarkExtent(a, pull, wEff, hw);
-        const rimK = p.surfaceRim * (0.5 + 0.5 * rowKs[ry]) * Math.min(1, lk) * Math.min(1, wEff / 2) * (1 - pull);
+        const blickK = blickRow(ry) * Math.min(1, lk) * (1 - pull);
+        // The ring is a thin liquid lens: over a dark back it reflects the highlight (lit side only, row
+        // shaded); over a light back it is absorption along a grazing path — a deep liquid tone, whatever
+        // the light. backK blends the two.
+        const backK = backKs[ry];
+        const rimK = p.surfaceRim * Math.min(1, wEff / 2) * (1 - pull) * ((1 - backK) * (0.5 + 0.5 * rowKs[ry]) * Math.min(1, lk) + backK);
+        const rimC = blend565(hiC, blend565(pal.rows[ry], darkC, 0.75), backK);
+        const side = dir > 0 ? 0 : 1;   // layer weights for the rear-mark compositor (markFn)
+        bandFill[side][ry] = a * fill; bandBlick[side][ry] = a * blickK; bandRim[side][ry] = a * rimK;
         // Integrate pixel footprints, including the rim, instead of snapping to a last column.
         const cLo = dir > 0 ? xm - hw : xm - wEff, cHi = dir > 0 ? xm + wEff : xm + hw;
         for (let x = Math.max(xlo, Math.floor(cLo)), xb = Math.min(xhi, Math.ceil(cHi)); x < xb; x++) {
@@ -1299,10 +1375,18 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
           const u = Math.max(0, Math.min(1, ((lo + hi) / 2 + hw) * invWidth));
           const us = u * u * (3 - 2 * u);
           const c = blend565(inner, outer, us);
-          pxa(x, y, pull > 0 ? blend565(c, pal.rows[ry], pull) : c, a * coverage * (1 - pull * us));
+          const af = a * fill * coverage * (1 - pull * us);
+          const ab = a * blickK * coverage * 4 * u * (1 - u);
           const rimCoverage = Math.max(0, hi - Math.max(lo, Math.max(0, wEff - 1)));
           const ar = a * rimK * rimCoverage;
-          if (ar >= 1 / 255) pxa(x, y, hiC, Math.min(1, ar));
+          // Fill, blick and rim over one pixel are composited as ONE write (premultiplied sum, normal
+          // over-operator order), so the firmware's fixed-point rounding is taken once per pixel: two
+          // same-direction layers (a tinted rim over the fill on a light back) stacked to 2 LSB before.
+          // A single layer takes the plain path, byte-identical to the separate writes.
+          nL = 0; A = 0; P[0] = P[1] = P[2] = 0;
+          layer(pull > 0 ? blend565(c, pal.rows[ry], pull) : c, af); layer(hiC, Math.min(1, ab)); layer(rimC, Math.min(1, ar));
+          if (nL === 1) pxa(x, y, cLast, A);
+          else if (nL > 1) pxa(x, y, q([P[0] / A, P[1] / A, P[2] / A]), A);
         }
         return wEff;
       } else {   // convex: thin nose inside the profile back to the ring — limb-darkened for an
@@ -1323,17 +1407,19 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     };
     for (let ry = 0; ry < H; ry++) {
       const xi = Math.floor(edges[ry]), xa = Math.max(capX0[ry], Math.floor(edgesL[ry]) + 1);
-      markW = 0; strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L); markR[ry] = markW;
-      if (p.freeLiquid) { markW = 0; strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi); markL[ry] = markW; }
+      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L);
+      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi);
     }
   }
 
-  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi), the concave
-  // surface stroke included only as far as its opacity reaches 0.5: a faint surfaceBand, or the
-  // outer part of a receding edge's band thinning into its trail, must not hide marks as liquid.
+  // Panel-frame column bounds for the mark compositor (liquid where lo <= x < hi): the body only. The
+  // concave band past it is composited per pixel by its own layer opacities (markFn / BandInfo, render
+  // frame), so a faint or receding band never hides a mark as liquid and there is no threshold to jump.
   const bounds: Edges = markBounds[idx] = { lo: new Float32Array(H), hi: new Float32Array(H) };
+  if (hasLiquid && p.surfaceBand > 0)
+    bounds.band = { xm: [edges, edgesL], w: [strokeR, strokeL], fill: bandFill, blick: bandBlick, rim: bandRim, pull: [pullR, pullL], hw: softW / 2, mirror: p.remaining, L };
   for (let ry = 0; ry < H; ry++) {
-    const lo = edgesL[ry] - markL[ry], hi = edges[ry] + markR[ry];
+    const lo = edgesL[ry], hi = edges[ry];
     if (p.remaining) {
       const row = (y0 + ry) * PANEL_W;
       for (let a = 0, b = L - 1; a < b; a++, b--) { const t = fb[row + a]; fb[row + a] = fb[row + b]; fb[row + b] = t; }
@@ -1392,9 +1478,9 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
           if (cov <= 0) continue;
           // Veil by the pixel's footprint over each band [profile, profile ± width]: continuous as the edge moves.
           if (ix + 1 > sR && bR > 0) { const a1 = Math.min(ix + 1, sR + bR), a0 = Math.max(ix, sR);
-            if (a1 > a0) { const q = ((a0 + a1) / 2 - sR) / bR; cov *= 1 - FOAM_VEIL * strokeA * (a1 - a0) * (1 - q) * (1 - pullR * q); } }
+            if (a1 > a0) { const q = ((a0 + a1) / 2 - sR) / bR; cov *= 1 - veilA * (a1 - a0) * (1 - q) * (1 - pullR * q); } }
           if (ix < sL && bL > 0) { const a1 = Math.min(ix + 1, sL), a0 = Math.max(ix, sL - bL);
-            if (a1 > a0) { const q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - FOAM_VEIL * strokeA * (a1 - a0) * (1 - q) * (1 - pullL * q); } }
+            if (a1 > a0) { const q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - veilA * (a1 - a0) * (1 - q) * (1 - pullL * q); } }
           const cx = dx - off, cy = dy - off, dc = Math.sqrt(cx * cx + cy * cy);
           pxa(mapX(ix + xsI), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
         }

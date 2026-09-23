@@ -23,7 +23,7 @@ FIELDS = [
  ('remaining','bool'),('highlightH','float'),('highlightInset','float'),('highlightBright','float'),('highlightSharp','float'),('shadeDepth','float'),('liquidThin','float'),('meniscusDepth','float'),
  ('meniscusPow','float'),('meniscusTiltGain','float'),('meniscusAsym','float'),('meniscusLens','float'),
   ('meniscusK','float'),('meniscusDamp','float'),('meniscusInertia','float'),('contactLag','float'),('wetFilm','float'),('traces','bool'),('traceAmount','float'),('traceDry','float'),('traceFollow','float'),('traceStain','float'),('traceThin','float'),('traceFilm','float'),('edgeSoft','float'),
- ('frontBright','float'),('surfaceBand','float'),('surfaceRim','float'),('surfaceWidth','float'),('surfaceTone','float'),('edgeGlow','float'),('glowStrength','float'),('cornerR','float'),('edgeLightGain','float'),
+ ('frontBright','float'),('surfaceBand','float'),('surfaceRim','float'),('surfaceWidth','float'),('surfaceTone','float'),('surfaceFill','float'),('surfaceBlick','float'),('edgeGlow','float'),('glowStrength','float'),('cornerR','float'),('edgeLightGain','float'),
  ('bubble','bool'),('bubbleW','float'),('bubbleH','float'),('bubbleGap','float'),('bubbleY','float'),('bubbleDark','float'),('bubbleRollGain','float'),('bubbleTiltGain','float'),
  ('fizz','bool'),('fizzCount','float'),('fizzSize','float'),('fizzSizeVar','float'),('fizzShadeOff','float'),('fizzSpeed','float'),('fizzDriftGain','float'),('fizzAcrossGain','float'),('fizzFlatRise','float'),('fizzSquash','float'),('fizzEdgeRise','float'),('fizzFoamLife','float'),
  ('ticksH','bool'),('tickStepH','float'),('tickMajorEveryH','float'),('tickMinorHeightH','float'),('tickMajorHeightH','float'),

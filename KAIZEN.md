@@ -28,6 +28,23 @@
 - Physical lab's area-light highlight is a broad Gaussian band at 2·(light angle); the legacy tent
   highlight (`highlightH`/`highlightSharp`) could take that profile to match the lab look further.
 
+- Rear marks under the band (markFn / Mark::bandMark) keep the rim and blick by scaling the mark's write by
+  what they let through; the layers' own colour also yields by that share. Exact compositing needs the back
+  as it was before step 3e (a ~8 px × H × 2 cache per tube) — only worth it if the faint mark seen "in" a
+  strong rim ever bothers.
+- The rim sits at `min(surfaceWidth, ring lead)`, not at the wall contact ring: with a deep dish and a narrow
+  band (depth 12, width 4) it is drawn ~8 px short of the real ring, more so while motion deepens the dish.
+  `surfaceWidth` ≥ depth·(1 + tiltGain) keeps them together; a mode grading the shoulder over the whole
+  lead and pinning the rim on the ring would be the faithful option (changes every preset's band width).
+- Blick and rim-tint are cues, not optics: the blick is a row tent at the highlight row (`light` is already the
+  cylinder highlight-normal angle, so no 2·light shift applies), the rim swaps reflection for absorption by
+  backdrop luma instead of by Fresnel/viewing angle (pbr-book 4ed, Dielectric BSDF). A per-pixel dielectric
+  term on a 1-px rim is not worth the S3 cycles; a separate blick colour (white blick on a coloured
+  `liquidHi`) is the cheap win.
+- Parity tolerance (12/255) assumes one quantised blend per pixel per stage; any stage that writes the same
+  pixel twice in the same direction can stack to 2 LSB (17/255). Compose layers before writing (as step 3e
+  now does) rather than widening the tolerance.
+
 ## Tooling / firmware
 - Push all writes fields one at a time, so the board renders transient combinations (e.g. new
   `tubeHeight` with the old fizz positions, which used to hit the task watchdog). A `Pbegin`/`Pcommit`

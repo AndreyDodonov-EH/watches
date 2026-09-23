@@ -50,6 +50,8 @@
   "surfaceRim": 0.24,
   "surfaceWidth": 3,
   "surfaceTone": -0.08,
+  "surfaceFill": 1,
+  "surfaceBlick": 0,
   "edgeGlow": 0,
   "glowStrength": 0,
   "cornerR": 0,

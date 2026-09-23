@@ -1,5 +1,5 @@
 {
-  "v": 20,
+  "v": 21,
   "tubeHeight": 72,
   "hoursY": 11,
   "minutesY": 144,
@@ -50,6 +50,8 @@
   "surfaceRim": 0.6,
   "surfaceWidth": 4,
   "surfaceTone": 0,
+  "surfaceFill": 1,
+  "surfaceBlick": 0,
   "edgeGlow": 0,
   "glowStrength": 0,
   "cornerR": 0,
