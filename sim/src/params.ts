@@ -885,6 +885,44 @@ const PRESET_NOCTURNE: Partial<Params> = {
   digitBright: 1.25, ambientLight: 0.5,
 };
 
+/** Bioluminescent tide (2026-09-23): a night-sea sample in a near-black vial — dark teal water that lights
+ *  itself cyan where it is thin (edge glow, lit cap, bright rim), with slow drifting plankton sparks instead of
+ *  a rising bead (tiny bright fizz, no foam, stirred by motion). Dim steel graduations and sprite digits sit
+ *  behind the glass and are lit through the water. The opposite of the spritz on every axis: dark, self-lit,
+ *  cold, calm. Standard rod only, current tuned slug physics (exempt from the class ranges). */
+const PRESET_TIDE: Partial<Params> = {
+  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#0d4658', liquidHi: '#9dfaff',
+  liquidLo: '#031419', tubeBack: '#04070b', tubeBack2: '#0a1219', tubeBackGradient: 0, glassHi: '#7fb8c4',
+  glassBody: 0.05, glassHiBright: 0.25, glassReflect: 0.15, glassRim: 0.45, glassWall: 4.5,
+  glassWallGlow: 0.12, glassOverLiquid: 0.35, lens: -0.2, lensCurve: 0.2, bubbleRim: '#d8ffff',
+  highlightH: 10, highlightBright: 0.45, highlightSharp: 1.6, highlightInset: 0, shadeDepth: 0.6,
+  liquidThin: 0.2, meniscusDepth: 3.5, meniscusPow: 3.5, meniscusTiltGain: 2.6, meniscusAsym: 1.1,
+  meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, contactLag: 1.75, wetFilm: 12,
+  traces: false, traceAmount: 0, traceDry: 1, traceFollow: 0.5, traceStain: 0.2, traceThin: 1.5, traceFilm: 0,
+  edgeSoft: 4, frontBright: 10, surfaceBand: 0.35, surfaceRim: 0.5, surfaceWidth: 4, surfaceTone: 0.2,
+  edgeGlow: 26, glowStrength: 0.6, cornerR: 0, edgeLightGain: 0.3, bubble: false, bubbleW: 27, bubbleH: 20,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0, fizz: true,
+  fizzCount: 55, fizzSize: 1.5, fizzSizeVar: 0.6, fizzShadeOff: 0, fizzDriftGain: 1.6, fizzAcrossGain: 1.05,
+  fizzFlatRise: 0.3, fizzSquash: 1, fizzEdgeRise: 0.1, fizzFoamLife: 0, fizzSpeed: 9, ticksH: true,
+  tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 12, tickMajorHeightH: 25, tickMinorWidthH: 1,
+  tickMajorWidthH: 2, tickColorH: '#3f6a76', tickMajorColorH: '#6fa4ae', tickPosH: 2, ticksM: true,
+  tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 10, tickMajorHeightM: 25, tickMinorWidthM: 1,
+  tickMajorWidthM: 2, tickColorM: '#3f6a76', tickMajorColorM: '#6fa4ae', tickPosM: 2, ticksOnTop: false,
+  tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3',
+  digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#121212', digitShadowStrength: 0.5,
+  digitShadowOffset: 1, digitFont: 5, digitTint: '#7fd6dd', digitTintAmount: 0.5, digitTone: -0.1,
+  digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 21,
+  digitBottom: 22, digitsOnTop: false, bottomLens: 0.5, digitDryLens: 0.1, topLens: 0.35, topParallax: -10,
+  digitParallax: 5.5, liquidTransparency: 0.4, markContrast: 30, digitsLeadingZero: false,
+  digitMinuteStep: 15, digitHourStep: 3, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false,
+  digitsLastOnlyM: false, freeLiquid: true, freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 0,
+  readTiltStart: 0, readTiltEnd: 1, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207,
+  angleDamp: 17.6, angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 0.25, lightAngle: 45,
+  acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5,
+  gyroDeadzone: 31, gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 1.25, tickBright: 1.1,
+  digitBright: 1.2, ambientLight: 0,
+};
+
 export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; mat?: Material; legacy?: boolean; big?: boolean }
 
 /** Big-lens twin of a preset (examples/urine_big.json, 2026-08-27): the second physical rod is wider and
@@ -939,6 +977,7 @@ PRESETS.push({ id: 'spritz', name: 'Aperol spritz', note: 'vivid orange aperitiv
 PRESETS.push({ id: 'cuvee', name: 'Cuvée', note: 'straw-gold sparkling wine, ivory backing, bronze numerals and a fine pale bead', p: PRESET_CUVEE });
 
 PRESETS.push({ id: 'nocturne', name: 'Nocturne', note: 'blue-black ink, smoked glass, silver front markings and lingering wet residue', p: PRESET_NOCTURNE, mat: M('medium', 'opaque', false, true, 'none') });
+PRESETS.push({ id: 'tide', name: 'Bioluminescent tide', note: 'night-sea water glowing cyan at the edge, drifting plankton sparks, steel marks behind black glass', p: PRESET_TIDE });
 
 /** Presets are whole looks: apply over the defaults, not over the current edit. */
 export function presetParams(e: PresetEntry): Params {
