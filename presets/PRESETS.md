@@ -14,6 +14,7 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | spritz | Aperol spritz | vivid orange-red aperitivo (translucent), watery, wetting, carbonated with a foam ring (2026-09-23), exempt from material ranges | white bar-glass backing, navy enamel numerals behind the liquid |
 | cuvee | Cuvée | straw-gold sparkling wine, wetting, carbonated (2026-09-23), exempt from historical material ranges | ivory backing, bronze rear numerals, pale bead, restrained reflections |
 | nocturne | Nocturne | opaque blue-black ink, medium viscosity, wetting, no gas | smoked glass, silver front markings, draining residue |
+| tide | Bioluminescent tide | dark teal night-sea water, self-lit cyan edge, watery, wetting, plankton sparks (2026-09-23), exempt from material ranges | near-black vial, dim steel graduations and digits behind the glass |
 | urine | Urine sample | tinted amber (translucent), watery, wetting | specimen cup graduations on the glass |
 | blood | Blood | opaque venous red, medium viscosity, wetting | syringe print on the glass |
 | milk | Milk | opaque white colloid, medium-thin, wetting | printed scale on the glass |
@@ -34,7 +35,7 @@ The original signature presets also exist as `<id>-big` for the second, wider ph
 `examples/urine_big.json`): 72 px tubes at y 11 / 144, `lens` −0.05 with curve −3, marks moved with the tube
 (thin presets take the example's hand-tuned mark values, wider ones scale theirs by 72 / tubeHeight), and
 front digits drop their `topLens` pre-warp. `urine-big` reproduces the example exactly. Alpine spring,
-Pinot noir, Aperol spritz, Cuvée and Nocturne are standard-rod only.
+Pinot noir, Aperol spritz, Cuvée, Nocturne and Bioluminescent tide are standard-rod only.
 
 Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; superseded by `glow`/`frizzante`).
 
@@ -121,3 +122,16 @@ while strong tilt releases the liquid. Best viewed with the black cuff.
 
 The complete v20 JSON matches the picker. Its declared medium, opaque, wetting
 material is covered by `npm run check:presets`. Preview: `images/presets/nocturne.png`.
+
+## Bioluminescent tide — current renderer (2026-09-23)
+
+Select **Bioluminescent tide**, open `?fresh=1&preset=tide&t=7:23&settle=1`, or import
+`tide.json`. One standard-rod preset: 54 px tubes at y 0 / 185.
+
+A night-sea sample in a near-black vial. The water is dark teal in bulk and lights itself
+cyan where the path is short: a glow past the fill edge, a lit concave cap and a bright
+rim, with a faint physical highlight so the vial still reads as glass. Tiny bright sparks
+drift slowly through the column and are stirred by motion; they never form a foam. Dim
+steel graduations every hour / 5 min and sprite digits every 3 h / 15 min sit behind the
+glass and are lit through the water. No residue. The slug is always free, on the current
+tuned physics, and is exempt from the material ranges. Preview: `images/presets/tide.png`.
