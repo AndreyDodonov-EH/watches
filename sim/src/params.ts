@@ -57,6 +57,8 @@ export interface Params {
   surfaceRim: number;    // 0..1 lit 1-px line on the outer edge of the concave surface stroke
   surfaceWidth: number;  // px thickness of the concave surface stroke (a bright band following the edge profile; never past the wall contact ring)
   surfaceTone: number;   // -1..1 surface colour shift: darker (toward the deep liquid colour) .. lighter (toward the highlight); both the concave stroke and the convex nose
+  surfaceFill: number;   // 0..1 opacity of the concave surface's shaded interior; the rim and the blick stay — at 0 only they define the surface (see-through dish)
+  surfaceBlick: number;  // 0..1 specular patch on the concave surface at the highlight rows (a reflection of the room light in the dish)
   edgeGlow: number;      // px, dim glow fading out past the fill edge (0 = off)
   glowStrength: number;  // 0..1 brightness of the glow at the edge
   cornerR: number;       // px, rounding of the column's left end (tube end cap)
@@ -184,7 +186,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 20;
+export const PARAMS_VERSION = 21;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -238,6 +240,8 @@ export const DEFAULT_PARAMS: Params = {
   surfaceRim: 0.6,
   surfaceWidth: 4,
   surfaceTone: 0,
+  surfaceFill: 1,
+  surfaceBlick: 0,
   edgeGlow: 15,
   glowStrength: 0.25,
   cornerR: 0,
@@ -950,6 +954,37 @@ const M = (viscosity: Material['viscosity'], opacity: Material['opacity'], emiss
   ({ viscosity, opacity, emissive, wetting, gas });
 
 /** Everything the preset picker and `?preset=<id>` offer. */
+/** Phosphor sample (2026-09-23, from the user's phosphor-vial photo): a pale green watery solution in a
+ *  clear lab vial standing on white paper, labelled in marker on the glass. Built to show the see-through
+ *  meniscus: the dish is a faint wash (surfaceFill 0.25, tone toward the white reflection), its far contact
+ *  ring a liquid-tinted contour over the paper (rim colour follows the backdrop), a white blick on the
+ *  surface and a bright front contact line (frontBright). Still liquid: no gas, light residue. */
+export const PRESET_PHOSPHOR: Partial<Params> = {
+  ...MODERN_BASE, ...WATERY, ...FRONT_PRINT,
+  tubeHeight: 54, hoursY: 0, minutesY: 185,
+  liquid: '#6ccf92', liquidHi: '#f4fff8', liquidLo: '#35905d',
+  tubeBack: '#f4f2ec', tubeBack2: '#e4e0d6', tubeBackGradient: 1,
+  glassHi: '#c8d3d5', glassBody: 0.03, glassHiBright: 0.24,
+  glassReflect: 0.25, glassRim: 0.55, glassWall: 4,
+  glassWallGlow: 0.05, glassOverLiquid: 0.6,
+  lens: -0.2, lensCurve: 0.2, bubbleRim: '#f4fff8',
+  highlightH: 9, highlightBright: 0.55, highlightSharp: 2.4,
+  shadeDepth: 0.5, liquidThin: 0.4,
+  meniscusDepth: 5, meniscusPow: 2.6, meniscusTiltGain: 0.9,
+  meniscusAsym: 1, meniscusInertia: 2.5,
+  edgeSoft: 1.4, frontBright: 4, edgeGlow: 6, glowStrength: 0.03,
+  surfaceBand: 0.7, surfaceRim: 1, surfaceWidth: 5, surfaceTone: 0.3,
+  surfaceFill: 0.35, surfaceBlick: 0.8,
+  fizz: false, bubble: false,
+  tickStepH: 1, tickMajorEveryH: 3, tickStepM: 5, tickMajorEveryM: 15,
+  tickColorH: '#5c5c5c', tickMajorColorH: '#232323', tickColorM: '#5c5c5c', tickMajorColorM: '#232323',
+  digitFont: 10, digitTint: '#262626', digitTintAmount: 0.4, digitTone: -0.3,
+  digitScaleX: 3.3, digitScaleY: 3.1, digitBottom: 10,
+  digitScaleXMin: 2.35, digitScaleYMin: 2.35, digitBottomMin: 11,
+  digitHourStep: 3, digitMinuteStep: 15,
+  liquidTransparency: 0.5, liquidBright: 1.15, tickBright: 1, digitBright: 1,
+};
+
 export const PRESETS: PresetEntry[] = [
   { id: 'frizzante', name: 'Frizzante', note: 'colourless sparkling water, lab print, fine bead', p: PRESET_FRIZZANTE, mat: M('watery', 'clear', false, true, 'carbonated') },
   { id: 'urine', name: 'Urine sample', note: 'clear amber, watery, specimen-cup graduations', p: PRESET_URINE, mat: M('watery', 'translucent', false, true, 'none') },
@@ -970,6 +1005,7 @@ export const PRESETS: PresetEntry[] = [
 ];
 // The original signatures also have big-rod variants; later additions are single standard-rod looks.
 PRESETS.push(...PRESETS.map((e) => ({ ...e, id: e.id + '-big', name: e.name + ' (big lens)', p: bigLens(e.p), big: true })));
+PRESETS.push({ id: 'phosphor', name: 'Phosphor sample', note: 'pale green solution in a clear lab vial on white paper, see-through meniscus, marker labels on the glass', p: PRESET_PHOSPHOR, mat: M('watery', 'translucent', false, true, 'none') });
 PRESETS.push({ id: 'alpine', name: 'Alpine spring', note: 'clear sparkling water, pale ceramic backing, slate markings', p: PRESET_ALPINE, mat: M('watery', 'clear', false, true, 'carbonated') });
 PRESETS.push({ id: 'pinot', name: 'Pinot noir', note: 'ruby red wine, legs on the glass, bronze cellar numerals', p: PRESET_PINOT });
 PRESETS.push({ id: 'spritz', name: 'Aperol spritz', note: 'vivid orange aperitivo, lively bead with a foam ring, navy enamel numerals on white', p: PRESET_SPRITZ });
@@ -1027,6 +1063,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   if (from < 17) r.playHold = DEFAULT_PARAMS.playHold;
   if (from < 19) { r.surfaceBand = DEFAULT_PARAMS.surfaceBand; r.surfaceRim = DEFAULT_PARAMS.surfaceRim; r.surfaceWidth = DEFAULT_PARAMS.surfaceWidth; r.surfaceTone = DEFAULT_PARAMS.surfaceTone; }
   if (from < 20) { r.fizzEdgeRise = DEFAULT_PARAMS.fizzEdgeRise; r.fizzFoamLife = DEFAULT_PARAMS.fizzFoamLife; }
+  if (from < 21) { r.surfaceFill = DEFAULT_PARAMS.surfaceFill; r.surfaceBlick = DEFAULT_PARAMS.surfaceBlick; }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -1086,9 +1123,11 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   edgeSoft: { help: 'Soft edge: anti-aliased ramp width in px, centred on the edge (0 = hard pixel edge, 1 = classic 1-px AA).', group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { help: 'Band just behind the fill edge blended toward liquidHi (bright convex cap), px.', group: 'Shape', min: 0, max: 40, step: 1 },
   surfaceBand: { help: 'Intensity of the visible meniscus surface. A concave surface grades from a darker inner shoulder to a lit rim and closes at the walls. It never fades as the liquid settles: a receding edge clings and deepens the dish, an advancing one flattens it, and it springs back as the edge settles. While an edge recedes fast (zero contact angle) the surface is liquid thinning into the wet trail, without shoulder or rim; both return as soon as it stops. A convex nose thins toward whatever is behind it (tube back, or the wet film a receding edge left), with a highlight tint for clear liquids. 0 disables surface shading.', group: 'Shape', label: 'surface band', min: 0, max: 1, step: 0.05 },
-  surfaceRim: { help: 'Strength of the thin lit rim on the concave surface. Moves smoothly with the edge and fades with the surface band. Follows the edge light and row shading. No effect on a convex meniscus.', group: 'Shape', label: 'surface rim', min: 0, max: 1, step: 0.05 },
+  surfaceRim: { help: 'Strength of the thin rim on the concave surface: the contact ring on the far glass, lit (liquidHi, light side only) over a dark tube back and a deep liquid-tinted contour, whatever the light, over a light one. Independent of surfaceFill, so it can draw the surface alone. Moves smoothly with the edge and fades with the surface band. Follows the edge light and row shading. No effect on a convex meniscus.', group: 'Shape', label: 'surface rim', min: 0, max: 1, step: 0.05 },
   surfaceWidth: { help: 'Thickness of the concave surface stroke, px, measured outward from the edge profile. It never extends past the wall contact ring (meniscusDepth minus the tilt bulge), so it tapers to nothing at the walls.', group: 'Shape', label: 'surface width', min: 1, max: 16, step: 0.5 },
   surfaceTone: { help: 'Tone of the visible surface: 0 = the shaded shoulder and lit rim (concave) / the limb-darkened or pale nose (convex); negative darkens toward the deep liquid colour, positive lightens toward the highlight.', group: 'Shape', label: 'surface tone', min: -1, max: 1, step: 0.05 },
+  surfaceFill: { help: 'Opacity of the shaded interior of the concave surface (the dish between the edge profile and the wall contact ring). 1 = the classic filled, shaded band. Lower it and the dish turns see-through — what is behind shows through a tint — while the lit rim and the blick keep drawing it; at 0 only they define the surface, as on a real vial where the surface is nearly invisible and the contact ring on the far glass catches the light. Rear marks count the dish as liquid only where its opacity reaches 0.5; the foam veil scales with it too.', group: 'Shape', label: 'surface fill', min: 0, max: 1, step: 0.05 },
+  surfaceBlick: { help: 'Specular patch on the concave surface: the room light reflected in the dish. Centred on the highlight row for the light angle, about a third of the tube tall (independent of highlightH, so it works with the body strip off), peaks mid-dish and vanishes at the edge profile and at the rim, liquidHi coloured. Follows the edge light, so only the lit edge has one; gone while the edge recedes fast. 0 = off.', group: 'Shape', label: 'surface blick', min: 0, max: 1, step: 0.05 },
   edgeGlow: { help: 'Dim glow fading out past the fill edge, px. 0 = off.', group: 'Shape', min: 0, max: 40, step: 1 },
   glowStrength: { help: 'Brightness of the glow at the edge.', group: 'Shape', min: 0, max: 1, step: 0.01 },
   cornerR: { help: 'Rounding of the column left end (tube end cap), px.', group: 'Shape', min: 0, max: 36, step: 1 },

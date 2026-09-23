@@ -1,6 +1,6 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-23 (firmware perf pass after the meniscus work)_
+_Last update: 2026-09-23 (see-through meniscus surface: surfaceFill / surfaceBlick, params v21)_
 
 ## Perf pass (2026-09-23)
 
@@ -13,6 +13,55 @@ are noinline row helpers (`rampRowR/L`, `bandRow`, `discRow`). Stage costs: edge
 3.7 → 2.0, fizz 2.3 → 0.9. `check_render_frames.py` (4000 host scenes) is byte-identical to the pre-pass
 renderer; `check:meniscus` is unchanged (max 9/255). The fizz ring uses `sqrtApprox` (≤ 2.1e-7 relative error;
 a 1/256 alpha step in 2.5e-7 of the samples). No new buffers. Remaining costs and ideas: KAIZEN (perf pass leftovers).
+
+## See-through meniscus surface (2026-09-23, from the user's phosphor-vial photo)
+
+The photo: the surface of a pale green liquid in a clear vial reads as an almost transparent ellipse — a
+pale wash over what is behind, a slightly darker liquid-tinted line where the contact ring meets the far glass
+against the white paper, a bright line along the front contact line and a soft white blick on the surface.
+The filled, shaded band (`surfaceBand`) could not do that: its interior opacity was the only opacity, so the
+rim faded with it. Params **v21** (migration fills defaults, NVS schema CRC changed → the device drops its blob):
+- `surfaceFill` (0..1, default 1): opacity of the concave dish's shaded interior. The rim keeps its own opacity
+  (`strokeA · surfaceRim …`), so at 0 the rim alone draws the surface. The foam veil scales with it.
+- `surfaceBlick` (0..1, default 0): specular patch on the dish, `liquidHi` coloured, a row tent centred on the
+  light angle's highlight row (same cylinder point as `highlightTop`) with its own height (`BLICK_H` 0.18 of the
+  tube each side — independent of `highlightH`: the user's config had the body strip off and saw no blick),
+  `4u(1−u)` across the band, × edge light, × (1 − pull); concave only. It needs a light `liquidHi`: a dull
+  highlight colour reflects a dull blick.
+- Rim colour and opacity now follow the backdrop (`backK` = luma of the tube-back row / 255): over a dark
+  back the lit rim as before (`liquidHi`, light side only, row shaded — byte-identical there); over a light
+  back a deep liquid contour, `blend(row, darkC, 0.75)`, at light-independent opacity (absorption along a
+  grazing path, not a reflection). Alpine / spritz / cuvee: the white-on-white rim used to vanish; now a
+  contour, as the far ring in the photo. A first pass with the body colour at 50 % was still too pale on
+  paper (user: "light on white, hard to see").
+- Fill, blick and rim are composited as ONE write per pixel (premultiplied sum, one division on multi-layer
+  pixels only: the 1–2 rim px per row and the blick rows). Separate writes stacked the firmware's ±1 LSB
+  blend rounding twice when two layers darken the same pixel (tinted rim over the fill on a white back:
+  17/255 at a 13 %-covered end pixel). Single-layer pixels take the old path unchanged.
+- Rear marks under the band (review finding, same day): the mark compositor used to count the dish as liquid
+  only where ≥ 0.5 opaque (`bandMarkExtent`) and drew marks dry past that, so at `surfaceFill` 0 a black rear
+  tick erased the rim and the blick, and fill 0.499 → 0.501 jumped the mark boundary by 4 px. Now the mark
+  bounds are the body only and the band is composited per pixel (`markFn` / `Mark::bandMark`, from per-row
+  `BandInfo`: profile, stroke width, fill/blick/rim weights, pull): the mark is liquid-tinted by the fill's
+  own opacity there, dry for the rest, in one write scaled by what the rim and blick let through. The
+  protection covers the band's whole footprint, including its `edgeSoft/2` overlap into the body (a second
+  review round found the blick erased on the first body pixel: the body path ran first, and a body pixel
+  below the time edge's profile was assigned to the home edge's band). The wet/dry colour mix and the blend
+  are computed in 888 and rounded once — the first version rounded three times and hit 17/255 against the
+  firmware with a blick over ordinary ticks. The wet/dry warp and the digit shadow plane switch at the body
+  edge (was: edge + the ≥ 0.5 extent). Harness invariants are pixel-based now (hidden at rest under an
+  opaque dish, shown when receding or flattening, rim and blick kept over a black mark, no jump across
+  fill 0.5), both edges, both fill directions, plus parity scenes with blick 0.8 / fill 0.35 over marks.
+- Verified: sim tsc/build, `check:presets`, `npm run check:meniscus` (invariants + 139 native/sim frames, max
+  channel delta 9/255, UBSan clean), PlatformIO build (RAM 87.4 KB — six per-row weight arrays per tube —,
+  flash 1.49 MB). Not flashed or benchmarked on-device: bandRow gained a lambda and a division on rim/blick
+  pixels, bandMark two divisions per mark pixel within a band's footprint; expect the surface-band stage within ~0.1 ms
+  of its 2.0 ms. Defaults reproduce the old look except the rim tint on light backs.
+  [before / after](docs/meniscus-see-through.png): pale green on a light back, alpine, frizzante, cryo with
+  `surfaceFill 0.25, surfaceTone 0.6, surfaceBlick 0.8, surfaceRim 0.9, surfaceWidth 5`. Existing presets unchanged;
+  the new `phosphor` preset (Phosphor sample: the photo's pale green solution in a clear vial on white paper,
+  marker labels on the glass, standard rod only) carries this look (`surfaceFill` 0.35, `surfaceTone` 0.3 for a faint green wash in the dish,
+  `surfaceRim` 1, `surfaceBlick` 0.8) plus `frontBright` 4 for the bright front contact line. `check:presets` ok (watery, translucent, wetting, no gas).
 
 ## Forward meniscus plan (2026-09-22, from images/thick_meniscus.png + images/fizz_on_edge.jpg)
 

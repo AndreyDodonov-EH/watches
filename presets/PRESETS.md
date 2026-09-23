@@ -15,6 +15,7 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | cuvee | Cuvée | straw-gold sparkling wine, wetting, carbonated (2026-09-23), exempt from historical material ranges | ivory backing, bronze rear numerals, pale bead, restrained reflections |
 | nocturne | Nocturne | opaque blue-black ink, medium viscosity, wetting, no gas | smoked glass, silver front markings, draining residue |
 | tide | Bioluminescent tide | dark teal night-sea water, self-lit cyan edge, watery, wetting, plankton sparks (2026-09-23), exempt from material ranges | near-black vial, dim steel graduations and digits behind the glass |
+| phosphor | Phosphor sample | pale green watery solution (translucent), wetting, no gas (2026-09-23) | clear lab vial on white paper, marker labels on the glass; see-through meniscus (`surfaceFill` 0.25, `surfaceBlick` 0.8) |
 | urine | Urine sample | tinted amber (translucent), watery, wetting | specimen cup graduations on the glass |
 | blood | Blood | opaque venous red, medium viscosity, wetting | syringe print on the glass |
 | milk | Milk | opaque white colloid, medium-thin, wetting | printed scale on the glass |
@@ -35,7 +36,7 @@ The original signature presets also exist as `<id>-big` for the second, wider ph
 `examples/urine_big.json`): 72 px tubes at y 11 / 144, `lens` −0.05 with curve −3, marks moved with the tube
 (thin presets take the example's hand-tuned mark values, wider ones scale theirs by 72 / tubeHeight), and
 front digits drop their `topLens` pre-warp. `urine-big` reproduces the example exactly. Alpine spring,
-Pinot noir, Aperol spritz, Cuvée, Nocturne and Bioluminescent tide are standard-rod only.
+Pinot noir, Aperol spritz, Cuvée, Nocturne, Bioluminescent tide and Phosphor sample are standard-rod only.
 
 Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; superseded by `glow`/`frizzante`).
 

@@ -55,6 +55,8 @@ struct Params {
   float surfaceRim;
   float surfaceWidth;
   float surfaceTone;
+  float surfaceFill;
+  float surfaceBlick;
   float edgeGlow;
   float glowStrength;
   float cornerR;
@@ -171,8 +173,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 165
-#define PARAMS_SCHEMA_CRC 0xff6fcefdu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 167
+#define PARAMS_SCHEMA_CRC 0x8ec186c1u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -228,6 +230,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"surfaceRim", 'f', (uint16_t)offsetof(Params, surfaceRim)},
   {"surfaceWidth", 'f', (uint16_t)offsetof(Params, surfaceWidth)},
   {"surfaceTone", 'f', (uint16_t)offsetof(Params, surfaceTone)},
+  {"surfaceFill", 'f', (uint16_t)offsetof(Params, surfaceFill)},
+  {"surfaceBlick", 'f', (uint16_t)offsetof(Params, surfaceBlick)},
   {"edgeGlow", 'f', (uint16_t)offsetof(Params, edgeGlow)},
   {"glowStrength", 'f', (uint16_t)offsetof(Params, glowStrength)},
   {"cornerR", 'f', (uint16_t)offsetof(Params, cornerR)},
@@ -346,7 +350,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  20, // v
+  21, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -397,6 +401,8 @@ static const Params PRESET_1 = {
   0.6f, // surfaceRim
   4.0f, // surfaceWidth
   0.0f, // surfaceTone
+  1.0f, // surfaceFill
+  0.0f, // surfaceBlick
   15.0f, // edgeGlow
   0.25f, // glowStrength
   0.0f, // cornerR

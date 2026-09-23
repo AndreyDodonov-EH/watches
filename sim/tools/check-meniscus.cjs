@@ -57,29 +57,68 @@ const fastOff = render('receding-fast-disabled', { ...trail, surfaceBand: 0 }, {
 for (let x = 405; x < 409; x++) assert(delta([fast[30 * 536 + x]], [fastOff[30 * 536 + x]]) <= 9, 'receding surface must not outline the trail');
 const stopped = render('receding-stopped', trail, { filmFree: 1 }, base, true);
 assert(delta(stopped.slice(30 * 536 + 403, 30 * 536 + 409), fastOff.slice(30 * 536 + 403, 30 * 536 + 409)) > 9, 'stopped edge must show its band');
-// Rear marks: a band counts as liquid for the mark compositor only where it is >= 0.5 opaque. At rest
-// the whole stroke does; a fast-receding edge's band thins into its trail and must not. Both edges,
-// both fill directions (bounds are in the panel frame, mirrored when remaining).
-const markScene = { ...marks, ticksH: true, ticksM: true, tickStepH: 1, digitParallax: 4 };
+// Rear marks under the concave band are composited per pixel by the dish's own layer opacities (no
+// >= 0.5 threshold): with an opaque liquid a settled opaque band hides the mark behind it exactly like the
+// body; a fast-receding edge's band thins into its trail and shows it; a flattening band (ring a fraction
+// of a px off the profile) is barely there and shows it; the rim keeps most of its colour over a dark
+// mark; fill 0.49 -> 0.51 moves nothing by more than a rounding step. Both edges, both fill directions.
+// Wide black ticks the full tube height make the whole rear wall a mark; contrast 0 lets the through-
+// liquid colour vanish at transparency 0.
+const markScene = { ...marks, digits: false, markContrast: 0, ticksH: true, tickStepH: 1, tickMinorWidthH: 60, tickMajorWidthH: 60,
+  tickMinorHeightH: 61, tickMajorHeightH: 61, tickColorH: '#000000', tickMajorColorH: '#000000' };
+const black = 0;
 for (const remaining of [false, true]) for (const home of [false, true]) {
   const recede = remaining ? 1 : -1;
   const moving = home ? { slugVel: -recede * 30 } : { fillVel: recede * 30 };
-  const ext = (changes, state) => {
-    render(`marks-${remaining}-${home}-${JSON.stringify(state)}-${JSON.stringify(changes)}`, { ...markScene, remaining, ...changes }, state);
-    return { lo: R.markBounds[0].lo[30], hi: R.markBounds[0].hi[30] };
+  const side = home ? 1 : 0, tag = `${remaining}/${home}`;
+  // Band geometry at row 30 from the settled band-on frame (the edge does not move between these shots):
+  // the 3 fully covered px past the profile, and the outer px where the rim sits (rimCoverage 1).
+  render(`marks-${remaining}-${home}-geometry`, { ...markScene, remaining }, {});
+  const b = R.markBounds[0].band, xm = b.xm[side][30], w0 = b.w[side][30];
+  const dir = side === 0 ? 1 : -1, first = side === 0 ? Math.ceil(xm) : Math.ceil(xm) - 1;
+  const at = (f, xr) => f[30 * 536 + (b.mirror ? b.L - 1 - xr : xr)];
+  const shot = (changes, state) => {
+    const f = render(`marks-${remaining}-${home}-${JSON.stringify(state)}-${JSON.stringify(changes)}`, { ...markScene, remaining, ...changes }, state);
+    return { f, zone: [0, 1, 2].map((i) => at(f, first + dir * i)), rim: at(f, side === 0 ? Math.ceil(xm + 2.5) : Math.floor(xm - 3.5)) };
   };
-  const side = (b) => (home !== remaining ? -b.lo : b.hi);   // bound of the edge under test, outward positive
-  const noBand = side(ext({ surfaceBand: 0 }, moving)), rest = side(ext({}, {})) - side(ext({ surfaceBand: 0 }, {}));
-  const pulled = side(ext({}, moving)) - noBand;
-  assert(rest > 3, `settled band must count as liquid for rear marks (${remaining}/${home}: ${rest})`);
-  assert(pulled <= 1.5, `receding band thinning into its trail must not hide rear marks (${remaining}/${home}: ${pulled})`);
-  // Flattening (meniscus wobble): with the ring a fraction of a px off the profile the band is drawn at
-  // opacity strokeA·tw < 0.5 — no visible colour — so it must not count as liquid for the marks either.
+  const zoneDelta = (a, b) => Math.max(...a.zone.map((v, i) => delta([v], [b.zone[i]])));
+  const bare = shot({ surfaceBand: 0 }, {}), bareNoTicks = shot({ surfaceBand: 0, ticksH: false }, {});
+  assert(zoneDelta(bare, bareNoTicks) > 150, `test scene must put a mark under the band (${tag})`);
+  const rest = shot({}, {}), restNoTicks = shot({ ticksH: false }, {});
+  assert(w0 >= 3.5, `settled band must reach its full width at the centre row (${tag}: ${w0})`);
+  assert.equal(zoneDelta(rest, restNoTicks), 0, `settled opaque band must hide rear marks like the body (${tag})`);
+  const pulled = shot({}, moving), pulledNoTicks = shot({ ticksH: false }, moving);
+  assert(zoneDelta(pulled, pulledNoTicks) > 100, `receding band thinning into its trail must not hide rear marks (${tag})`);
   for (const meniscusDepth of [0.2, 0.45]) {
-    const flat = side(ext({ meniscusDepth }, {})) - side(ext({ meniscusDepth, surfaceBand: 0 }, {}));
-    assert.equal(flat, 0, `flattening band must not hide rear marks (${remaining}/${home}, depth ${meniscusDepth})`);
+    const flat = shot({ meniscusDepth }, {}), flatNoTicks = shot({ meniscusDepth, ticksH: false }, {});
+    assert(delta([flat.zone[0]], [flatNoTicks.zone[0]]) > 150, `flattening band must not hide rear marks (${tag}, depth ${meniscusDepth})`);
   }
+  // See-through dish (surfaceFill 0): the rim is drawn over the mark, not erased by it.
+  const open = shot({ surfaceFill: 0 }, {}), openNoTicks = shot({ surfaceFill: 0, ticksH: false }, {});
+  const kept = delta([open.rim], [openNoTicks.rim]), tick = delta([openNoTicks.rim], [black]);
+  assert(tick > 100 && kept < 0.4 * tick, `rim must stay on top of rear marks (${tag}: moved ${kept} of ${tick})`);
+  const fillA = shot({ surfaceFill: 0.49 }, {}), fillB = shot({ surfaceFill: 0.51 }, {});
+  assert(delta(fillA.f, fillB.f) <= 17, `rear marks must follow the fill opacity without a jump (${tag})`);
+  // The band overlaps the body by edgeSoft/2: the blick on the first body pixel inside the profile is also
+  // kept over a black mark, whatever the liquid's transparency. The blick tent is taller than the body's
+  // highlight strip, so it shows on that pixel a few rows off the highlight row: take the row where it does.
+  const glossy = { surfaceFill: 0, surfaceRim: 0, surfaceBlick: 1, liquidTransparency: 1 };
+  const innerAt = (f, row) => { const xmr = b.xm[side][row], xr = side === 0 ? Math.ceil(xmr) - 1 : Math.ceil(xmr); return f[row * 536 + (b.mirror ? b.L - 1 - xr : xr)]; };
+  const gl = shot(glossy, {}), glNoTicks = shot({ ...glossy, ticksH: false }, {}), glNoBlick = shot({ ...glossy, ticksH: false, surfaceBlick: 0 }, {});
+  let row = 30, blick = 0;
+  for (let r = 15; r <= 45; r++) { const d = delta([innerAt(glNoTicks.f, r)], [innerAt(glNoBlick.f, r)]); if (d > blick) { blick = d; row = r; } }
+  const inner = (sh) => innerAt(sh.f, row);
+  const keptB = delta([inner(gl)], [inner(glNoTicks)]), tickB = delta([inner(glNoTicks)], [black]);
+  assert(blick > 30, `test scene must put a blick on the first body pixel (${tag}: ${blick})`);
+  assert(keptB < 0.75 * tickB, `blick must stay on top of rear marks inside the softened edge (${tag}: moved ${keptB} of ${tickB})`);
 }
+// Parity scenes with the blick and a see-through fill over ordinary marks (both edges' bands over ticks and
+// digits): the mark compositor's wet/dry mix must round once, like the firmware.
+for (const remaining of [false, true])
+  render(`marks-blick-${remaining}`, { ...marks, ticksH: true, ticksM: true, tickStepH: 1, remaining,
+    surfaceFill: 0.35, surfaceBlick: 0.8, liquidTransparency: 0.5 });
+render('marks-blick-moving', { ...marks, ticksH: true, ticksM: true, tickStepH: 1, surfaceFill: 0.35, surfaceBlick: 0.8, liquidTransparency: 0.5 },
+  { edgeLight: 0.4, acrossTilt: -0.2, cap: 3, fillVel: -30 });
 const gradient = render('gradient', { surfaceRim: 0 });
 assert(new Set(gradient.slice(30 * 536 + 400, 30 * 536 + 406)).size >= 4, 'surface needs shading across its width');
 const covered = render('opaque-residue', { traces: true, traceAmount: 2 }, {}, base, true);
