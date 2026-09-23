@@ -81,6 +81,11 @@ export class PhysicalDevice {
     return validatePhysicalParams(JSON.parse(raw));
   }
 
+  async getFps(): Promise<number> {
+    this.requireConnection();
+    return this.transport.getFps();
+  }
+
   async setTime(date: Date, speed: number): Promise<void> {
     this.requireConnection();
     if (!Number.isFinite(date.getTime())) throw new Error('Invalid time.');

@@ -45,6 +45,13 @@ export abstract class LineTransport implements WatchTransport {
     return p;
   }
 
+  async getFps(): Promise<number> {
+    const reply = await this.request('f');
+    const match = /^fps (\d+(?:\.\d+)?)\s/.exec(reply);
+    if (!match) throw new Error(`no device FPS reply: ${reply || 'timeout'}`);
+    return Number(match[1]);
+  }
+
   async getParams(): Promise<Partial<Params>> {
     for (let i = 0; i < 2; i++) {
       const r = await this.request('p?');

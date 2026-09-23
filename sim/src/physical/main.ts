@@ -26,7 +26,7 @@ let visual: PhysicalAppearance = appearance(DEFAULT_APPEARANCE_NAMES.background,
 let frameCount = 0, lastFps = performance.now(), renderMs = 0, busy = false;
 
 root.innerHTML = `<header><h1>Liquid Watch · physical lab <a href="./">legacy simulator</a></h1><span class="notice" id="notice"></span></header>
-<div class="toolbar"><button id="connect">connect</button><select id="link"><option value="serial">Web Serial</option><option value="ble">Bluetooth</option></select><button id="pull">pull</button><button id="push">push physical</button><button id="legacy">return legacy device</button><select id="material"><option value="">material preset…</option>${Object.keys(MATERIALS).map(k => `<option>${k}</option>`).join('')}</select><select id="background"><option value="">background…</option>${Object.keys(BACKGROUNDS).map(k => `<option>${k}</option>`).join('')}</select><select id="digits"><option value="">digits…</option>${Object.keys(DIGITS).map(k => `<option>${k}</option>`).join('')}</select><select id="view"><option value="raw">raw panel</option><option value="rod">6 mm acrylic rods</option></select><button id="export">export</button><label><input id="import" type="file" accept="application/json"></label></div>
+<div class="toolbar"><button id="connect">connect</button><select id="link"><option value="serial">Web Serial</option><option value="ble">Bluetooth</option></select><button id="pull">pull</button><button id="push">push physical</button><button id="legacy">return legacy device</button><button id="read-device-fps">read device fps</button><span id="device-fps">connect to read</span><select id="material"><option value="">material preset…</option>${Object.keys(MATERIALS).map(k => `<option>${k}</option>`).join('')}</select><select id="background"><option value="">background…</option>${Object.keys(BACKGROUNDS).map(k => `<option>${k}</option>`).join('')}</select><select id="digits"><option value="">digits…</option>${Object.keys(DIGITS).map(k => `<option>${k}</option>`).join('')}</select><select id="view"><option value="raw">raw panel</option><option value="rod">6 mm acrylic rods</option></select><button id="export">export</button><label><input id="import" type="file" accept="application/json"></label></div>
 <p class="notice" id="status">offline · physical capability unverified</p>
 <div class="lab"><section class="stage"><canvas id="physical-canvas" width="${PANEL_W}" height="${PANEL_H}"></canvas><p class="prototype-note">Optical prototype · no slosh or film yet. Oil absorption is an estimate at 20°C. Background/digits are simulator palettes; device settings last until restart; browser configuration is saved.</p>
 <div class="stats"><span id="fps">0 fps</span><span id="rebuild">rebuild 0 ms</span><span id="clock">10:09:00</span><span>phase 1 · fixed columns</span></div>
@@ -175,6 +175,15 @@ $('send-time').onclick = () => runBusy(async () => {
   await device.setTime(clock.date, clock.speed);
   notice('time sent');
 });
+$('read-device-fps').onclick = () => runBusy(async () => {
+  try {
+    const fps = await device.getFps();
+    if (device.capable) $('device-fps').textContent = `${fps.toFixed(1)} fps · read ${new Date().toLocaleTimeString()}`;
+  } catch (error) {
+    if (device.capable) $('device-fps').textContent = 'read failed';
+    throw error;
+  }
+});
 
 $('material').onchange = () => {
   Object.assign(params, material($<HTMLSelectElement>('material').value, params));
@@ -210,14 +219,18 @@ $('import').onchange = async () => {
 };
 
 function updateActions(): void {
-  for (const id of ['pull', 'push', 'legacy', 'send-time']) {
+  for (const id of ['pull', 'push', 'legacy', 'send-time', 'read-device-fps']) {
     $<HTMLButtonElement>(id).disabled = busy || !device.capable;
   }
   $('connect').textContent = device.transport.connected ? 'disconnect' : 'connect';
   $<HTMLButtonElement>('connect').disabled = busy;
   $<HTMLSelectElement>('link').disabled = busy || device.transport.connected;
 }
-device.onStatus = (text) => { notice(text); updateActions(); };
+device.onStatus = (text) => {
+  if (!device.transport.connected) $('device-fps').textContent = 'connect to read';
+  notice(text);
+  updateActions();
+};
 rebuildControls();
 updateActions();
 tick();

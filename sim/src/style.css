@@ -21,6 +21,7 @@ fieldset { border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 12px; dis
 #fps { flex: none; width: 330px; white-space: pre; overflow: hidden; font-family: monospace; }
 /* serial status may carry long error text: clip it so it can never wrap/resize the fieldset */
 #serialst { display: inline-block; max-width: 10em; height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+#devicefps { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #scope { width: 316px; height: 70px; background: #0d0d0d; border-radius: 3px; flex: none; }
 legend { color: var(--muted); padding: 0 4px; }
 fieldset label { display: flex; gap: 6px; align-items: center; }

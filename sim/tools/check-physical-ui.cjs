@@ -27,6 +27,7 @@ const url = process.env.PHYSICAL_LAB_URL || 'http://localhost:5190/physical.html
           let reply = 'ok';
           if (line === 'V') reply = JSON.stringify({ physical: 1, schema: mode === 'incompatible' ? 'old' : digest, renderer: 'legacy' });
           if (line === 'P?') reply = JSON.stringify(params);
+          if (line === 'f') reply = 'fps 34.7  render 22.97 ms  push-wait 0.02 ms  cores h 21.0 / m 20.0 ms  (mode l, renderer physical, transp 0.50)  frame-p95 31 ms';
           if (line === 'Pcommit' && mode === 'commit-fail') reply = 'error commit';
           if (line.startsWith('T ')) reply = 'time 11:22:00';
           if (line.startsWith('d')) reply = 'demo speed x' + line.slice(1);
@@ -44,6 +45,19 @@ const url = process.env.PHYSICAL_LAB_URL || 'http://localhost:5190/physical.html
     return { page, errors };
   }
   try {
+    {
+      const { page, errors } = await scene();
+      await page.locator('#read-device-fps').click();
+      await page.waitForFunction(() => !document.querySelector('#read-device-fps').disabled);
+      assert.match(await page.locator('#device-fps').textContent(), /^34\.7 fps · read /);
+      assert.equal((await page.evaluate(() => window.__commands)).at(-1), 'f');
+      await page.locator('#connect').click();
+      assert.equal(await page.locator('#read-device-fps').isDisabled(), true);
+      assert.equal(await page.locator('#device-fps').textContent(), 'connect to read');
+      assert.deepEqual(errors, []);
+      await page.close();
+      console.log('device FPS readout and disconnect reset: ok');
+    }
     {
       const { page, errors } = await scene('commit-fail');
       await page.locator('#push').click();

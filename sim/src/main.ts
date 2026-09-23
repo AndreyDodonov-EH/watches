@@ -78,6 +78,7 @@ app.innerHTML = `
         <label><select id="link"><option value="serial">Web Serial</option><option value="ble">Bluetooth</option></select> <button id="serialbtn">connect</button> <span id="serialst">disconnected</span></label>
         <label><input type="checkbox" id="livepush" checked> push params live</label>
         <label><button id="pull">pull params</button> <button id="pushall">push all</button></label>
+        <label><button id="readfps" disabled>read device fps</button> <span id="devicefps">connect to read</span></label>
       </fieldset>
     </div>
   </section>
@@ -217,6 +218,8 @@ const onStatus = (st: TransportStatus, detail?: string) => {
   $('serialst').textContent = detail ? `${st}: ${detail}` : st;
   $('serialbtn').textContent = st === 'connected' ? 'disconnect' : 'connect';
   $<HTMLSelectElement>('link').disabled = st === 'connected';
+  $<HTMLButtonElement>('readfps').disabled = st !== 'connected';
+  if (st !== 'connected') $('devicefps').textContent = 'connect to read';
   if (st !== 'connected' && inputSource === 'serial') { inputSource = 'manual'; srcRadio('manual').checked = true; }
 };
 for (const t of Object.values(links)) t.onStatus = onStatus;
@@ -249,6 +252,17 @@ $('pull').onclick = async () => {
   catch (e) { $('serialst').textContent = String(e); }
 };
 $('pushall').onclick = async () => { if (!transport.connected) return; await transport.setParams(params); $('serialst').textContent = 'pushed'; };
+$('readfps').onclick = async () => {
+  const button = $<HTMLButtonElement>('readfps');
+  button.disabled = true;
+  try {
+    const fps = await transport.getFps();
+    if (transport.connected) $('devicefps').textContent = `${fps.toFixed(1)} fps · read ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    if (transport.connected) $('devicefps').textContent = e instanceof Error ? e.message : String(e);
+  }
+  finally { button.disabled = !transport.connected; }
+};
 async function pushTime(): Promise<void> {
   if (!transport.connected) { $('serialst').textContent = 'connect first'; return; }
   const button = $<HTMLButtonElement>('settime');
