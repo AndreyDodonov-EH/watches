@@ -9,6 +9,8 @@ export interface WatchTransport {
   onStatus: (s: TransportStatus, detail?: string) => void;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  /** FPS from the device's most recently completed two-second window. */
+  getFps(): Promise<number>;
   /** Full struct as exported by the device. */
   getParams(): Promise<Partial<Params>>;
   /** Resolves false if the device rejected the key. */
