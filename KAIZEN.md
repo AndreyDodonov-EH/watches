@@ -319,3 +319,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   term ∝ y(1−y²) (lower half bulges past the chord, upper half flattens); could replace/extend it.
 - Headless Chromium fails at `sandbox_host_linux.cc` in this workspace; preset review used the static
   `render-ref.ts` frame instead. That preview cannot assess animated fizz or foam.
+- Tinted liquids go khaki/pastel above ~0.4 `liquidTransparency`: the rear marks are a straight mix toward
+  the back, not a multiply (colour filtering). A multiply would let tinted liquids be clear *and* saturated.
+- `check-presets` class ranges (freeGain 570, watery freeDamp ≤ 1.5, meniscusK ≤ 550, readTilt 20/50) no
+  longer match the user-tuned look (840 / 7 / 685 / 0–1); pinot and olive-oil are exempt for that reason.
+- Headless Chromium worked on 2026-09-23 (run-sim shot.mjs); the sandbox note above may be stale.

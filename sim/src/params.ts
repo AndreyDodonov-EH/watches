@@ -739,6 +739,43 @@ const PRESET_OLIVE_OIL: Partial<Params> = {
   brightness: 1, liquidBright: 0.98, tickBright: 1.2, digitBright: 2, ambientLight: 1,
 };
 
+/** Pinot noir (2026-09-23): a thin column of red wine reads ruby, not black — a saturated, bright body at
+ *  low transparency (a dark body mixed toward the back turns mauve). Parchment cellar-thermometer backing,
+ *  bronze numerals seen dimly through the wine, and legs: a clinging coat that drains slowly after a tilt.
+ *  Standard rod only, exempt from the material-class ranges (it keeps the current tuned slug physics). */
+const PRESET_PINOT: Partial<Params> = {
+  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#8c0a1c', liquidHi: '#ffb8c0',
+  liquidLo: '#4a0410', tubeBack: '#f1e6cf', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#5c5654',
+  glassBody: 0, glassHiBright: 0.08, glassReflect: 0.2, glassRim: 0.63, glassWall: 4.5, glassWallGlow: 0,
+  glassOverLiquid: 0.25, lens: -0.2, lensCurve: 0.2, bubbleRim: '#3a0a10', highlightH: 10,
+  highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.5, liquidThin: 0.15,
+  meniscusDepth: 4, meniscusPow: 3.5, meniscusTiltGain: 2.6, meniscusAsym: 1.1, meniscusLens: 0.05,
+  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, contactLag: 1.75, wetFilm: 18, traces: true,
+  traceAmount: 1, traceDry: 1.5, traceFollow: 0.15, traceStain: 0.3, traceThin: 1, traceFilm: 0.03,
+  edgeSoft: 4, frontBright: 0, surfaceBand: 0.3, surfaceRim: 0.35, surfaceWidth: 4, surfaceTone: -0.1,
+  edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0, fizz: false,
+  fizzCount: 120, fizzSize: 5.5, fizzSizeVar: 0.65, fizzShadeOff: 0.2, fizzDriftGain: 1.35,
+  fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 1.25, fizzEdgeRise: 0.3, fizzFoamLife: 1.5,
+  fizzSpeed: 28, ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25, tickMajorHeightH: 22,
+  tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#6a4a20', tickMajorColorH: '#6a4a20', tickPosH: 2,
+  ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 25, tickMajorHeightM: 28,
+  tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#6a4a20', tickMajorColorM: '#6a4a20', tickPosM: 2,
+  ticksOnTop: false, tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true,
+  digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#121212',
+  digitShadowStrength: 0.5, digitShadowOffset: 1, digitFont: 6, digitTint: '#3a1a08', digitTintAmount: 0.5,
+  digitTone: -0.3, digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75,
+  digitBottomMin: 21, digitBottom: 22, digitsOnTop: false, bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35,
+  topParallax: -10, digitParallax: 4.75, liquidTransparency: 0.12, markContrast: 0, digitsLeadingZero: false,
+  digitMinuteStep: 5, digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false,
+  digitsLastOnlyM: false, freeLiquid: true, freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 0,
+  readTiltStart: 0, readTiltEnd: 1, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207,
+  angleDamp: 17.6, angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 31,
+  acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5,
+  gyroDeadzone: 31, gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 1.1, tickBright: 2,
+  digitBright: 2, ambientLight: 0,
+};
+
 export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; mat?: Material; legacy?: boolean; big?: boolean }
 
 /** Big-lens twin of a preset (examples/urine_big.json, 2026-08-27): the second physical rod is wider and
@@ -784,9 +821,10 @@ export const PRESETS: PresetEntry[] = [
   { id: 'molten', name: 'Molten iron', note: 'emissive orange, dense, non-wetting, forged numerals', p: PRESET_MOLTEN, mat: M('medium', 'opaque', true, false, 'trapped') },
   { id: 'free', name: 'Free liquid', note: 'bottle green slug; gentle tilt reads time, strong tilt flows', p: PRESET_FREE },
 ];
-// The original signatures also have big-rod variants; alpine is a single standard-rod look.
+// The original signatures also have big-rod variants; alpine and pinot are single standard-rod looks.
 PRESETS.push(...PRESETS.map((e) => ({ ...e, id: e.id + '-big', name: e.name + ' (big lens)', p: bigLens(e.p), big: true })));
 PRESETS.push({ id: 'alpine', name: 'Alpine spring', note: 'clear sparkling water, pale ceramic backing, slate markings', p: PRESET_ALPINE, mat: M('watery', 'clear', false, true, 'carbonated') });
+PRESETS.push({ id: 'pinot', name: 'Pinot noir', note: 'ruby red wine, legs on the glass, bronze cellar numerals', p: PRESET_PINOT });
 
 /** Presets are whole looks: apply over the defaults, not over the current edit. */
 export function presetParams(e: PresetEntry): Params {
