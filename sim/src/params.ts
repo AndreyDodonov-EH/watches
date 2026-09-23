@@ -430,6 +430,44 @@ export const PRESET_FRIZZANTE: Partial<Params> = {
   liquidBright: 1.3, tickBright: 1.1, digitBright: 1.1,
 };
 
+/** Alpine spring water: a cool, nearly colourless bead against pale ceramic, with
+ *  a restrained capillary surface and fine carbonation. Rear slate markings stay
+ *  legible through the clear liquid and its dry glass. */
+export const PRESET_ALPINE: Partial<Params> = {
+  ...MODERN_BASE, ...WATERY,
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true,
+  liquid: '#548b9d', liquidHi: '#f5ffff', liquidLo: '#295c6d',
+  tubeBack: '#f2eee5', tubeBack2: '#f2eee5', tubeBackGradient: 0,
+  glassHi: '#aabcc0', glassBody: 0.04, glassHiBright: 0.22,
+  glassReflect: 0.3, glassRim: 0.58, glassWall: 4.5,
+  glassWallGlow: 0.08, glassOverLiquid: 0.65,
+  lens: -0.2, lensCurve: 0.2, bubbleRim: '#f5ffff',
+  highlightH: 8, highlightBright: 0.68, highlightSharp: 2.6,
+  shadeDepth: 0.5, liquidThin: 0.45,
+  meniscusDepth: 5, meniscusPow: 2.8, meniscusTiltGain: 0.9,
+  meniscusAsym: 1.05, meniscusInertia: 2.5,
+  edgeSoft: 1.4, surfaceBand: 0.38, surfaceRim: 0.35,
+  surfaceWidth: 3, surfaceTone: 0, edgeGlow: 8, glowStrength: 0.03,
+  fizz: true, fizzCount: 60, fizzSize: 2, fizzSizeVar: 0.45,
+  fizzSpeed: 42, fizzFlatRise: 0.5, fizzSquash: 1.2,
+  fizzEdgeRise: 0.5, fizzFoamLife: 2.5,
+  tickStepH: 1, tickMajorEveryH: 2, tickMinorHeightH: 11,
+  tickMajorHeightH: 17, tickMinorWidthH: 1, tickMajorWidthH: 2,
+  tickStepM: 5, tickMajorEveryM: 10, tickMinorHeightM: 10,
+  tickMajorHeightM: 16, tickMinorWidthM: 1, tickMajorWidthM: 2,
+  tickColorH: '#607477', tickMajorColorH: '#293d43',
+  tickColorM: '#607477', tickMajorColorM: '#293d43',
+  tickPosH: 2, tickPosM: 2, tickLens: 0.5,
+  digitFont: 10, digitTint: '#394d52', digitTintAmount: 0.3,
+  digitTone: -0.2, digitShadowStrength: 0.4,
+  digitScaleX: 3.3, digitScaleY: 3.1, digitBottom: 10,
+  digitScaleXMin: 2.35, digitScaleYMin: 2.35, digitBottomMin: 11,
+  digitHourStep: 2, digitMinuteStep: 10,
+  liquidTransparency: 0.72, markContrast: 25,
+  liquidBright: 0.9, tickBright: 1.05, digitBright: 1.15,
+  ambientLight: 0.1,
+};
+
 /** Urine in a specimen cup: tinted amber (translucent, not colourless), watery, no bead
  *  (examples/urine_1.json + nice_meniscus.json, minus the bubbles). */
 export const PRESET_URINE: Partial<Params> = {
@@ -746,8 +784,9 @@ export const PRESETS: PresetEntry[] = [
   { id: 'molten', name: 'Molten iron', note: 'emissive orange, dense, non-wetting, forged numerals', p: PRESET_MOLTEN, mat: M('medium', 'opaque', true, false, 'trapped') },
   { id: 'free', name: 'Free liquid', note: 'bottle green slug; gentle tilt reads time, strong tilt flows', p: PRESET_FREE },
 ];
-// Every preset also exists for the big rod: `<id>-big`.
+// The original signatures also have big-rod variants; alpine is a single standard-rod look.
 PRESETS.push(...PRESETS.map((e) => ({ ...e, id: e.id + '-big', name: e.name + ' (big lens)', p: bigLens(e.p), big: true })));
+PRESETS.push({ id: 'alpine', name: 'Alpine spring', note: 'clear sparkling water, pale ceramic backing, slate markings', p: PRESET_ALPINE, mat: M('watery', 'clear', false, true, 'carbonated') });
 
 /** Presets are whole looks: apply over the defaults, not over the current edit. */
 export function presetParams(e: PresetEntry): Params {
