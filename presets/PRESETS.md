@@ -13,6 +13,7 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | pinot | Pinot noir | translucent ruby, watery, wetting, legs (2026-09-23), exempt from material ranges | parchment backing, bronze numerals behind the liquid |
 | spritz | Aperol spritz | vivid orange-red aperitivo (translucent), watery, wetting, carbonated with a foam ring (2026-09-23), exempt from material ranges | white bar-glass backing, navy enamel numerals behind the liquid |
 | cuvee | Cuvée | straw-gold sparkling wine, wetting, carbonated (2026-09-23), exempt from historical material ranges | ivory backing, bronze rear numerals, pale bead, restrained reflections |
+| nocturne | Nocturne | opaque blue-black ink, medium viscosity, wetting, no gas | smoked glass, silver front markings, draining residue |
 | urine | Urine sample | tinted amber (translucent), watery, wetting | specimen cup graduations on the glass |
 | blood | Blood | opaque venous red, medium viscosity, wetting | syringe print on the glass |
 | milk | Milk | opaque white colloid, medium-thin, wetting | printed scale on the glass |
@@ -33,7 +34,7 @@ The original signature presets also exist as `<id>-big` for the second, wider ph
 `examples/urine_big.json`): 72 px tubes at y 11 / 144, `lens` −0.05 with curve −3, marks moved with the tube
 (thin presets take the example's hand-tuned mark values, wider ones scale theirs by 72 / tubeHeight), and
 front digits drop their `topLens` pre-warp. `urine-big` reproduces the example exactly. Alpine spring,
-Pinot noir, Aperol spritz and Cuvée are standard-rod only.
+Pinot noir, Aperol spritz, Cuvée and Nocturne are standard-rod only.
 
 Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; superseded by `glow`/`frizzante`).
 
@@ -106,3 +107,17 @@ The JSON contains the complete v20 configuration, including inactive controls.
 The current renderer uses 3.8 px bubble diameters, 0.48 transparency and the references'
 685 / 38 meniscus spring/damping; this look is exempt from the historical material ranges,
 like Pinot noir and Aperol spritz. Preview: `images/presets/cuvee.png`.
+
+## Nocturne — current renderer (2026-09-23)
+
+Select **Nocturne**, open `?fresh=1&preset=nocturne&t=7:23&settle=1`, or import
+`nocturne.json`. One standard-rod preset: 54 px tubes at y 0 / 185.
+
+Blue-black ink fills from the left against smoked grey glass. Silver numerals and
+fine graduations sit on the front glass so they remain readable over opaque ink.
+A soft reflection and a concave meniscus define the column; after a tilt, a wet
+smear drains back and fades. No bubbles or glow. The reading pose holds the time,
+while strong tilt releases the liquid. Best viewed with the black cuff.
+
+The complete v20 JSON matches the picker. Its declared medium, opaque, wetting
+material is covered by `npm run check:presets`. Preview: `images/presets/nocturne.png`.
