@@ -9,6 +9,7 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | id | name | material | vessel / scale |
 |---|---|---|---|
 | frizzante | Frizzante | clear, watery, wetting, carbonated | lab cylinder, white print on the glass |
+| alpine | Alpine spring | clear, watery, wetting, carbonated | pale ceramic backing, rear slate scale, fine bead |
 | urine | Urine sample | tinted amber (translucent), watery, wetting | specimen cup graduations on the glass |
 | blood | Blood | opaque venous red, medium viscosity, wetting | syringe print on the glass |
 | milk | Milk | opaque white colloid, medium-thin, wetting | printed scale on the glass |
@@ -25,10 +26,11 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | molten | Molten iron | emissive opaque metal, non-wetting, gas bubbles | forged numerals behind (dry side only) |
 | free | Free liquid | user-tuned slug (2026-08-26), exempt from the checker | copper numerals |
 
-Every preset also exists as `<id>-big` for the second, wider physical rod (`bigLens()` in `params.ts`, from
+The original signature presets also exist as `<id>-big` for the second, wider physical rod (`bigLens()` in `params.ts`, from
 `examples/urine_big.json`): 72 px tubes at y 11 / 144, `lens` −0.05 with curve −3, marks moved with the tube
 (thin presets take the example's hand-tuned mark values, wider ones scale theirs by 72 / tubeHeight), and
-front digits drop their `topLens` pre-warp. `urine-big` reproduces the example exactly.
+front digits drop their `topLens` pre-warp. `urine-big` reproduces the example exactly. Alpine spring is
+one standard-rod preset.
 
 Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; superseded by `glow`/`frizzante`).
 

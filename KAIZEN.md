@@ -317,3 +317,5 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   parallelogram; hydrostatics says a trapezoid (bottom leads at both ends). Only the sag term is mirrored.
 - meniscusAsym only moves the contact lines (d·|d|^pow). Hydrostatic Young–Laplace adds a mid-height
   term ∝ y(1−y²) (lower half bulges past the chord, upper half flattens); could replace/extend it.
+- Headless Chromium fails at `sandbox_host_linux.cc` in this workspace; preset review used the static
+  `render-ref.ts` frame instead. That preview cannot assess animated fizz or foam.
