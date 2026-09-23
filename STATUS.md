@@ -1,6 +1,18 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-22 (fizz foam in the meniscus front, sim + firmware)_
+_Last update: 2026-09-23 (firmware perf pass after the meniscus work)_
+
+## Perf pass (2026-09-23)
+
+Bench scene (board NVS preset, `bench.py` 10:09:30): **27.4 → 35.0 fps, render 28.06 → 20.73 ms**, parity
+>12/255 off 2 → 0. Cause: on the ESP32-S3, libm `fminf/fmaxf/floorf/ceilf` are flash calls, float `/` is ROM
+`__divsf3` and `sqrtf` is a software loop, and the meniscus / glow / foam loops made a dozen of them per pixel.
+render.cpp now uses inline `fmn/fmx/ffloor/fceil` everywhere (same values), reciprocals for loop-invariant
+divisors, and squared-distance tests in the fizz discs. The glow ramp, surface band and fizz disc pixel loops
+are noinline row helpers (`rampRowR/L`, `bandRow`, `discRow`). Stage costs: edge glow 4.7 → 1.6 ms, surface band
+3.7 → 2.0, fizz 2.3 → 0.9. `check_render_frames.py` (4000 host scenes) is byte-identical to the pre-pass
+renderer; `check:meniscus` is unchanged (max 9/255). The fizz ring uses `sqrtApprox` (≤ 2.1e-7 relative error;
+a 1/256 alpha step in 2.5e-7 of the samples). No new buffers. Remaining costs and ideas: KAIZEN (perf pass leftovers).
 
 ## Forward meniscus plan (2026-09-22, from images/thick_meniscus.png + images/fizz_on_edge.jpg)
 

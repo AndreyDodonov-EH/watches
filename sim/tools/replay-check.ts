@@ -23,7 +23,7 @@ const mapSample = (s: number[], d: number): TiltInput =>
 function edgeX(ry: number, xe: number, angleDeg: number, tilt: number, side: number, cap: number): number {
   const yc = (TUBE_HEIGHT_PX - 1) / 2, d = (ry - yc) / yc, P = DEFAULT_PARAMS;
   const asymEff = P.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(P.meniscusDepth);
-  const u = Math.abs(d), climb = P.meniscusDepth * (1 - asymEff * d) * Math.pow(u, P.meniscusPow);
+  const u = Math.abs(d), climb = P.meniscusDepth * (1 + asymEff * d) * Math.pow(u, P.meniscusPow);
   const bulge = P.meniscusTiltGain * tilt * Math.abs(P.meniscusDepth) + cap;
   return xe + Math.tan((angleDeg * Math.PI) / 180) * (ry - yc) + climb - bulge * (1 - Math.sqrt(Math.max(0, 1 - u * u)));
 }
