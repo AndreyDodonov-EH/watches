@@ -860,8 +860,9 @@ function lensRow(d: number, p: Params): number {
 function edgeCap(ry: number, p: Params, tilt: number, side: number, cap: number): number {
   const H = tubeLayout(p).H, yc = (H - 1) / 2;
   const d = lensRow((ry - yc) / yc, p), u = Math.abs(d);   // -1..1, as seen through the glass
+  // Sag: side > 0 (top up) moves the bottom (d = +1) contact line out, whether the cap is concave or convex
   const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(p.meniscusDepth);
-  const climb = p.meniscusDepth * (1 - asymEff * d) * Math.pow(u, p.meniscusPow);
+  const climb = p.meniscusDepth * (1 + asymEff * d) * Math.pow(u, p.meniscusPow);
   const bulge = p.meniscusTiltGain * tilt * Math.abs(p.meniscusDepth) + cap;   // px the centre leads the walls
   return climb - bulge * (1 - Math.sqrt(Math.max(0, 1 - u * u)));               // circular cap: 0 centre, 1 wall
 }
@@ -874,7 +875,7 @@ function wallCap(ry: number, p: Params, tilt: number, side: number, cap: number)
   const d = lensRow((ry - yc) / yc, p);
   const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(p.meniscusDepth);
   const bulge = p.meniscusTiltGain * tilt * Math.abs(p.meniscusDepth) + cap;
-  return p.meniscusDepth * (1 - asymEff * d) - bulge;
+  return p.meniscusDepth * (1 + asymEff * d) - bulge;
 }
 /** Rear-mark extent of a concave band: px past the profile over which its opacity
  *  alpha·(1 − pull·smoothstep(u)) stays >= 0.5, u running 0..1 from hw inside the profile to the

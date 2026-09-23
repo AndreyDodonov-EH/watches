@@ -262,8 +262,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   two layers used to be scaled per row before compositing (worst ~50/255 on a few edge texels of the
   host scene set); with `markContrast` > 0 the luma floor now acts on the composite instead of per
   layer (presets free / cola / champagne / malt / cryo). Revisit only if someone sees it on the panel.
-- Step 3e calls `sqrtf` per band pixel (~|meniscusDepth| + bulge px per row per edge). Not measured on
-  the board; a 65-entry sqrt table shared with the sim would make it LUT-only if bench shows it.
+- Step 3e convex nose still calls newlib `sqrtf` (bit-by-bit software, ~250 cycles) per nose pixel. Only
+  convex presets pay it; `sqrtApprox` (fizz ring) would do if 1/256 alpha steps are acceptable there.
 - Meniscus `surfaceWidth` is not derived from the tube diameter; `-big` presets may want a wider band.
 - Sim drawTube allocates `strokeR/strokeL` (and the compositor bounds) per frame like `edges`; fold into
   one reused scratch set if GC churn ever shows.
@@ -303,3 +303,17 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   shot (300 ms) is too short for foam to gather.
 - `ensureFizz` column length is `xe − xs − 6`: the 6 px cut predates the meniscus and no longer matches
   the surface profile (spawn range / home-side respawn). Not pursued.
+
+- Perf pass 2026-09-23 leftovers (bench scene, per-core ms from a cycle-counter probe): rear digits 10.2 (H) /
+  8.1 (M) = drawGlyph bilinear taps + Mark per pixel, the largest stage; dry-tube `traceFilm` 6.4 ms on the
+  short minutes column (film-into-back bake idea above); glow ramp ~170 and surface band ~370 cycles/px
+  (three quantised blends per band pixel; one combined blend would halve it, not bit-exact).
+- A stage profiler (esp_cpu_get_cycle_count around drawTube stages, `F` serial command) was a throwaway
+  scratchpad patch; worth keeping behind `-DRENDER_PROF` for the next pass.
+- Not possible now: IRAM for hot render code (free internal heap is ~5 KB with BLE up) and a 32 KB I-cache
+  (the prebuilt Arduino libs fix it at 16 KB; needs a custom sdkconfig build).
+- physics.cpp still uses libm fminf/fmaxf/floorf (50 Hz, negligible); switch if it ever matters.
+- Home edge (edgeXL) reuses the time edge's skew sign, so a free slug under across-tilt leans as a
+  parallelogram; hydrostatics says a trapezoid (bottom leads at both ends). Only the sag term is mirrored.
+- meniscusAsym only moves the contact lines (d·|d|^pow). Hydrostatic Young–Laplace adds a mid-height
+  term ∝ y(1−y²) (lower half bulges past the chord, upper half flattens); could replace/extend it.
