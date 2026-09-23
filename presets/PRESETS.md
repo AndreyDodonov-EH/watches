@@ -12,6 +12,7 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | alpine | Alpine spring | clear, watery, wetting, carbonated | pale ceramic backing, rear slate scale, fine bead |
 | pinot | Pinot noir | translucent ruby, watery, wetting, legs (2026-09-23), exempt from material ranges | parchment backing, bronze numerals behind the liquid |
 | spritz | Aperol spritz | vivid orange-red aperitivo (translucent), watery, wetting, carbonated with a foam ring (2026-09-23), exempt from material ranges | white bar-glass backing, navy enamel numerals behind the liquid |
+| cuvee | Cuvée | straw-gold sparkling wine, wetting, carbonated (2026-09-23), exempt from historical material ranges | ivory backing, bronze rear numerals, pale bead, restrained reflections |
 | urine | Urine sample | tinted amber (translucent), watery, wetting | specimen cup graduations on the glass |
 | blood | Blood | opaque venous red, medium viscosity, wetting | syringe print on the glass |
 | milk | Milk | opaque white colloid, medium-thin, wetting | printed scale on the glass |
@@ -32,7 +33,7 @@ The original signature presets also exist as `<id>-big` for the second, wider ph
 `examples/urine_big.json`): 72 px tubes at y 11 / 144, `lens` −0.05 with curve −3, marks moved with the tube
 (thin presets take the example's hand-tuned mark values, wider ones scale theirs by 72 / tubeHeight), and
 front digits drop their `topLens` pre-warp. `urine-big` reproduces the example exactly. Alpine spring,
-Pinot noir and Aperol spritz are standard-rod only.
+Pinot noir, Aperol spritz and Cuvée are standard-rod only.
 
 Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; superseded by `glow`/`frizzante`).
 
@@ -90,3 +91,18 @@ Colour & scale:
 - highlightBright × liquidBright ≤ 1.3 for non-metal, non-emissive liquids (else the specular burns to a white stripe).
 - sprite fonts, hours tube: digitScaleY ≤ digitScaleX (vial stretch) and baseline + 8·scaleY ≤ tubeHeight (glyph fits).
 - trims: liquidBright 0.9–2 (1.15–1.5 if emissive), tickBright 0.8–1.3, digitBright 0.8–1.8.
+
+## Cuvée — current renderer (2026-09-23)
+
+Select **Cuvée** in the simulator, open `?fresh=1&preset=cuvee&t=7:23&settle=1`,
+or import `cuvee.json`. One standard-rod preset: 54 px tubes at y 0 / 185.
+
+Uses the two `perfect_*` reference exports for glass geometry and damped surface motion.
+Warm straw colour, an ivory backing, bronze rear markings and pale bubble rims give depth
+without emissive glow. A short-lived bead collects at the meniscus. The 20–50° reading
+band and home spring keep the time legible at rest, releasing the slug under strong tilt.
+The JSON contains the complete v20 configuration, including inactive controls.
+
+The current renderer uses 3.8 px bubble diameters, 0.48 transparency and the references'
+685 / 38 meniscus spring/damping; this look is exempt from the historical material ranges,
+like Pinot noir and Aperol spritz. Preview: `images/presets/cuvee.png`.

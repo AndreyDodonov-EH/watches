@@ -812,6 +812,43 @@ const PRESET_SPRITZ: Partial<Params> = {
   inputGain: 1, brightness: 1, liquidBright: 1.3, tickBright: 2, digitBright: 2, ambientLight: 1,
 };
 
+/** Cuvée: straw-gold sparkling wine, ivory backing and bronze rear numerals.
+ *  Tuned against the current renderer and the September 2026 reference exports;
+ *  bubble diameter, brightness and damping are outside the historical material ranges.
+ *  The reading pose parks the liquid; strong tilt releases it. Standard rod only. */
+const PRESET_CUVEE: Partial<Params> = {
+  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#c1a04a', liquidHi: '#fff7de',
+  liquidLo: '#7b6229', tubeBack: '#f4f0e5', tubeBack2: '#f4f0e5', tubeBackGradient: 0, glassHi: '#9a9b8d',
+  glassBody: 0, glassHiBright: 0.12, glassReflect: 0.28, glassRim: 0.55, glassWall: 4.5, glassWallGlow: 0,
+  glassOverLiquid: 0.7, lens: -0.2, lensCurve: 0.2, bubbleRim: '#f4edce', highlightH: 9, highlightBright: 0.4,
+  highlightSharp: 2.8, highlightInset: 0, shadeDepth: 0.36, liquidThin: 0.46, meniscusDepth: 3.5,
+  meniscusPow: 3.5, meniscusTiltGain: 2.6, meniscusAsym: 1.1, meniscusLens: 0.05, meniscusK: 685,
+  meniscusDamp: 38, meniscusInertia: 5.6, contactLag: 1.75, wetFilm: 16, traces: false, traceAmount: 0,
+  traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0, edgeSoft: 2.4, frontBright: 0,
+  surfaceBand: 0.18, surfaceRim: 0.24, surfaceWidth: 3, surfaceTone: -0.08, edgeGlow: 0, glowStrength: 0,
+  cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
+  bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.3, fizz: true, fizzCount: 64, fizzSize: 3.8,
+  fizzSizeVar: 0.8, fizzShadeOff: 0.2, fizzDriftGain: 1.35, fizzAcrossGain: 1.05, fizzFlatRise: 0.4,
+  fizzSquash: 1.05, fizzEdgeRise: 0.4, fizzFoamLife: 1.6, fizzSpeed: 28, ticksH: true, tickStepH: 1,
+  tickMajorEveryH: 0, tickMinorHeightH: 19, tickMajorHeightH: 22, tickMinorWidthH: 1, tickMajorWidthH: 3,
+  tickColorH: '#51472d', tickMajorColorH: '#51472d', tickPosH: 2, ticksM: true, tickStepM: 5,
+  tickMajorEveryM: 0, tickMinorHeightM: 19, tickMajorHeightM: 28, tickMinorWidthM: 1, tickMajorWidthM: 2,
+  tickColorM: '#51472d', tickMajorColorM: '#51472d', tickPosM: 2, ticksOnTop: false, tickLens: 0.65,
+  tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3',
+  digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#121212', digitShadowStrength: 0.35,
+  digitShadowOffset: 1, digitFont: 7, digitTint: '#503719', digitTintAmount: 0.6, digitTone: -0.3,
+  digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 21,
+  digitBottom: 22, digitsOnTop: false, bottomLens: 0.4, digitDryLens: 0.1, topLens: 0.35, topParallax: -10,
+  digitParallax: 4.75, liquidTransparency: 0.48, markContrast: 0, digitsLeadingZero: false,
+  digitMinuteStep: 5, digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false,
+  digitsLastOnlyM: false, freeLiquid: true, freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 150,
+  readTiltStart: 20, readTiltEnd: 50, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207,
+  angleDamp: 17.6, angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 31,
+  acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5,
+  gyroDeadzone: 31, gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 1.05, tickBright: 1.5,
+  digitBright: 1.65, ambientLight: 0.7,
+};
+
 export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; mat?: Material; legacy?: boolean; big?: boolean }
 
 /** Big-lens twin of a preset (examples/urine_big.json, 2026-08-27): the second physical rod is wider and
@@ -857,11 +894,13 @@ export const PRESETS: PresetEntry[] = [
   { id: 'molten', name: 'Molten iron', note: 'emissive orange, dense, non-wetting, forged numerals', p: PRESET_MOLTEN, mat: M('medium', 'opaque', true, false, 'trapped') },
   { id: 'free', name: 'Free liquid', note: 'bottle green slug; gentle tilt reads time, strong tilt flows', p: PRESET_FREE },
 ];
-// The original signatures also have big-rod variants; alpine, pinot and spritz are single standard-rod looks.
+// The original signatures also have big-rod variants; later additions are single standard-rod looks.
 PRESETS.push(...PRESETS.map((e) => ({ ...e, id: e.id + '-big', name: e.name + ' (big lens)', p: bigLens(e.p), big: true })));
 PRESETS.push({ id: 'alpine', name: 'Alpine spring', note: 'clear sparkling water, pale ceramic backing, slate markings', p: PRESET_ALPINE, mat: M('watery', 'clear', false, true, 'carbonated') });
 PRESETS.push({ id: 'pinot', name: 'Pinot noir', note: 'ruby red wine, legs on the glass, bronze cellar numerals', p: PRESET_PINOT });
 PRESETS.push({ id: 'spritz', name: 'Aperol spritz', note: 'vivid orange aperitivo, lively bead with a foam ring, navy enamel numerals on white', p: PRESET_SPRITZ });
+
+PRESETS.push({ id: 'cuvee', name: 'Cuvée', note: 'straw-gold sparkling wine, ivory backing, bronze numerals and a fine pale bead', p: PRESET_CUVEE });
 
 /** Presets are whole looks: apply over the defaults, not over the current edit. */
 export function presetParams(e: PresetEntry): Params {
