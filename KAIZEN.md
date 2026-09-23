@@ -324,3 +324,4 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `check-presets` class ranges (freeGain 570, watery freeDamp ≤ 1.5, meniscusK ≤ 550, readTilt 20/50) no
   longer match the user-tuned look (840 / 7 / 685 / 0–1); pinot and olive-oil are exempt for that reason.
 - Headless Chromium worked on 2026-09-23 (run-sim shot.mjs); the sandbox note above may be stale.
+- run-sim has no way to load a user-exported JSON; a 3-line node helper turning the JSON into `p.<key>=` URL params worked (2026-09-23) and belongs in the skill.
