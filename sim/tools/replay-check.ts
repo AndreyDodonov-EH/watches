@@ -20,12 +20,17 @@ const TUBE_LENGTH_PX = 536, TUBE_HEIGHT_PX = 72;
 // axis map (spec/layout.ts): along = -ay, across = -ax, gyroAcross = gx
 const mapSample = (s: number[], d: number): TiltInput =>
   ({ along: -s[1] / d, across: -s[0] / d, gyroAlong: s[4], gyroAcross: s[3] });
-function edgeX(ry: number, xe: number, angleDeg: number, tilt: number, side: number, cap: number): number {
-  const yc = (TUBE_HEIGHT_PX - 1) / 2, d = (ry - yc) / yc, P = DEFAULT_PARAMS;
-  const asymEff = P.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(P.meniscusDepth);
-  const u = Math.abs(d), climb = P.meniscusDepth * (1 + asymEff * d) * Math.pow(u, P.meniscusPow);
-  const bulge = P.meniscusTiltGain * tilt * Math.abs(P.meniscusDepth) + cap;
-  return xe + Math.tan((angleDeg * Math.PI) / 180) * (ry - yc) + climb - bulge * (1 - Math.sqrt(Math.max(0, 1 - u * u)));
+// Wall-row edge of the contact-angle meniscus (render.ts capShape / edgeCap at rest speed, no lens):
+// the static angle shifted by the tilt pressure within the hysteresis band, the across sag, the wobble.
+const MM_PER_PX = 0.083;
+function edgeX(ry: number, xe: number, angleDeg: number, tilt: number, side: number, cap: number, len: number): number {
+  const R = (TUBE_HEIGHT_PX - 1) / 2, d = (ry - R) / R, P = DEFAULT_PARAMS, rad = Math.PI / 180;
+  const t0 = P.contactAngle * rad, hy = P.contactHyst * rad, lc = P.capLength, Rmm = R * MM_PER_PX;
+  const cs = Math.max(Math.cos(Math.min(Math.PI, t0 + hy)), Math.min(Math.cos(Math.max(0, t0 - hy)),
+    Math.cos(t0) - Rmm * len * MM_PER_PX * tilt / (4 * lc * lc)));
+  const asym = (Rmm / lc) ** 2 * side * Math.sign(cs);
+  const sphere = cs * R * d * d / (1 + Math.sqrt(Math.max(0, 1 - cs * cs * d * d)));
+  return xe + Math.tan((angleDeg * Math.PI) / 180) * (ry - R) + sphere * Math.max(0, 1 + asym * d) - cap * d * d;
 }
 
 // deterministic noise
@@ -76,9 +81,9 @@ const scenarios: [string, number[][]][] = [
 
 const p = { ...DEFAULT_PARAMS, freeLiquid: false };
 // Max distance the drawn edge may ever sit from the time-true fill edge (px):
-// hard slosh cap + tan(hard angle cap)·(H/2) + |meniscus| + 1 px slack.
+// hard slosh cap + tan(hard angle cap)·(H/2) + |meniscus| (≤ a hemisphere, sagged) + wobble + 1 px slack.
 const EDGE_BUDGET = FILL_SLOSH_MAX_PX + Math.tan((ANGLE_HARD_MAX_DEG * Math.PI) / 180) * (TUBE_HEIGHT_PX / 2)
-  + Math.abs(DEFAULT_PARAMS.meniscusDepth) * (1 + DEFAULT_PARAMS.meniscusTiltGain) * (1 + DEFAULT_PARAMS.meniscusAsym) + CAP_DYN_MAX_PX + 1;
+  + (TUBE_HEIGHT_PX / 2) * (1 + (TUBE_HEIGHT_PX / 2 * 0.083 / DEFAULT_PARAMS.capLength) ** 2) + CAP_DYN_MAX_PX + 1;   // cap ≤ a hemisphere, sagged
 
 let failures = 0;
 const fail = (msg: string): void => { failures++; console.error('  FAIL', msg); };
@@ -98,7 +103,7 @@ for (const [name, samples] of scenarios) {
         && isFinite(tube.cap) && isFinite(tube.filmFree) && isFinite(tube.slugPos) && isFinite(tube.reading)))
         { fail(`${name}: non-finite state`); break; }
       for (const ry of [0, TUBE_HEIGHT_PX >> 1, TUBE_HEIGHT_PX - 1]) {
-        const dev = Math.abs(edgeX(ry, tube.fillTarget * TUBE_LENGTH_PX + tube.fillPos, tube.angle, tube.edgeLight, tube.acrossTilt, tube.cap) - tube.fillTarget * TUBE_LENGTH_PX);
+        const dev = Math.abs(edgeX(ry, tube.fillTarget * TUBE_LENGTH_PX + tube.fillPos, tube.angle, tube.edgeLight, tube.acrossTilt, tube.cap, columnLen(tube.fillTarget, p)) - tube.fillTarget * TUBE_LENGTH_PX);
         maxDev = Math.max(maxDev, dev);
       }
       maxAngle = Math.max(maxAngle, Math.abs(tube.angle));

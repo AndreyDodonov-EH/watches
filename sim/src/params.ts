@@ -34,15 +34,14 @@ export interface Params {
   highlightSharp: number;  // 0.3..4 band profile exponent (high = narrow, glossy)
   shadeDepth: number;    // 0..1, how dark the bottom rows get (cylinder shading)
   liquidThin: number;    // 0..1 the liquid lightens and desaturates toward the walls (short path through the column)
-  meniscusDepth: number; // px, how far the liquid climbs the wall at top/bottom vs centre (>0 concave)
-  meniscusPow: number;   // curve exponent (2 = parabola)
-  meniscusTiltGain: number; // tilt into the end pushes the surface centre out (convex bulge), away hollows it; × |meniscusDepth|
-  meniscusAsym: number;  // 0..1: across-tilt sags the bulge onto the low wall (its contact line extends, the high one retracts)
+  contactAngle: number;  // deg, static contact angle on the glass: < 90 wetting (concave), > 90 non-wetting (convex bead)
+  contactHyst: number;   // deg, hysteresis half-band: a line advances at θ + this, recedes at θ − this; tilt pressure moves θ within it
+  contactDyn: number;    // deg, Cox–Voinov speed term: the angle a zero-angle line reaches advancing at 25 px/s (viscosity / surface tension)
+  capLength: number;     // mm, capillary length √(γ/ρg): with the ~2–3 mm bore it sets the across-tilt sag and the tilt pressure
   meniscusLens: number;  // -1..1 pre-warp of the cap profile against the physical glass (like topLens); negative compensates magnification
   meniscusK: number;     // 1/s^2 spring of the free surface between the pinned contact lines
   meniscusDamp: number;  // 1/s damping of that spring (low = visible wobble after a flick)
   meniscusInertia: number; // 0..10 how much edge forcing (flick kick, slug acceleration) bulges the surface centre ahead of the contact lines
-  contactLag: number;    // 0..3 contact-angle hysteresis: px the contact lines trail the centre per 10 px/s of edge speed
   wetFilm: number;       // px trailing wet film a receding edge leaves on the glass
   traces: boolean;       // a receding edge leaves a residue on the glass (blood smear, syrup coating, legs)
   traceAmount: number;   // 0..2 residue opacity boost at the wall rows, independent of liquidTransparency
@@ -186,7 +185,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 21;
+export const PARAMS_VERSION = 22;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -217,15 +216,14 @@ export const DEFAULT_PARAMS: Params = {
   highlightInset: 0,
   shadeDepth: 0.49,
   liquidThin: 0.4,
-  meniscusDepth: -12,
-  meniscusPow: 3.2,
-  meniscusTiltGain: 0.55,
-  meniscusAsym: 0.5,
+  contactAngle: 25,
+  contactHyst: 10,
+  contactDyn: 8,
+  capLength: 2.7,
   meniscusLens: 0,
   meniscusK: 180,
   meniscusDamp: 9,
   meniscusInertia: 6,
-  contactLag: 0.5,
   wetFilm: 6,
   traces: false,
   traceAmount: 0.6,
@@ -372,8 +370,8 @@ const MODERN_BASE: Partial<Params> = {
   glassHi: '#859093', glassBody: 0.04, glassHiBright: 0.34, glassReflect: 0.2, glassRim: 0.52, glassOverLiquid: 0.4,
   lens: -0.5, lensCurve: -0.05,
   highlightH: 17, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.68,
-  meniscusDepth: 4.5, meniscusPow: 3.6, meniscusTiltGain: 0.9, meniscusAsym: 1.05, meniscusLens: 0,
-  meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, contactLag: 3, wetFilm: 15,
+  meniscusLens: 0,
+  meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 15,
   edgeSoft: 0, frontBright: 0, edgeGlow: 19, glowStrength: 0.06, cornerR: 0, edgeLightGain: 0.55,
   bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleTiltGain: 14, bubbleDark: 0.91,
   fizz: false, fizzCount: 10, fizzSize: 2, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 14,
@@ -411,10 +409,10 @@ const FRONT_PRINT: Partial<Params> = {
 };
 
 // Viscosity classes on top of the base (checker ranges in tools/check-presets.ts).
-const WATERY: Partial<Params> = { freeDamp: 0.8, freeBounce: 0.2, meniscusK: 475, meniscusDamp: 8, meniscusInertia: 3, contactLag: 2, wetFilm: 10, angleTiltGain: 6.5, angleGyroGain: 0.42 };
-const MEDIUM: Partial<Params> = { freeDamp: 2.5, freeBounce: 0.1, meniscusK: 280, meniscusDamp: 16, meniscusInertia: 2, contactLag: 2.6, wetFilm: 15, angleTiltGain: 4, angleGyroGain: 0.25 };
-const VISCOUS: Partial<Params> = { freeDamp: 9, freeBounce: 0, meniscusK: 90, meniscusDamp: 34, meniscusInertia: 1, contactLag: 3, wetFilm: 26, angleTiltGain: 1.5, angleGyroGain: 0.06 };
-const METAL: Partial<Params> = { freeDamp: 1, freeBounce: 0.55, meniscusK: 650, meniscusDamp: 12, meniscusInertia: 4, contactLag: 0.1, wetFilm: 0, angleTiltGain: 2, angleGyroGain: 0.4 };
+const WATERY: Partial<Params> = { contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.7, freeDamp: 0.8, freeBounce: 0.2, meniscusK: 475, meniscusDamp: 8, meniscusInertia: 3, wetFilm: 10, angleTiltGain: 6.5, angleGyroGain: 0.42 };
+const MEDIUM: Partial<Params> = { contactAngle: 30, contactHyst: 15, contactDyn: 15, capLength: 2.3, freeDamp: 2.5, freeBounce: 0.1, meniscusK: 280, meniscusDamp: 16, meniscusInertia: 2, wetFilm: 15, angleTiltGain: 4, angleGyroGain: 0.25 };
+const VISCOUS: Partial<Params> = { contactAngle: 25, contactHyst: 20, contactDyn: 90, capLength: 1.9, freeDamp: 9, freeBounce: 0, meniscusK: 90, meniscusDamp: 34, meniscusInertia: 1, wetFilm: 26, angleTiltGain: 1.5, angleGyroGain: 0.06 };
+const METAL: Partial<Params> = { contactAngle: 140, contactHyst: 15, contactDyn: 3, capLength: 1.9, freeDamp: 1, freeBounce: 0.55, meniscusK: 650, meniscusDamp: 12, meniscusInertia: 4, wetFilm: 0, angleTiltGain: 2, angleGyroGain: 0.4 };
 
 /** Sparkling mineral water in a lab cylinder: the water itself is colourless — what you see is the
  *  back through it, a white surface reflection, the meniscus and a constant fine bead. */
@@ -424,7 +422,6 @@ export const PRESET_FRIZZANTE: Partial<Params> = {
   bubbleRim: '#f4ffff',
   glassHi: '#dfeef4', glassBody: 0.12, glassHiBright: 0.55, glassReflect: 0.28, glassRim: 0.75, glassOverLiquid: 0.7,
   highlightH: 8, highlightBright: 0.9, highlightSharp: 3, shadeDepth: 0.45,
-  meniscusDepth: 6, meniscusPow: 2.4,
   fizz: true, fizzCount: 50, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 42, fizzFlatRise: 0.5, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 4,
   liquidTransparency: 0.85, markContrast: 20,
   tickStepM: 1, tickMajorEveryM: 5, tickColorH: '#9fb8c2', tickMajorColorH: '#ffffff', tickColorM: '#8fa9b4', tickMajorColorM: '#ffffff',
@@ -448,8 +445,7 @@ export const PRESET_ALPINE: Partial<Params> = {
   lens: -0.2, lensCurve: 0.2, bubbleRim: '#f5ffff',
   highlightH: 8, highlightBright: 0.68, highlightSharp: 2.6,
   shadeDepth: 0.5, liquidThin: 0.45,
-  meniscusDepth: 5, meniscusPow: 2.8, meniscusTiltGain: 0.9,
-  meniscusAsym: 1.05, meniscusInertia: 2.5,
+  meniscusInertia: 2.5,
   edgeSoft: 1.4, surfaceBand: 0.38, surfaceRim: 0.35,
   surfaceWidth: 3, surfaceTone: 0, edgeGlow: 8, glowStrength: 0.03,
   fizz: true, fizzCount: 60, fizzSize: 2, fizzSizeVar: 0.45,
@@ -477,7 +473,7 @@ export const PRESET_ALPINE: Partial<Params> = {
 export const PRESET_URINE: Partial<Params> = {
   ...MODERN_BASE, ...WATERY,
   liquid: '#6d6112', liquidHi: '#809419', liquidLo: '#79792a', bubbleRim: '#322606',
-  meniscusDepth: 4.5, meniscusPow: 3.6, meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, contactLag: 3, wetFilm: 15,
+  meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 15,
   fizz: false, liquidTransparency: 0.52,
 };
 
@@ -487,7 +483,6 @@ export const PRESET_BLOOD: Partial<Params> = {
   liquid: '#6e0b16', liquidHi: '#c8443f', liquidLo: '#1c0306', tubeBack: '#050203', tubeBack2: '#0a0405', bubbleRim: '#e08a80',
   glassHi: '#93a2ae', glassBody: 0.06, glassHiBright: 0.3, glassReflect: 0.14, glassRim: 0.5, glassOverLiquid: 0.22,
   highlightH: 10, highlightBright: 0.5, highlightSharp: 2, shadeDepth: 0.86,
-  meniscusDepth: 5, meniscusPow: 2.6,
   traces: true, traceAmount: 1.1, traceDry: 1.5, traceFollow: 0.25, traceStain: 0.35, traceThin: 0.8,   // blood smears the wall, crawls back, dries last
   liquidTransparency: 0.05,
   digitFont: 9, digitTintAmount: 0, digitTone: 0,
@@ -502,7 +497,6 @@ export const PRESET_MILK: Partial<Params> = {
   liquid: '#c9c5ba', liquidHi: '#ffffff', liquidLo: '#7a7568', tubeBack: '#0a0a0a', tubeBack2: '#101010', bubbleRim: '#ffffff',
   glassHi: '#d8dde0', glassBody: 0.08, glassHiBright: 0.4, glassReflect: 0.18, glassRim: 0.5, glassOverLiquid: 0.35,
   highlightH: 16, highlightBright: 0.4, highlightSharp: 0.8, shadeDepth: 0.5,
-  meniscusDepth: 4, meniscusPow: 2.6,
   liquidTransparency: 0.03,
   tickColorH: '#7aa3bd', tickMajorColorH: '#5b8db0', tickColorM: '#7aa3bd', tickMajorColorM: '#5b8db0',
   digitFont: 10, digitTint: '#4f86ab', digitTintAmount: 0.8, digitTone: -0.1,
@@ -520,7 +514,6 @@ export const PRESET_MERCURY: Partial<Params> = {
   bubbleRim: '#e8f0f5',
   glassHi: '#e2edf5', glassBody: 0.13, glassHiBright: 0.6, glassReflect: 0.35, glassRim: 0.78, glassOverLiquid: 0.5,
   highlightH: 7, highlightBright: 1.3, highlightSharp: 3.6, shadeDepth: 0.95,
-  meniscusDepth: -8, meniscusPow: 2.4, meniscusTiltGain: 0.35, meniscusAsym: 0.15,
   frontBright: 22, edgeGlow: 0, glowStrength: 0, edgeLightGain: 0.7,
   liquidTransparency: 0,
   tickEmboss: 0.35, tickColorH: '#0e1418', tickMajorColorH: '#060a0c', tickColorM: '#0e1418', tickMajorColorM: '#060a0c',
@@ -537,7 +530,6 @@ export const PRESET_HONEY: Partial<Params> = {
   liquid: '#7a4206', liquidHi: '#f0c060', liquidLo: '#3d1c03', tubeBack: '#0c0703', tubeBack2: '#1c1208', bubbleRim: '#ffd890',
   glassHi: '#f0dcb0', glassBody: 0.08, glassHiBright: 0.45, glassReflect: 0.25, glassRim: 0.6,
   highlightH: 14, highlightBright: 0.4, highlightSharp: 1.8, shadeDepth: 0.78,
-  meniscusDepth: 9, meniscusPow: 2.2,
   traces: true, traceAmount: 0.7, traceDry: 2, traceFollow: 0.08, traceStain: 0.45, traceThin: 0.3,   // syrup coats thickly whatever the speed, crawls back slowly
   fizz: true, fizzCount: 5, fizzSize: 3, fizzSizeVar: 0.6, fizzShadeOff: 0.5, fizzSpeed: 3, fizzFlatRise: 0.15, fizzDriftGain: 0.4, fizzAcrossGain: 0.8, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 20,
   liquidTransparency: 0.32,
@@ -552,7 +544,6 @@ export const PRESET_COLA: Partial<Params> = {
   liquid: '#3a1206', liquidHi: '#e8b890', liquidLo: '#120602', tubeBack: '#070403', tubeBack2: '#140c07', bubbleRim: '#f0d8c4',
   glassHi: '#e8dcd2', glassBody: 0.08, glassHiBright: 0.5, glassReflect: 0.25, glassRim: 0.6, glassOverLiquid: 0.5,
   highlightH: 9, highlightBright: 0.5, highlightSharp: 3, shadeDepth: 0.7,
-  meniscusDepth: 5, meniscusPow: 2.6,
   fizz: true, fizzCount: 40, fizzSize: 1.5, fizzSizeVar: 0.6, fizzSpeed: 36, fizzFlatRise: 0.45, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 5,
   liquidTransparency: 0.38, markContrast: 24,
   tickColorH: '#4a3e32', tickMajorColorH: '#5a4a3c', tickColorM: '#4a3e32', tickMajorColorM: '#5a4a3c',
@@ -567,7 +558,7 @@ export const PRESET_MALT: Partial<Params> = {
   liquid: '#7a4e14', liquidHi: '#ffe0a8', liquidLo: '#2e1704', tubeBack: '#0a0603', tubeBack2: '#160e05', bubbleRim: '#f0c88a',
   glassHi: '#f2e0b4', glassBody: 0.1, glassHiBright: 0.5, glassReflect: 0.3, glassRim: 0.7, glassOverLiquid: 0.45,
   highlightH: 12, highlightBright: 0.5, highlightSharp: 1.6, shadeDepth: 0.78,
-  meniscusDepth: 7, meniscusPow: 2.4, wetFilm: 18,
+  wetFilm: 18,
   traces: true, traceAmount: 0.45, traceDry: 0.6, traceFollow: 0.35, traceStain: 0.2, traceThin: 1.2,   // thin legs crawl down and dry quickly
   liquidTransparency: 0.42, markContrast: 24,
   ticksOnTop: true, tickLens: 0, tickParallax: 0, tickEmboss: 0.5,
@@ -583,7 +574,6 @@ export const PRESET_CHAMPAGNE: Partial<Params> = {
   liquid: '#8a7228', liquidHi: '#fff8dc', liquidLo: '#4a3808', tubeBack: '#080602', tubeBack2: '#161004', bubbleRim: '#fff4cc',
   glassHi: '#f6ecd0', glassBody: 0.1, glassHiBright: 0.55, glassReflect: 0.3, glassRim: 0.7, glassOverLiquid: 0.55,
   highlightH: 9, highlightBright: 0.55, highlightSharp: 2.6, shadeDepth: 0.55,
-  meniscusDepth: 5, meniscusPow: 2.6,
   fizz: true, fizzCount: 60, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 46, fizzFlatRise: 0.45, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 4,
   liquidTransparency: 0.5, markContrast: 24,
   tickColorH: '#4a3e18', tickMajorColorH: '#5a4c20', tickColorM: '#4a3e18', tickMajorColorM: '#5a4c20',
@@ -597,7 +587,7 @@ export const PRESET_CRYO: Partial<Params> = {
   liquid: '#3a7aa8', liquidHi: '#ffffff', liquidLo: '#0e3f66', tubeBack: '#03070c', tubeBack2: '#0c1620', bubbleRim: '#f0fbff',
   glassHi: '#e2f4ff', glassBody: 0.16, glassHiBright: 0.45, glassReflect: 0.28, glassRim: 0.85, glassOverLiquid: 0.6,
   highlightH: 10, highlightBright: 0.45, highlightSharp: 1.8, shadeDepth: 0.45,
-  meniscusDepth: 6, meniscusPow: 2.2, meniscusK: 520, meniscusDamp: 4, meniscusInertia: 4, contactLag: 1.5, wetFilm: 8,
+  meniscusK: 520, meniscusDamp: 4, meniscusInertia: 4, wetFilm: 8,
   freeDamp: 0.5, freeBounce: 0.3, angleTiltGain: 8, angleGyroGain: 0.5,
   fizz: true, fizzCount: 55, fizzSize: 1, fizzSizeVar: 0.5, fizzSpeed: 52, fizzFlatRise: 0.6, fizzDriftGain: 1.2, fizzSquash: 1.3, fizzEdgeRise: 0.6, fizzFoamLife: 2,
   liquidTransparency: 0.72, markContrast: 20,
@@ -612,7 +602,6 @@ export const PRESET_INK: Partial<Params> = {
   liquid: '#0e1428', liquidHi: '#5a70a0', liquidLo: '#03040c', tubeBack: '#000000', tubeBack2: '#000000', bubbleRim: '#4a5a78',
   glassHi: '#8c9bb5', glassBody: 0.05, glassHiBright: 0.3, glassReflect: 0.2, glassRim: 0.45, glassOverLiquid: 0.3,
   highlightH: 7, highlightBright: 0.8, highlightSharp: 2.6, shadeDepth: 0.9,
-  meniscusDepth: 4, meniscusPow: 2.6,
   traces: true, traceAmount: 0.5, traceDry: 1.2, traceFollow: 0.5, traceStain: 0.4, traceThin: 1.5,   // thin ink drains back fast, the stain lingers a beat
   liquidTransparency: 0,
   tickMinorWidthH: 1, tickMajorWidthH: 1, tickMinorWidthM: 1, tickMajorWidthM: 1,
@@ -630,7 +619,6 @@ export const PRESET_GLOW: Partial<Params> = {
   liquid: '#5ad81e', liquidHi: '#e4ffc8', liquidLo: '#1f7a08', tubeBack: '#020602', tubeBack2: '#061006', bubbleRim: '#dfffc0',
   glassHi: '#a8d8a0', glassBody: 0.06, glassHiBright: 0.35, glassReflect: 0.15, glassRim: 0.4, glassOverLiquid: 0.4,
   highlightH: 14, highlightBright: 0.6, highlightSharp: 1.2, shadeDepth: 0.55,
-  meniscusDepth: 5, meniscusPow: 2.6,
   edgeSoft: 0, frontBright: 14, edgeGlow: 28, glowStrength: 0.7, edgeLightGain: 0.3,
   liquidTransparency: 0.35, markContrast: 30,
   tickPosH: 2, tickPosM: 2, tickColorH: '#4f8a3e', tickMajorColorH: '#c6ffb0', tickColorM: '#4f8a3e', tickMajorColorM: '#c6ffb0',
@@ -645,11 +633,11 @@ export const PRESET_GLOW: Partial<Params> = {
  *  glow past the column end, bold print. */
 export const PRESET_XENON: Partial<Params> = {
   ...MODERN_BASE, ...LAYOUT_WIDE,
+  contactAngle: 100, contactHyst: 0, contactDyn: 0,
   liquid: '#5a30d8', liquidHi: '#d9c8ff', liquidLo: '#1a0570', tubeBack: '#05020c', tubeBack2: '#0a0418', bubbleRim: '#d8ccff',
   glassHi: '#a394d8', glassBody: 0.1, glassHiBright: 0.5, glassReflect: 0.2, glassRim: 0.6, glassOverLiquid: 0.4,
   highlightH: 14, highlightBright: 0.7, highlightSharp: 1.5, shadeDepth: 0.42,
-  meniscusDepth: -5, meniscusPow: 2, meniscusTiltGain: 0, meniscusAsym: 0,
-  meniscusK: 400, meniscusDamp: 30, meniscusInertia: 0, contactLag: 0, wetFilm: 0,
+  meniscusK: 400, meniscusDamp: 30, meniscusInertia: 0, wetFilm: 0,
   edgeSoft: 0, frontBright: 18, edgeGlow: 26, glowStrength: 0.6, cornerR: 14, edgeLightGain: 0.3,
   liquidTransparency: 0.5, markContrast: 34,
   tickMajorEveryH: 3, tickMajorEveryM: 15, tickColorH: '#3a2a6a', tickMajorColorH: '#9a86ff', tickColorM: '#3a2a6a', tickMajorColorM: '#9a86ff',
@@ -665,10 +653,11 @@ export const PRESET_XENON: Partial<Params> = {
  *  forged numerals printed on the glass. */
 export const PRESET_MOLTEN: Partial<Params> = {
   ...MODERN_BASE, ...LAYOUT_WIDE, ...FRONT_PRINT, ...MEDIUM,
+  contactAngle: 120, contactHyst: 10, contactDyn: 5, capLength: 5,
   liquid: '#e04c00', liquidHi: '#ffd98a', liquidLo: '#5e0e00', tubeBack: '#0b0300', tubeBack2: '#160600', bubbleRim: '#ffd08a',
   glassHi: '#c08a60', glassBody: 0.07, glassHiBright: 0.4, glassReflect: 0.18, glassRim: 0.45, glassOverLiquid: 0.3,
   highlightH: 10, highlightBright: 0.6, highlightSharp: 1.2, shadeDepth: 0.78,
-  meniscusDepth: -4, meniscusPow: 2, meniscusK: 400, meniscusDamp: 14, meniscusInertia: 4, contactLag: 0.2, wetFilm: 0,
+  meniscusK: 400, meniscusDamp: 14, meniscusInertia: 4, wetFilm: 0,
   freeDamp: 2.5, freeBounce: 0.05,
   edgeSoft: 0, frontBright: 16, edgeGlow: 26, glowStrength: 0.6, edgeLightGain: 1,
   fizz: true, fizzCount: 10, fizzSize: 2.5, fizzSizeVar: 0.5, fizzShadeOff: 0.4, fizzSpeed: 7, fizzFlatRise: 0.25, fizzDriftGain: 0.6, fizzAcrossGain: 0.8, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 15,
@@ -686,11 +675,12 @@ export const PRESET_MOLTEN: Partial<Params> = {
  *  liquid with a watery surface (K 460, ζ≈0.12), copper gauge numerals behind the liquid. Saved 2026-08-26. */
 const PRESET_FREE: Partial<Params> = {
   ...PLAIN_TUBE_BACK,
+  contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
   tubeHeight: 56, hoursY: 9, minutesY: 180, liquid: '#1f602f', liquidHi: '#1a6528', liquidLo: '#214002',
   tubeBack: '#10140f', glassBody: 0.03, glassHiBright: 0.15, glassReflect: 0.11, glassRim: 0.13,
   glassOverLiquid: 0.25, lens: -0.4, lensCurve: 0.6, bubbleRim: '#255917', highlightH: 26, highlightBright: 0.15,
-  highlightSharp: 3, highlightInset: 31, shadeDepth: 0.74, meniscusDepth: 3.5, meniscusPow: 3.6,
-  meniscusTiltGain: 0.9, meniscusAsym: 1.05, meniscusK: 460, meniscusDamp: 5, meniscusInertia: 2, contactLag: 0.9,
+  highlightSharp: 3, highlightInset: 31, shadeDepth: 0.74,
+  meniscusK: 460, meniscusDamp: 5, meniscusInertia: 2,
   wetFilm: 15, edgeSoft: 0.7, frontBright: 23, edgeGlow: 40, glowStrength: 0.21, edgeLightGain: 0.55, bubbleW: 28,
   bubbleH: 20, bubbleGap: 18, bubbleY: 0.28, bubbleTiltGain: 14, bubbleDark: 0.55, fizzCount: 19, fizzSize: 4.5,
   fizzSizeVar: 0.7, fizzShadeOff: 0.55, fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2,
@@ -707,14 +697,15 @@ const PRESET_FREE: Partial<Params> = {
 
 /** User-tuned olive oil (2026-09-18), preserved independently of the material-class ranges. */
 const PRESET_OLIVE_OIL: Partial<Params> = {
+  contactAngle: 15, contactHyst: 8, contactDyn: 40, capLength: 1.9,
   v: 18, tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: false,
   liquid: '#5e5b08', liquidHi: '#8a8619', liquidLo: '#89861f',
   tubeBack: '#110b03', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#322d2a',
   glassBody: 0.32, glassHiBright: 0.77, glassReflect: 0.35, glassRim: 0.69, glassWall: 5, glassWallGlow: 0.6, glassOverLiquid: 0.64,
   lens: -0.2, lensCurve: 0.2, bubbleRim: '#2d3319',
   highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25, liquidThin: 0.6,
-  meniscusDepth: 4, meniscusPow: 4, meniscusTiltGain: 3, meniscusAsym: 2, meniscusLens: 0,
-  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, contactLag: 1.9, wetFilm: 15,
+  meniscusLens: 0,
+  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, wetFilm: 15,
   traces: true, traceAmount: 2, traceDry: 2, traceFollow: 0.66, traceStain: 1, traceThin: 1.9,
   edgeSoft: 3.7, frontBright: 0, edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55,
   bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
@@ -748,13 +739,14 @@ const PRESET_OLIVE_OIL: Partial<Params> = {
  *  bronze numerals seen dimly through the wine, and legs: a clinging coat that drains slowly after a tilt.
  *  Standard rod only, exempt from the material-class ranges (it keeps the current tuned slug physics). */
 const PRESET_PINOT: Partial<Params> = {
+  contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
   v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#8c0a1c', liquidHi: '#ffb8c0',
   liquidLo: '#4a0410', tubeBack: '#f1e6cf', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#5c5654',
   glassBody: 0, glassHiBright: 0.08, glassReflect: 0.2, glassRim: 0.63, glassWall: 4.5, glassWallGlow: 0,
   glassOverLiquid: 0.25, lens: -0.2, lensCurve: 0.2, bubbleRim: '#3a0a10', highlightH: 10,
   highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.5, liquidThin: 0.15,
-  meniscusDepth: 4, meniscusPow: 3.5, meniscusTiltGain: 2.6, meniscusAsym: 1.1, meniscusLens: 0.05,
-  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, contactLag: 1.75, wetFilm: 18, traces: true,
+  meniscusLens: 0.05,
+  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 18, traces: true,
   traceAmount: 1, traceDry: 1.5, traceFollow: 0.15, traceStain: 0.3, traceThin: 1, traceFilm: 0.03,
   edgeSoft: 4, frontBright: 0, surfaceBand: 0.3, surfaceRim: 0.35, surfaceWidth: 4, surfaceTone: -0.1,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
@@ -785,13 +777,14 @@ const PRESET_PINOT: Partial<Params> = {
  *  that packs into a foam ring at the surface. White bar-glass backing with navy enamel numerals seen dimly
  *  through the drink. Standard rod only, on the current tuned slug physics (exempt from the class ranges). */
 const PRESET_SPRITZ: Partial<Params> = {
+  contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
   v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#e8420a', liquidHi: '#f7a44c',
   liquidLo: '#8f1c06', tubeBack: '#fbf7ee', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#5c5654',
   glassBody: 0, glassHiBright: 0.08, glassReflect: 0.4, glassRim: 0.63, glassWall: 4.5, glassWallGlow: 0,
   glassOverLiquid: 0.6, lens: -0.2, lensCurve: 0.2, bubbleRim: '#5a1605', highlightH: 9, highlightBright: 0.4,
-  highlightSharp: 2, highlightInset: 0, shadeDepth: 0.4, liquidThin: 0.4, meniscusDepth: 3.5,
-  meniscusPow: 3.5, meniscusTiltGain: 2.6, meniscusAsym: 1.1, meniscusLens: 0.05, meniscusK: 685,
-  meniscusDamp: 38, meniscusInertia: 5.6, contactLag: 1.75, wetFilm: 14, traces: false, traceAmount: 0,
+  highlightSharp: 2, highlightInset: 0, shadeDepth: 0.4, liquidThin: 0.4,
+  meniscusLens: 0.05, meniscusK: 685,
+  meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 14, traces: false, traceAmount: 0,
   traceDry: 1, traceFollow: 0.5, traceStain: 0.2, traceThin: 1.5, traceFilm: 0, edgeSoft: 4, frontBright: 0,
   surfaceBand: 0.3, surfaceRim: 0.35, surfaceWidth: 4, surfaceTone: 0, edgeGlow: 0, glowStrength: 0,
   cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
@@ -821,13 +814,14 @@ const PRESET_SPRITZ: Partial<Params> = {
  *  bubble diameter, brightness and damping are outside the historical material ranges.
  *  The reading pose parks the liquid; strong tilt releases it. Standard rod only. */
 const PRESET_CUVEE: Partial<Params> = {
+  contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
   v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#c1a04a', liquidHi: '#fff7de',
   liquidLo: '#7b6229', tubeBack: '#f4f0e5', tubeBack2: '#f4f0e5', tubeBackGradient: 0, glassHi: '#9a9b8d',
   glassBody: 0, glassHiBright: 0.12, glassReflect: 0.28, glassRim: 0.55, glassWall: 4.5, glassWallGlow: 0,
   glassOverLiquid: 0.7, lens: -0.2, lensCurve: 0.2, bubbleRim: '#f4edce', highlightH: 9, highlightBright: 0.4,
-  highlightSharp: 2.8, highlightInset: 0, shadeDepth: 0.36, liquidThin: 0.46, meniscusDepth: 3.5,
-  meniscusPow: 3.5, meniscusTiltGain: 2.6, meniscusAsym: 1.1, meniscusLens: 0.05, meniscusK: 685,
-  meniscusDamp: 38, meniscusInertia: 5.6, contactLag: 1.75, wetFilm: 16, traces: false, traceAmount: 0,
+  highlightSharp: 2.8, highlightInset: 0, shadeDepth: 0.36, liquidThin: 0.46,
+  meniscusLens: 0.05, meniscusK: 685,
+  meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 16, traces: false, traceAmount: 0,
   traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0, edgeSoft: 2.4, frontBright: 0,
   surfaceBand: 0.18, surfaceRim: 0.24, surfaceWidth: 3, surfaceTone: -0.08, edgeGlow: 0, glowStrength: 0,
   cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
@@ -857,13 +851,14 @@ const PRESET_CUVEE: Partial<Params> = {
  *  A soft reflective band and a wetting surface reveal the dark column; medium
  *  drag and draining residue make the ink feel weighty. Standard rod only. */
 const PRESET_NOCTURNE: Partial<Params> = {
+  contactAngle: 30, contactHyst: 15, contactDyn: 15, capLength: 2.3,
   v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: false, liquid: '#182943', liquidHi: '#849bbc',
   liquidLo: '#050b16', tubeBack: '#6d7883', tubeBack2: '#3c4652', tubeBackGradient: 2, glassHi: '#91a2b6',
   glassBody: 0.025, glassHiBright: 0.16, glassReflect: 0.13, glassRim: 0.55, glassWall: 4.5,
   glassWallGlow: 0.04, glassOverLiquid: 0.3, lens: -0.2, lensCurve: 0.2, bubbleRim: '#f4edce', highlightH: 11,
   highlightBright: 0.62, highlightSharp: 2.5, highlightInset: 0, shadeDepth: 0.72, liquidThin: 0.3,
-  meniscusDepth: 4.5, meniscusPow: 3, meniscusTiltGain: 1.4, meniscusAsym: 1, meniscusLens: 0.05,
-  meniscusK: 300, meniscusDamp: 24, meniscusInertia: 3, contactLag: 2.5, wetFilm: 18, traces: true,
+  meniscusLens: 0.05,
+  meniscusK: 300, meniscusDamp: 24, meniscusInertia: 3, wetFilm: 18, traces: true,
   traceAmount: 0.9, traceDry: 1.8, traceFollow: 0.3, traceStain: 0.5, traceThin: 1, traceFilm: 0,
   edgeSoft: 2.2, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.48, surfaceWidth: 3, surfaceTone: -0.15,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
@@ -895,13 +890,14 @@ const PRESET_NOCTURNE: Partial<Params> = {
  *  behind the glass and are lit through the water. The opposite of the spritz on every axis: dark, self-lit,
  *  cold, calm. Standard rod only, current tuned slug physics (exempt from the class ranges). */
 const PRESET_TIDE: Partial<Params> = {
+  contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
   v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#0d4658', liquidHi: '#9dfaff',
   liquidLo: '#031419', tubeBack: '#04070b', tubeBack2: '#0a1219', tubeBackGradient: 0, glassHi: '#7fb8c4',
   glassBody: 0.05, glassHiBright: 0.25, glassReflect: 0.15, glassRim: 0.45, glassWall: 4.5,
   glassWallGlow: 0.12, glassOverLiquid: 0.35, lens: -0.2, lensCurve: 0.2, bubbleRim: '#d8ffff',
   highlightH: 10, highlightBright: 0.45, highlightSharp: 1.6, highlightInset: 0, shadeDepth: 0.6,
-  liquidThin: 0.2, meniscusDepth: 3.5, meniscusPow: 3.5, meniscusTiltGain: 2.6, meniscusAsym: 1.1,
-  meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, contactLag: 1.75, wetFilm: 12,
+  liquidThin: 0.2,
+  meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 12,
   traces: false, traceAmount: 0, traceDry: 1, traceFollow: 0.5, traceStain: 0.2, traceThin: 1.5, traceFilm: 0,
   edgeSoft: 4, frontBright: 10, surfaceBand: 0.35, surfaceRim: 0.5, surfaceWidth: 4, surfaceTone: 0.2,
   edgeGlow: 26, glowStrength: 0.6, cornerR: 0, edgeLightGain: 0.3, bubble: false, bubbleW: 27, bubbleH: 20,
@@ -970,8 +966,7 @@ export const PRESET_PHOSPHOR: Partial<Params> = {
   lens: -0.2, lensCurve: 0.2, bubbleRim: '#f4fff8',
   highlightH: 9, highlightBright: 0.55, highlightSharp: 2.4,
   shadeDepth: 0.5, liquidThin: 0.4,
-  meniscusDepth: 5, meniscusPow: 2.6, meniscusTiltGain: 0.9,
-  meniscusAsym: 1, meniscusInertia: 2.5,
+  meniscusInertia: 2.5,
   edgeSoft: 1.4, frontBright: 4, edgeGlow: 6, glowStrength: 0.03,
   surfaceBand: 0.7, surfaceRim: 1, surfaceWidth: 5, surfaceTone: 0.3,
   surfaceFill: 0.35, surfaceBlick: 0.8,
@@ -1064,6 +1059,15 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   if (from < 19) { r.surfaceBand = DEFAULT_PARAMS.surfaceBand; r.surfaceRim = DEFAULT_PARAMS.surfaceRim; r.surfaceWidth = DEFAULT_PARAMS.surfaceWidth; r.surfaceTone = DEFAULT_PARAMS.surfaceTone; }
   if (from < 20) { r.fizzEdgeRise = DEFAULT_PARAMS.fizzEdgeRise; r.fizzFoamLife = DEFAULT_PARAMS.fizzFoamLife; }
   if (from < 21) { r.surfaceFill = DEFAULT_PARAMS.surfaceFill; r.surfaceBlick = DEFAULT_PARAMS.surfaceBlick; }
+  if (from < 22) {
+    // v22: the meniscus is a contact-angle model. The old wall climb maps onto the angle whose spherical
+    // cap has that depth (h = R·tan(45° − θ/2)); the old px-per-speed lag onto the hysteresis band.
+    const D = r.meniscusDepth, lag = r.contactLag, H = typeof r.tubeHeight === 'number' ? r.tubeHeight : DEFAULT_PARAMS.tubeHeight;
+    if (typeof D === 'number') r.contactAngle = 90 - 2 * Math.atan(D / Math.max(1, (H - 1) / 2)) * 180 / Math.PI;
+    // …kept on its side of 90°, so a shallow old dish cannot turn over under tilt
+    const a = typeof r.contactAngle === 'number' ? r.contactAngle : DEFAULT_PARAMS.contactAngle;
+    if (typeof lag === 'number') r.contactHyst = Math.max(0, Math.min(25, lag * 6, Math.abs(90 - a) - 1));
+  }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -1103,15 +1107,14 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   highlightSharp: { help: 'Band profile exponent. High = narrow, glossy.', group: 'Shape', min: 0.3, max: 4, step: 0.1 },
   shadeDepth: { help: 'How dark the bottom rows get (cylinder shading).', group: 'Shape', min: 0, max: 1, step: 0.01 },
   liquidThin: { help: 'The liquid lightens and desaturates toward the walls, where the path through the column is short.', group: 'Shape', label: 'thin edge', min: 0, max: 1, step: 0.01 },
-  meniscusDepth: { help: 'How far the liquid climbs the wall at top/bottom vs centre, px. >0 concave, <0 convex.', group: 'Shape', min: -30, max: 40, step: 0.5 },
-  meniscusPow: { help: 'Meniscus curve exponent. 2 = parabola.', group: 'Shape', min: 0.5, max: 6, step: 0.1 },
-  meniscusTiltGain: { help: 'Gravity pressing the liquid into this end pushes the surface centre outward (convex bulge), draining hollows it — for concave and convex liquids alike. In px of |meniscusDepth| per g. With free liquid the two ends get opposite signs: the lower end bulges, the upper end hollows.', group: 'Shape', label: 'meniscus bulge vs tilt', min: -1, max: 3, step: 0.05 },
-  meniscusAsym: { help: 'Across-tilt sags the bulge onto the low wall: its contact line extends, the high one retracts.', group: 'Shape', label: 'meniscus sag per g across', min: 0, max: 2, step: 0.05 },
+  contactAngle: { help: 'Static contact angle of the liquid on the glass, degrees. Sets both ends\' curvature: a spherical cap whose ring leads its centre by R·(1 − sin θ)/cos θ — a hemisphere at 0°, flat at 90°, a convex bead above (mercury ~140°). Water on glass ~20–30°.', group: 'Shape', label: 'contact angle °', min: 0, max: 180, step: 1 },
+  contactHyst: { help: 'Contact-angle hysteresis, degrees either side of the static angle. Tilting the watch along the tube presses the liquid into the lower end: that end flattens toward the advancing angle, the upper end deepens toward the receding angle — both keep the curvature\'s sign unless the band crosses 90°. A moving contact line sits at the advancing / receding angle.', group: 'Shape', label: 'hysteresis °', min: 0, max: 40, step: 0.5 },
+  contactDyn: { help: 'Dynamic contact angle (Cox–Voinov, θ³ = θ₀³ ± G·v): the angle a zero-angle line reaches advancing at 25 px/s — grows with viscosity over surface tension (water ~8°, oil ~40°, honey 180°). An advancing edge flattens with speed, a receding one deepens until θ = 0 and it pulls its film.', group: 'Meniscus dynamics', label: 'dynamic angle °', min: 0, max: 180, step: 1 },
+  capLength: { help: 'Capillary length √(γ/ρg) of the liquid, mm (water 2.7, oils / honey / mercury ~1.9). Against the ~2–3 mm bore it sets how much the cap sags onto the low wall under across-tilt (Bond number) and how strongly an along-tilt pushes the two ends\' angles apart.', group: 'Shape', label: 'capillary length mm', min: 0.5, max: 6, step: 0.1 },
   meniscusLens: { help: 'Pre-warp of the cap profile against the physical glass, same convention as the front-digits lens: negative undoes the vertical magnification so the drawn cap keeps its shape through the rod. Set it equal to topLens.', group: 'Shape', label: 'meniscus vs glass lens', min: -1, max: 1, step: 0.05 },
   meniscusK: { help: 'Spring of the free surface between the pinned contact lines, 1/s². Lower = slower, larger wobble.', group: 'Meniscus dynamics', label: 'surface spring K', min: 10, max: 800, step: 5 },
   meniscusDamp: { help: 'Damping of the surface wobble, 1/s. Below ~2·√K it rings after a flick.', group: 'Meniscus dynamics', label: 'surface damping', min: 0, max: 60, step: 0.5 },
   meniscusInertia: { help: 'How much the forcing on the edge (flick kick, free-slug acceleration) bulges the surface centre ahead of the contact lines: a flick makes the cap bulge, then ring at the surface spring. Hard-capped at 12 px.', group: 'Meniscus dynamics', label: 'bulge per edge forcing', min: 0, max: 10, step: 0.1 },
-  contactLag: { help: 'Contact-angle hysteresis: an advancing edge drags its contact lines behind the centre, a receding one leaves them clinging. px per 10 px/s of edge speed.', group: 'Meniscus dynamics', label: 'contact-line lag', min: 0, max: 3, step: 0.05 },
   wetFilm: { help: 'Trailing wet film a receding edge leaves on the glass, px at full speed (25 px/s); brightest at the walls, drains in ~0.5 s. With traces on it is the band over which the liquid thins out into its residue (full liquid at the edge, residue this many px out).', group: 'Meniscus dynamics', label: 'wet film px', min: 0, max: 30, step: 1 },
   traces: { help: 'A receding edge leaves a residue on the glass where the liquid has been (blood smear, syrup coating, legs); the wet part drains back after the liquid, the stain dries out slowly.', group: 'Meniscus dynamics' },
   traceAmount: { help: 'Opacity of the dried residue at the wall rows (weaker at mid-height), independent of liquid transparency. Values over 1 boost through the streak/height attenuation toward fully opaque (clamped per pixel).', group: 'Meniscus dynamics', label: 'residue amount', min: 0, max: 2, step: 0.05 },
@@ -1124,7 +1127,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   frontBright: { help: 'Band just behind the fill edge blended toward liquidHi (bright convex cap), px.', group: 'Shape', min: 0, max: 40, step: 1 },
   surfaceBand: { help: 'Intensity of the visible meniscus surface. A concave surface grades from a darker inner shoulder to a lit rim and closes at the walls. It never fades as the liquid settles: a receding edge clings and deepens the dish, an advancing one flattens it, and it springs back as the edge settles. While an edge recedes fast (zero contact angle) the surface is liquid thinning into the wet trail, without shoulder or rim; both return as soon as it stops. A convex nose thins toward whatever is behind it (tube back, or the wet film a receding edge left), with a highlight tint for clear liquids. 0 disables surface shading.', group: 'Shape', label: 'surface band', min: 0, max: 1, step: 0.05 },
   surfaceRim: { help: 'Strength of the thin rim on the concave surface: the contact ring on the far glass, lit (liquidHi, light side only) over a dark tube back and a deep liquid-tinted contour, whatever the light, over a light one. Independent of surfaceFill, so it can draw the surface alone. Moves smoothly with the edge and fades with the surface band. Follows the edge light and row shading. No effect on a convex meniscus.', group: 'Shape', label: 'surface rim', min: 0, max: 1, step: 0.05 },
-  surfaceWidth: { help: 'Thickness of the concave surface stroke, px, measured outward from the edge profile. It never extends past the wall contact ring (meniscusDepth minus the tilt bulge), so it tapers to nothing at the walls.', group: 'Shape', label: 'surface width', min: 1, max: 16, step: 0.5 },
+  surfaceWidth: { help: 'Thickness of the concave surface stroke, px, measured outward from the edge profile. It never extends past the wall contact ring (where the cap meets the glass), so it tapers to nothing at the walls.', group: 'Shape', label: 'surface width', min: 1, max: 16, step: 0.5 },
   surfaceTone: { help: 'Tone of the visible surface: 0 = the shaded shoulder and lit rim (concave) / the limb-darkened or pale nose (convex); negative darkens toward the deep liquid colour, positive lightens toward the highlight.', group: 'Shape', label: 'surface tone', min: -1, max: 1, step: 0.05 },
   surfaceFill: { help: 'Opacity of the shaded interior of the concave surface (the dish between the edge profile and the wall contact ring). 1 = the classic filled, shaded band. Lower it and the dish turns see-through — what is behind shows through a tint — while the lit rim and the blick keep drawing it; at 0 only they define the surface, as on a real vial where the surface is nearly invisible and the contact ring on the far glass catches the light. Rear marks count the dish as liquid only where its opacity reaches 0.5; the foam veil scales with it too.', group: 'Shape', label: 'surface fill', min: 0, max: 1, step: 0.05 },
   surfaceBlick: { help: 'Specular patch on the concave surface: the room light reflected in the dish. Centred on the highlight row for the light angle, about a third of the tube tall (independent of highlightH, so it works with the body strip off), peaks mid-dish and vanishes at the edge profile and at the rim, liquidHi coloured. Follows the edge light, so only the lit edge has one; gone while the edge recedes fast. 0 = off.', group: 'Shape', label: 'surface blick', min: 0, max: 1, step: 0.05 },

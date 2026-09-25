@@ -262,7 +262,7 @@ with `presets/1.json` baked in, driven by the live IMU at 50 Hz; **~40 fps**. Se
 (newline-terminated): `l` liquid, `c` calibration face, `h` hello, `f` fps bench, `s` status line,
 `i` IMU CSV stream, `t HH:MM[:SS]` set clock (no RTC battery — defaults to 10:09:30 at boot),
 `d<N>` demo speed (×N, `d0` freeze, `d1` real), `p<name>=<value>` set ANY param live by its sim name
-(`pliquid=#39ff14`, `pfizz=0`, `pmeniscusDepth=-10`), `p?` dump params as JSON (sim-importable), `p!` reset
+(`pliquid=#39ff14`, `pfizz=0`, `pcontactAngle=140`), `p?` dump params as JSON (sim-importable), `p!` reset
 to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help. Same protocol over **BLE** (Nordic UART Service,
 advertised as `liquid-watch`; NimBLE-Arduino, RX queued into `loop()`, replies notified in MTU-3 chunks).
 `TUBE_HEIGHT_MAX` = 80: the two internal-DMA strips (2 × 536 × 80 × 2 B) must leave room for the BT controller,

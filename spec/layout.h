@@ -19,6 +19,8 @@
 #define LIQUID_HI_RGB888   0x9FE1CB
 #define BG_RGB888          0x000000
 
+#define MM_PER_PX          0.083f  // panel pixel pitch (physical meniscus: tube radius vs capillary length)
+
 #define RGB565(r,g,b)      ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
 #define LIQUID_RGB565      RGB565(0x5D,0xCA,0xA5)   // 0x5E54
 #define LIQUID_HI_RGB565   RGB565(0x9F,0xE1,0xCB)

@@ -284,63 +284,15 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Meniscus `surfaceWidth` is not derived from the tube diameter; `-big` presets may want a wider band.
 - Sim drawTube allocates `strokeR/strokeL` (and the compositor bounds) per frame like `edges`; fold into
   one reused scratch set if GC churn ever shows.
-- Concave presets with `meniscusTiltGain·|meniscusDepth|` > `meniscusDepth` (user preset: 2.6 × 4 vs 4)
-  are convex at full tilt, and the dynamic `cap` (±12 px) flips the ring lead's sign through every
-  kick; an underdamped meniscus spring (frizzante: K 475, damp 8) rings the stroke concave↔convex for
-  ~1 s after a stop. Physically the surface does slosh, but the two branches are drawn differently
-  (stroke outside vs nose inside). The renderer now fades below 1 px at the branch transition;
-  revisit the dynamics only if the physical wobble itself is excessive.
-
-- Residue-enabled hard-edge glow now blends over the live backing instead of its clean-glass LUT;
-  measure its on-device cost before considering a different cache. No new buffers allocated.
-- Rear digits crossed by a fast-moving edge (user preset, `remaining`, `digitParallax` on, transparency
-  0.17) show a dark jagged sliver along the contact line for a few frames: the per-pixel plane switch of
-  the baked shadow (behind air vs behind liquid) lands on the parallax-offset shadow texels. Reproduces
-  with `surfaceBand` 0, so it is the shadow-bake compositor, not the surface stroke. Not pursued.
-- `traceFilm` on a black tube back: the film carries the liquid's specular highlight band
-  (`traceRows` mixes `liquidHi` at the highlight rows) along the whole dry tube, and its
-  desaturation uses the full `ambientLight` (not transparency-scaled like the body). Reads as a
-  glossy coating; acceptable, but a dried film has no liquid surface to reflect. Not pursued.
-- Rear ticks/digits behind air are composited opaque over the film, so the film reads as sitting
-  behind the rear-wall marks; physically the inner-wall film is in front of them (should tint them
-  like it tints the tube back). Only visible with `traceFilm` and a black back. Not pursued.
-- Foam (parked fizz) is pushed back by a receding surface; the reference photo also shows foam left
-  stuck to the wet glass behind it. Would need parked bubbles drawn outside the liquid over the residue
-  and a short strand life. Not pursued.
-- Fizz nucleating on the glass (bubbles that sit still until a random detach time) is the other cheap
-  touch from the photo; a zero-speed state in the stepper. Not pursued.
-- In `remaining` + `freeLiquid` with `freeHomeK` 0 the slug rests against the near end, so the visible
-  meniscus is the *home* edge (`edgeXL`) and the time edge sits at the panel border; edge-specific
-  effects (edge glow, frontBright, surface band) are tuned per edge and may look mismatched there.
-- `fizzEdgeRise` default 0.3 with the default 8 bubbles at 14 px/s parks a bubble only every minute
-  or so (the vertical wrap re-randomises x); a full ring needs fizzy-preset counts/speeds.
-
-- `render-ref.ts` can't show fizz/foam (one frame, fizz off); a headless "step fizz N s then dump" mode
-  would make foam checks reproducible (used a throwaway copy for the meniscus-foam fix). The run-sim
-  shot (300 ms) is too short for foam to gather.
-- `ensureFizz` column length is `xe − xs − 6`: the 6 px cut predates the meniscus and no longer matches
-  the surface profile (spawn range / home-side respawn). Not pursued.
-
-- Perf pass 2026-09-23 leftovers (bench scene, per-core ms from a cycle-counter probe): rear digits 10.2 (H) /
-  8.1 (M) = drawGlyph bilinear taps + Mark per pixel, the largest stage; dry-tube `traceFilm` 6.4 ms on the
-  short minutes column (film-into-back bake idea above); glow ramp ~170 and surface band ~370 cycles/px
-  (three quantised blends per band pixel; one combined blend would halve it, not bit-exact).
-- A stage profiler (esp_cpu_get_cycle_count around drawTube stages, `F` serial command) was a throwaway
-  scratchpad patch; worth keeping behind `-DRENDER_PROF` for the next pass.
-- Not possible now: IRAM for hot render code (free internal heap is ~5 KB with BLE up) and a 32 KB I-cache
-  (the prebuilt Arduino libs fix it at 16 KB; needs a custom sdkconfig build).
-- physics.cpp still uses libm fminf/fmaxf/floorf (50 Hz, negligible); switch if it ever matters.
-- Home edge (edgeXL) reuses the time edge's skew sign, so a free slug under across-tilt leans as a
-  parallelogram; hydrostatics says a trapezoid (bottom leads at both ends). Only the sag term is mirrored.
-- meniscusAsym only moves the contact lines (d·|d|^pow). Hydrostatic Young–Laplace adds a mid-height
-  term ∝ y(1−y²) (lower half bulges past the chord, upper half flattens); could replace/extend it.
-- Headless Chromium fails at `sandbox_host_linux.cc` in this workspace; preset review used the static
-  `render-ref.ts` frame instead. That preview cannot assess animated fizz or foam.
-- Tinted liquids go khaki/pastel above ~0.4 `liquidTransparency`: the rear marks are a straight mix toward
-  the back, not a multiply (colour filtering). A multiply would let tinted liquids be clear *and* saturated.
-- `check-presets` class ranges (freeGain 570, watery freeDamp ≤ 1.5, meniscusK ≤ 550, readTilt 20/50) no
-  longer match the user-tuned look (840 / 7 / 685 / 0–1); pinot and olive-oil are exempt for that reason.
-- Headless Chromium worked on 2026-09-23 (run-sim shot.mjs); the sandbox note above may be stale.
 - run-sim has no way to load a user-exported JSON; a 3-line node helper turning the JSON into `p.<key>=` URL params worked (2026-09-23) and belongs in the skill.
 - Cuvée also uses the current renderer's tuned values outside historical material ranges; its visual
   checks and JSON parity pass, but `check:presets` skips it. A modern material profile is still needed.
+- Contact-angle meniscus (2026-09-24): the flick wobble (`cap`, ±12 px) still rides on top of the cap and can
+  turn a near-90° end over for a moment (physical slosh); presets got class-default angles, not per-liquid values.
+- `check:imu` fails "reading did not settle" for alpine / pinot / spritz / cuvee / tide — pre-existing on master
+  (2026-09-24), slug home-parking, unrelated to the meniscus.
+- Perf ceiling (2026-09-24, `e2e.sh --bare` = no BLE/IMU): spritz 34.9 fps / 21.4 ms (normal build 29.4), preset 1
+  45.4 / 14.7 (39.1). BLE+IMU cost ~3–4 ms/frame. Spritz stages on bare: digits 13.0 ms, surface band 6.5, meniscus 3.3,
+  fizz 2.1, minute ticks 2.1. Normal build `f` showed cores h 16 / m 27 ms — the minutes tube on core 1 sets the frame;
+  rebalancing work between the cores is a candidate — see docs/perf-core-balance.md.
+- Standalone HTML preview (2026-09-24): Chromium cannot start inside the sandbox (`sandbox_host_linux.cc`, EPERM); browser verification ran with approved escalation.

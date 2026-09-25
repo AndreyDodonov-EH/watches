@@ -3,7 +3,7 @@
 //   l  liquid face (default)          c  calibration face        h  hello / orientation test
 //   f  live fps + frame timing        i  toggle IMU stream (50 Hz CSV)
 //   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze)
-//   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p meniscusDepth=-10)
+//   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p contactAngle=140)
 //   p?  dump params as JSON           p!  reset params to the built-in preset (and erase NVS copy)
 //   params persist in NVS (autosave 2 s after last p write)
 //   b<n> brightness 0..255            H<0|1>  panel HBM experiment (RM67162 B0h; unusable, see KAIZEN)
@@ -528,7 +528,11 @@ void setup() {
   tubeH.trace = traceBuf(0); tubeM.trace = traceBuf(1);   // static dried-trace buffers (see physics.h)
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   workerStart();
+#ifdef NO_IMU   // perf-baseline build (tools/e2e.sh --bare): no I2C polling, tilt stays 0
+  have_imu = false;
+#else
   have_imu = imu_init();
+#endif
   paramsLoad();
   out.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);

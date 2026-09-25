@@ -434,13 +434,16 @@ struct RowCache {
   int16_t lensSrc[TUBE_HEIGHT_MAX]; bool lensOn; bool lensPos;   // applyLens row map
   float mag[TUBE_HEIGHT_MAX];                                    // lensMagRows (fizz squash)
   int16_t capX0[TUBE_HEIGHT_MAX];                                // rounded-corner mask
-  // edge profile terms (sim edgeCap): d = lensRow(row), climbPow = |d|^meniscusPow, bulge = 1 - sqrt(1 - d^2)
-  float rowD[TUBE_HEIGHT_MAX], rowClimbPow[TUBE_HEIGHT_MAX], rowBulge[TUBE_HEIGHT_MAX];
+  // edge profile terms (sim edgeCap): d = lensRow(row), u2 = d^2
+  float rowD[TUBE_HEIGHT_MAX], rowU2[TUBE_HEIGHT_MAX];
   uint16_t hiC;                                                  // front-bright colour
   uint16_t lensC;                                                // concave surface stroke colour (sim lensC)
   uint16_t darkC;                                                // deep liquid colour (sim darkC): dark tone target, unlit stroke shade
   uint16_t toneC; int toneT;                                     // surfaceTone target colour and blend 1/256 (sim toneC/toneK)
 };
+// One end's meniscus for this frame (sim CapShape): cosT = cos of its contact angle (> 0 concave), h = px
+// its contact ring leads the surface centre, asym = across sag, cap = wobble, k = short-column scale.
+struct CapShape { float cosT, h, asym, cap, k; };
 // Edge-effect blend tables: (row, k) -> 565, a function of the palette and lightK only. Rebuilt when
 // lightK moves (exact compare: at rest it is constant, in motion it changes every frame anyway).
 #define EFFECT_MAX 16
@@ -503,12 +506,13 @@ struct Tube {
   void ensureFizz(const Params &p, float len, float agitation);
   inline float fizzSquashRow(const Params &p, int y) const;
   void lensMagRows(const Params &p, float *rows) const;
-  inline float edgeCap(int ry, const Params &p, float tilt, float side, float cap) const;
-  inline float wallCap(int ry, const Params &p, float tilt, float side, float cap) const;
-  inline float wallX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
-  inline float wallXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
-  inline float edgeX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
-  inline float edgeXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const;
+  CapShape capShape(const Params &p, float len, float tilt, float side, float cap, float vOut) const;
+  inline float edgeCap(int ry, const CapShape &c) const;
+  inline float wallCap(int ry, const CapShape &c) const;
+  inline float wallX(int ry, float xe, float tanA, const CapShape &c) const;
+  inline float wallXL(int ry, float xs, float tanA, const CapShape &c) const;
+  inline float edgeX(int ry, float xe, float tanA, const CapShape &c) const;
+  inline float edgeXL(int ry, float xs, float tanA, const CapShape &c) const;
   void buildRowCache(const Params &p, uint32_t gen);
   void applyLens(const Params &p);
   const uint16_t *effectTable(EffectTable &T, const Params &p, const Palette &pal, uint32_t gen, float lightK, bool glow) const;
@@ -1236,51 +1240,63 @@ static float lensRow(float d, const Params &p) {
   float u = fabsf(d);
   return (d < 0 ? -1 : 1) * ((1 - strength) * u + strength * powf(u, exponent));
 }
-// Cap profile: px the contact line at row ry leads the surface centre along +x. cap = dynamic
-// centre lead in the edge's own +x sense. tilt = along follower (edgeLight), side = across follower.
-// Capillary wall climb (|d|^meniscusPow) plus a circular pressure/inertia bulge (tilt, cap); see sim edgeCap.
-// Everything that depends only on (params, H): rebuilt when the generation counter moves.
-// Per-row terms come from RowCache (param-only); the scalars are per tube per frame.
-inline float Tube::edgeCap(int ry, const Params &p, float tilt, float side, float cap) const {
-  float d = rc.rowD[ry];
-  float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f) * (p.meniscusDepth < 0 ? -1 : 1);
-  float climb = p.meniscusDepth * (1 + asymEff * d) * rc.rowClimbPow[ry];
-  float bulge = p.meniscusTiltGain * tilt * fabsf(p.meniscusDepth) + cap;
-  return climb - bulge * rc.rowBulge[ry];
+// Contact-angle meniscus, the same for both ends of a slug (sim capShape): a spherical cap set by the
+// end's contact angle — the static angle moved within the hysteresis band by the hydrostatic head along
+// the slug (tilt = along follower into this end), pinned to the advancing / receding angle while the
+// line moves and pushed further by Cox–Voinov (vOut = outward speed, px/s). side = across follower
+// (sag ∝ Bond number), cap = wobble, k = per-end short-column limit (sim capScale).
+#define MENISCUS_HYST_PX_S 2.0f
+#define MENISCUS_SAG_K 1.0f
+CapShape Tube::capShape(const Params &p, float len, float tilt, float side, float cap, float vOut) const {
+  const float R = (H - 1) / 2.0f, rad = (float)M_PI / 180, PI = (float)M_PI;
+  float t0 = clampf(p.contactAngle, 0, 180) * rad, hy = fmx(0, p.contactHyst) * rad;
+  float tA = fmn(PI, t0 + hy), tR = fmx(0, t0 - hy);
+  float lc = fmx(0.1f, p.capLength), Rmm = R * MM_PER_PX;
+  float cs = clampf(cosf(t0) - Rmm * fmx(0, len) * MM_PER_PX * tilt / (4 * lc * lc), cosf(tA), cosf(tR));
+  float th = acosf(cs);
+  th += ((vOut > 0 ? tA : tR) - th) * fmn(1, fabsf(vOut) / MENISCUS_HYST_PX_S);
+  float dyn = fmx(0, p.contactDyn) * rad, g = dyn * dyn * dyn / FILM_FULL_PX_S;
+  th = cbrtf(clampf(th * th * th + g * vOut, 0, PI * PI * PI));
+  CapShape c;
+  c.cosT = cosf(th);
+  float sinT = sinf(th);
+  c.h = R * c.cosT / (1 + sinT);
+  c.asym = MENISCUS_SAG_K * (Rmm / lc) * (Rmm / lc) * side * (c.cosT < 0 ? -1.0f : c.cosT > 0 ? 1.0f : 0.0f);
+  c.cap = cap;
+  c.k = fmn(1, fmx(0, len) / 2 / fmx(1, fabsf(c.h) * (1 + fabsf(c.asym)) + fabsf(cap)));
+  return c;
 }
-// Caps of a column len px long may not exceed half of it in total (short slug = bead). See sim capScale.
-static float capScale(float len, const Params &p, float tilt, float cap) {
-  float feat = fabsf(p.meniscusDepth) * (1 + fabsf(p.meniscusTiltGain * tilt)) + fabsf(cap);
-  return fmn(1, fmx(0, len) / 2 / fmx(1, feat));
+// Cap profile: px the surface at row ry leads the surface centre along +x: the spherical cap through
+// the ring (stable form), sagged by the across tilt (clamped at 0), minus the wobble mode u^2. See sim edgeCap.
+inline float Tube::edgeCap(int ry, const CapShape &c) const {
+  const float R = (H - 1) / 2.0f, u2 = rc.rowU2[ry];
+  float sphere = c.cosT * R * u2 / (1 + sqrtf(fmx(0, 1 - c.cosT * c.cosT * u2)));
+  return sphere * fmx(0, 1 + c.asym * rc.rowD[ry]) - c.cap * u2;
 }
 // tanA = tan(angle) hoisted per tube (was recomputed per row).
-inline float Tube::edgeX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
+inline float Tube::edgeX(int ry, float xe, float tanA, const CapShape &c) const {
   const float yc = (H - 1) / 2.0f;
-  float skew = tanA * (ry - yc);
-  return xe + skew + k * edgeCap(ry, p, tilt, side, cap);
+  return xe + tanA * (ry - yc) + c.k * edgeCap(ry, c);
 }
-// Home-end edge of a free slug centred at xs: mirror image of edgeX, flattening onto the end cap.
-inline float Tube::edgeXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
+// Home-end edge of a free slug centred at xs: mirror image of edgeX (its CapShape takes the mirrored
+// forcing), flattening onto the end cap.
+inline float Tube::edgeXL(int ry, float xs, float tanA, const CapShape &c) const {
   const float yc = (H - 1) / 2.0f;
-  float skew = tanA * (ry - yc);
-  return xs + fmn(1, xs / 8) * (skew - k * edgeCap(ry, p, -tilt, side, -cap));
+  return xs + fmn(1, xs / 8) * (tanA * (ry - yc) - c.k * edgeCap(ry, c));
 }
 // Wall-ring lead: the contact ring all round the bore (edgeCap at u = 1, across sag interpolated
 // by the row's d) — one x per row seen side-on; the visible surface at a row is the lens between
 // edgeCap (the mid-depth section) and this. Meets edgeCap at the wall rows. See sim wallCap.
-inline float Tube::wallCap(int ry, const Params &p, float tilt, float side, float cap) const {
-  float d = rc.rowD[ry];
-  float asymEff = p.meniscusAsym * side * clampf(1 - tilt, 0, 1.5f) * (p.meniscusDepth < 0 ? -1 : 1);
-  float bulge = p.meniscusTiltGain * tilt * fabsf(p.meniscusDepth) + cap;
-  return p.meniscusDepth * (1 + asymEff * d) - bulge;
+inline float Tube::wallCap(int ry, const CapShape &c) const {
+  return c.h * fmx(0, 1 + c.asym * rc.rowD[ry]) - c.cap;
 }
-inline float Tube::wallX(int ry, float xe, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
+inline float Tube::wallX(int ry, float xe, float tanA, const CapShape &c) const {
   const float yc = (H - 1) / 2.0f;
-  return xe + tanA * (ry - yc) + k * wallCap(ry, p, tilt, side, cap);
+  return xe + tanA * (ry - yc) + c.k * wallCap(ry, c);
 }
-inline float Tube::wallXL(int ry, float xs, float tanA, const Params &p, float tilt, float side, float cap, float k) const {
+inline float Tube::wallXL(int ry, float xs, float tanA, const CapShape &c) const {
   const float yc = (H - 1) / 2.0f;
-  return xs + fmn(1, xs / 8) * (tanA * (ry - yc) - k * wallCap(ry, p, -tilt, side, -cap));
+  return xs + fmn(1, xs / 8) * (tanA * (ry - yc) - c.k * wallCap(ry, c));
 }
 
 
@@ -1310,7 +1326,7 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
     }
     rc.capX0[ry] = x0;
     float d = lensRow((ry - yc) / yc, p), u = fabsf(d);
-    rc.rowD[ry] = d; rc.rowClimbPow[ry] = powf(u, p.meniscusPow); rc.rowBulge[ry] = 1 - sqrtf(fmx(0, 1 - u * u));
+    rc.rowD[ry] = d; rc.rowU2[ry] = u * u;
   }
   RGB hi888 = ambientize(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright), ambientBodyL(p), ambientAmt(p));
   rc.hiC = q(hi888);
@@ -1366,7 +1382,11 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   float lightK = fmx(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   float lightKL = fmx(0.25f, 1 - p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   int xsI = (int)jround(xs);
-  float capK = capScale(len, p, s.edgeLight, s.cap);
+  // Per-end meniscus: the home end takes the mirrored forcing; contact-line speeds outward (advancing
+  // > 0) from the panel-frame velocities, which drawTube does not mirror. See sim drawTube.
+  const float recedeV = p.remaining ? 1 : -1;
+  const CapShape capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, -recedeV * (s.fillVel + s.slugVel));
+  const CapShape capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, recedeV * s.slugVel);
   float tanA = tanf(angle * (float)M_PI / 180);
   const bool hasLiquid = xe - xs >= 0.5f;   // an empty column draws nothing, not even an AA sliver
   ensureFizz(p, clampf(xe - xs - 6, 0, L), s.agitation);
@@ -1378,8 +1398,8 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   // Tube back and cached edge geometry, before the residue backing and liquid body.
   const int16_t *capX0 = rc.capX0;
   for (int ry = 0; ry < H; ry++) {
-    float ex = edgeX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK);
-    float exL = p.freeLiquid ? edgeXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK) : 0;
+    float ex = edgeX(ry, xe, tanA, capR);
+    float exL = p.freeLiquid ? edgeXL(ry, xs, tanA, capL) : 0;
     edges[ry] = ex; edgesL[ry] = exL;
     fizzSurf[ry] = ex - xs; fizzSurfL[ry] = exL - xs;   // surface fronts for stepFizz (foam parks on the profile)
     hspan(y0 + ry, 0, L, pal.tubeBackRows[ry]);
@@ -1710,8 +1730,8 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     };
     for (int ry = 0; ry < H; ry++) {
       int xi = (int)ffloor(edges[ry]), xa = (int)ffloor(edgesL[ry]) + 1; if (xa < capX0[ry]) xa = capX0[ry];
-      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L);
-      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi);
+      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, capR), 1, lightK, xa, L);
+      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, capL), -1, lightKL, capX0[ry], xi);
     }
   }
 

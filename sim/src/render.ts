@@ -3,7 +3,7 @@
 // a few filled ellipses/dots. Mirrored 1:1 by firmware/src/render.cpp.
 import {
   PANEL_W, PANEL_H, TUBE_LENGTH_PX, TUBE_HEIGHT_MAX,
-  rgb565, rgb565to888,
+  rgb565, rgb565to888, MM_PER_PX,
 } from '@spec/layout';
 import type { Params } from './params';
 import { columnLen, FILM_FULL_PX_S, TRACE_FULL, type TubeState } from './physics';
@@ -891,12 +891,6 @@ function settleFoam(arr: Fizz[], p: Params, H: number, speed: number, surf: Floa
   }
 }
 
-/** Fill-edge x for tube-row `ry` (0..H-1), given edge centre `xe`, angle and meniscus.
- *  `tilt` = smoothed along-tilt (TubeState.edgeLight): end down (+) -> pressure fills the cap
- *  (deeper, rounder); end up (-) -> the drop drains and flattens.
- *  `side` = smoothed across-tilt (TubeState.acrossTilt, + = top edge up): the drop sags onto the
- *  low wall — that contact line extends, the high one retracts; stronger while draining.
- *  Face up (side = 0) the sag is toward the back glass and invisible: symmetric cap. */
 /** Row coordinate -1..1 seen through the physical glass: the cap profile is evaluated where the
  *  row will appear, so the rod's vertical magnification does not flatten it (same warp as topLens). */
 function lensRow(d: number, p: Params): number {
@@ -907,59 +901,87 @@ function lensRow(d: number, p: Params): number {
   const u = Math.abs(d);
   return Math.sign(d) * ((1 - strength) * u + strength * Math.pow(u, exponent));
 }
-/** Cap profile: px the contact line at tube-row `ry` leads the surface centre, along +x. Two shapes:
- *  the capillary wall climb `meniscusDepth · |d|^meniscusPow` (thin horns at high powers), and the
- *  pressure bulge — gravity into this end (tilt > 0), the flick/slide inertia `cap` — which pushes the
- *  whole surface centre outward as a circular cap, whatever the wall-climb sign; draining hollows it.
- *  `cap` = TubeState.cap in the edge's own +x sense (the centre leading its contact lines). */
-function edgeCap(ry: number, p: Params, tilt: number, side: number, cap: number): number {
-  const H = tubeLayout(p).H, yc = (H - 1) / 2;
-  const d = lensRow((ry - yc) / yc, p), u = Math.abs(d);   // -1..1, as seen through the glass
+// ---------------------------------------------------------------------------
+// Meniscus: contact-angle model, the same for both ends of a slug.
+// Each end is a spherical cap set by its contact angle θ (capillary-dominated baseline: the bore is
+// ~2–3 mm, the capillary length ~2–3 mm). θ comes from the liquid's static angle and
+//  · the hydrostatic head along the slug (along-tilt): the lower end carries more pressure, so its
+//    curvature drops (θ up), the upper end's rises — held within the hysteresis band [θR, θA];
+//  · the contact line's speed: a moving line sits at θA / θR and Cox–Voinov moves it further,
+//    θ³ = θ₀³ ± G·v (a fast receding line reaches θ = 0 and leaves its film behind).
+// Across-tilt sags the cap onto the low wall in proportion to the Bond number (R / capillary
+// length)²; the flick/slide wobble (TubeState.cap) is the surface's pinned-line mode on top.
+// ---------------------------------------------------------------------------
+const MENISCUS_HYST_PX_S = 2;  // contact-line speed at which a moving line has settled onto θA / θR
+const MENISCUS_SAG_K = 1;      // across sag per unit Bond number and g
+
+/** One end's meniscus for this frame. `cosT` = cos θ (> 0 concave), `h` = px its contact ring
+ *  leads the surface centre (R(1 − sin θ)/cos θ: R at θ = 0, 0 at 90°, −R at 180°), `asym` =
+ *  across sag, `cap` = wobble (px the centre leads the ring, the edge's own +x sense). */
+export interface CapShape { cosT: number; h: number; asym: number; cap: number }
+/** `len` = column length px, `tilt` = along follower into this end (TubeState.edgeLight, edge's
+ *  own sense), `side` = across follower, `vOut` = contact-line speed outward (advancing > 0), px/s. */
+export function capShape(p: Params, len = 0, tilt = 0, side = 0, cap = 0, vOut = 0): CapShape {
+  const R = (tubeLayout(p).H - 1) / 2, rad = Math.PI / 180;
+  const t0 = Math.max(0, Math.min(180, p.contactAngle)) * rad, hy = Math.max(0, p.contactHyst) * rad;
+  const tA = Math.min(Math.PI, t0 + hy), tR = Math.max(0, t0 - hy);
+  // hydrostatic head, split between the two ends: Δcos θ = R·L·sin α / (4 lc²), all in mm
+  const lc = Math.max(0.1, p.capLength), Rmm = R * MM_PER_PX;
+  const cs = Math.max(Math.cos(tA), Math.min(Math.cos(tR), Math.cos(t0) - Rmm * Math.max(0, len) * MM_PER_PX * tilt / (4 * lc * lc)));
+  let th = Math.acos(cs);
+  th += ((vOut > 0 ? tA : tR) - th) * Math.min(1, Math.abs(vOut) / MENISCUS_HYST_PX_S);
+  const dyn = Math.max(0, p.contactDyn) * rad, g = dyn * dyn * dyn / FILM_FULL_PX_S;   // Cox–Voinov
+  th = Math.cbrt(Math.max(0, Math.min(Math.PI ** 3, th * th * th + g * vOut)));
+  const cosT = Math.cos(th), sinT = Math.sin(th);
   // Sag: side > 0 (top up) moves the bottom (d = +1) contact line out, whether the cap is concave or convex
-  const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(p.meniscusDepth);
-  const climb = p.meniscusDepth * (1 + asymEff * d) * Math.pow(u, p.meniscusPow);
-  const bulge = p.meniscusTiltGain * tilt * Math.abs(p.meniscusDepth) + cap;   // px the centre leads the walls
-  return climb - bulge * (1 - Math.sqrt(Math.max(0, 1 - u * u)));               // circular cap: 0 centre, 1 wall
+  const asym = MENISCUS_SAG_K * (Rmm / lc) ** 2 * side * Math.sign(cosT);
+  return { cosT, h: R * cosT / (1 + sinT), asym, cap };
+}
+/** Cap profile: px the surface at tube-row `ry` leads the surface centre, along +x: the spherical
+ *  cap of radius R / cos θ through the ring (stable form, exact parabola as θ → 90°), sagged by the
+ *  across tilt (clamped at 0: the sag never turns the curvature over), minus the wobble mode u². */
+function edgeCap(ry: number, p: Params, c: CapShape): number {
+  const R = (tubeLayout(p).H - 1) / 2;
+  const d = lensRow((ry - R) / R, p), u2 = d * d;   // -1..1, as seen through the glass
+  const sphere = c.cosT * R * u2 / (1 + Math.sqrt(Math.max(0, 1 - c.cosT * c.cosT * u2)));
+  return sphere * Math.max(0, 1 + c.asym * d) - c.cap * u2;
 }
 /** Wall-ring lead: px the contact ring — the contact line all round the bore, edgeCap at u = 1 —
  *  leads the surface centre, with the across sag interpolated by the row's d. Seen side-on the
  *  ring projects to one x per row; the visible surface at a row is the lens between edgeCap (the
  *  mid-depth section) and this. Meets edgeCap at the wall rows, so the lens closes there. */
-function wallCap(ry: number, p: Params, tilt: number, side: number, cap: number): number {
-  const H = tubeLayout(p).H, yc = (H - 1) / 2;
-  const d = lensRow((ry - yc) / yc, p);
-  const asymEff = p.meniscusAsym * side * Math.max(0, Math.min(1.5, 1 - tilt)) * Math.sign(p.meniscusDepth);
-  const bulge = p.meniscusTiltGain * tilt * Math.abs(p.meniscusDepth) + cap;
-  return p.meniscusDepth * (1 + asymEff * d) - bulge;
+function wallCap(ry: number, p: Params, c: CapShape): number {
+  const R = (tubeLayout(p).H - 1) / 2;
+  return c.h * Math.max(0, 1 + c.asym * lensRow((ry - R) / R, p)) - c.cap;
 }
-/** Meniscus amplitude limiter: the caps of a column `len` px long may not exceed half of it in total
+/** Meniscus amplitude limiter for one end: its cap may not reach past half a column `len` px long
  *  (a short slug is a bead, not two crossing scoops). 1 for any column longer than the features. */
-export function capScale(len: number, p: Params, tilt: number, cap: number): number {
-  const feat = Math.abs(p.meniscusDepth) * (1 + Math.abs(p.meniscusTiltGain * tilt)) + Math.abs(cap);
-  return Math.min(1, Math.max(0, len) / 2 / Math.max(1, feat));
+export function capScale(len: number, c: CapShape): number {
+  return Math.min(1, Math.max(0, len) / 2 / Math.max(1, Math.abs(c.h) * (1 + Math.abs(c.asym)) + Math.abs(c.cap)));
 }
-export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, tilt = 0, side = 0, cap = 0, k = 1): number {
+/** Fill-edge x for tube-row `ry` (0..H-1), given edge centre `xe`, in-plane skew and this end's cap. */
+export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, c = capShape(p), k = 1): number {
   const yc = (tubeLayout(p).H - 1) / 2;
   const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xe + skew + k * edgeCap(ry, p, tilt, side, cap);
+  return xe + skew + k * edgeCap(ry, p, c);
 }
-/** Home-end edge of a free slug whose centre sits at `xs`: the mirror image of edgeX (gravity
- *  presses the opposite way, the centre leads in -x). Flattens onto the end cap over the last 8 px. */
-export function edgeXL(ry: number, xs: number, angleDeg: number, p: Params, tilt = 0, side = 0, cap = 0, k = 1): number {
+/** Home-end edge of a free slug whose centre sits at `xs`: the mirror image of edgeX (its cap takes
+ *  the mirrored forcing, the centre leads in -x). Flattens onto the end cap over the last 8 px. */
+export function edgeXL(ry: number, xs: number, angleDeg: number, p: Params, c = capShape(p), k = 1): number {
   const yc = (tubeLayout(p).H - 1) / 2;
   const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xs + Math.min(1, xs / 8) * (skew - k * edgeCap(ry, p, -tilt, side, -cap));
+  return xs + Math.min(1, xs / 8) * (skew - k * edgeCap(ry, p, c));
 }
 /** Wall-ring x of the time edge / home edge: edgeX / edgeXL with wallCap in place of edgeCap. */
-function wallX(ry: number, xe: number, angleDeg: number, p: Params, tilt: number, side: number, cap: number, k: number): number {
+function wallX(ry: number, xe: number, angleDeg: number, p: Params, c: CapShape, k: number): number {
   const yc = (tubeLayout(p).H - 1) / 2;
   const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xe + skew + k * wallCap(ry, p, tilt, side, cap);
+  return xe + skew + k * wallCap(ry, p, c);
 }
-function wallXL(ry: number, xs: number, angleDeg: number, p: Params, tilt: number, side: number, cap: number, k: number): number {
+function wallXL(ry: number, xs: number, angleDeg: number, p: Params, c: CapShape, k: number): number {
   const yc = (tubeLayout(p).H - 1) / 2;
   const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xs + Math.min(1, xs / 8) * (skew - k * wallCap(ry, p, -tilt, side, -cap));
+  return xs + Math.min(1, xs / 8) * (skew - k * wallCap(ry, p, c));
 }
 
 /** Stable per-column streak factor 0.82..1 for the dried traces — a subtle texture, not stripes.
@@ -1002,7 +1024,12 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   const lightKL = Math.max(0.25, 1 - p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   const xsI = Math.round(xs);
-  const capK = capScale(len, p, s.edgeLight, s.cap);
+  // Per-end meniscus: the home end takes the mirrored forcing; contact-line speeds outward (advancing
+  // > 0) from the panel-frame velocities, which drawTube does not mirror.
+  const recedeV = p.remaining ? 1 : -1;
+  const capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, -recedeV * (s.fillVel + s.slugVel));
+  const capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, recedeV * s.slugVel);
+  const capK = capScale(len, capR), capKL = capScale(len, capL);
   const hasLiquid = xe - xs >= 0.5;   // an empty column draws nothing, not even an anti-aliased sliver
   ensureFizz(idx, p, Math.max(0, Math.min(L, xe - xs - 6)), s.agitation);
 
@@ -1020,8 +1047,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const surfL = fizzSurfL[idx].length === H ? fizzSurfL[idx] : (fizzSurfL[idx] = new Float32Array(H));
   fizzExposed[idx] = (xe < L - 0.5 ? 1 : 0) | (p.freeLiquid && xs > 0.5 ? 2 : 0);
   for (let ry = 0; ry < H; ry++) {
-    const ex = edgeX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK);
-    const exL = p.freeLiquid ? edgeXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK) : 0;
+    const ex = edgeX(ry, xe, angle, p, capR, capK);
+    const exL = p.freeLiquid ? edgeXL(ry, xs, angle, p, capL, capKL) : 0;
     edges[ry] = ex; edgesL[ry] = exL;
     surf[ry] = ex - xs; surfL[ry] = exL - xs;
     let x0 = 0;
@@ -1407,8 +1434,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     };
     for (let ry = 0; ry < H; ry++) {
       const xi = Math.floor(edges[ry]), xa = Math.max(capX0[ry], Math.floor(edgesL[ry]) + 1);
-      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), 1, lightK, xa, L);
-      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, angle, p, s.edgeLight, s.acrossTilt, s.cap, capK), -1, lightKL, capX0[ry], xi);
+      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, angle, p, capR, capK), 1, lightK, xa, L);
+      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, angle, p, capL, capKL), -1, lightKL, capX0[ry], xi);
     }
   }
 
