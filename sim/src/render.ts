@@ -44,6 +44,7 @@ export interface Palette {
   traceRows: Uint16Array; // dried deposit colour, independent of bulk liquid transparency
   tubeBackRows: Uint16Array; // tube-back colour with glass shading per row
   body: number; tubeBack: number; bubbleRim: number; bubbleIn: Uint16Array;
+  bubbleRimRows: Uint16Array; // H: fizz ring colour per row, dimmed by the cylinder's light (the scalar rim stays for the spirit bubble / pinpoint)
   dryT: Float32Array;    // H: what an empty tube transmits of the back per row (0 inside the glass wall band); fades rear marks behind air
 }
 
@@ -89,6 +90,10 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   const rows = new Uint16Array(H);
   const traceRows = new Uint16Array(H);
   const bubbleIn = new Uint16Array(H);
+  const bubbleRimRows = new Uint16Array(H), rimC = hexToRgb(p.bubbleRim);
+  // The lit rim colour after the panel clip: bright presets push it past white, so the row shading is
+  // applied to the clipped colour (otherwise it saturates away). Capped below white so the pinpoint reads.
+  const rimLit = scale(rimC, br).map((v) => Math.min(255, v)) as [number, number, number];
   const tubeBackRows = new Uint16Array(H);
   const tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
   const liquidHiScaled = scale(hi, br), glassHiScaled = scale(ghi, p.brightness);
@@ -167,10 +172,13 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     traceRows[y] = q(scale(rgb565to888(q(residue)), 0.85));
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
+    // Fizz ring follows the cylinder's light: the glassW style/Lambert mix, without the highlight tent and reflections.
+    const amb = 0.5 + 0.5 * Math.cos((t - 0.3) * Math.PI * 1.6), wr = amb + (lambert(y) - amb) * p.lightPhys;
+    bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.35 + 0.45 * wr), bodyL, ambAmt));
   }
   return {
     rows, traceRows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)),
-    bubbleRim: q(ambientize(scale(hexToRgb(p.bubbleRim), br), bodyL, ambAmt)), bubbleIn, dryT,
+    bubbleRim: q(ambientize(scale(rimC, br), bodyL, ambAmt)), bubbleIn, bubbleRimRows, dryT,
   };
 }
 
@@ -687,8 +695,9 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
 }
 
 /** px in the liquid frame; v = size/speed factor; life ≠ 0 = parked under a surface, |life| s left before it
- *  pops: > 0 under the time edge, < 0 under the home edge of a free slug. */
-export interface Fizz { x: number; y: number; v: number; life: number; }
+ *  pops: > 0 under the time edge, < 0 under the home edge of a free slug; z = depth in the bore (0 = front
+ *  wall, 1 = back wall), drawn at spawn and every recycle (never on a move, park or release). */
+export interface Fizz { x: number; y: number; v: number; life: number; z: number; }
 export const fizz: Fizz[][] = [[], []];
 // Bubbles per tube (firmware MAX_FIZZ): the sliders' worst case, fizzCount 120 doubled by full agitation.
 // A count pushed past the sliders is capped and reported, not silently dropped.
@@ -727,7 +736,7 @@ function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
     want = FIZZ_MAX;
   }
   const H = tubeLayout(p).H;
-  while (arr.length < want) { const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v, life: 0 }); }
+  while (arr.length < want) { const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v, life: 0, z: Math.random() }); }
   if (arr.length > want) arr.length = want;
 }
 /** Bubble radius px for size factor `v`. */
@@ -781,7 +790,7 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
         }
         else {
           const left = Math.abs(f.life) - dt * (1 + 3 * agitation);   // shaking pops the foam
-          if (left <= 0) { f.life = 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, -1); }
+          if (left <= 0) { f.life = 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, -1); f.z = Math.random(); }
           else f.life = side * left;
           continue;
         }
@@ -790,7 +799,7 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
       f.x += vx * f.v * dt;
       // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
       const hide = fizzHideY(p, f.v);
-      if (f.y < hide || f.y >= H - hide) { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; respawn(f, -1); continue; }
+      if (f.y < hide || f.y >= H - hide) { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; respawn(f, -1); f.z = Math.random(); continue; }
       // The flow carrying its rim within FOAM_CATCH of a surface (the whole disc, so big bubbles never poke
       // through), or into the foam already there (it joins at the back, not rising through it): at the
       // surface the rise heads for it parks for a random life around fizzFoamLife and glides onto it
@@ -800,7 +809,7 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
       const r = fizzR(p, f.v);
       const outR = vx > 0 && f.x > discFit(surf, H, f.y, r, 1) - FOAM_CATCH, outL = vx < 0 && -f.x > discFit(surfL, H, f.y, r, -1) - FOAM_CATCH;
       if ((side > 0 && outR) || (side < 0 && outL) || (side !== 0 && touchesFoam(fizz[i], f, r, p, side))) f.life = side * p.fizzFoamLife * (0.5 + Math.random());
-      else if (outR || outL) { f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, vx < 0 ? 0 : 1); }
+      else if (outR || outL) { f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, vx < 0 ? 0 : 1); f.z = Math.random(); }
       else f.x = Math.max(-foamFront(surfL, H, f.y, -1), Math.min(foamFront(surf, H, f.y, 1), f.x));
     }
     if (side !== 0) settleFoam(fizz[i], p, H, speed, side > 0 ? surf : surfL, side, dt);
@@ -1486,6 +1495,10 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // magnification so they come out round after applyLens (size >= 3: darker interior, bright rim).
   if (p.fizz) {
     const mag = lensMagRows(H, p);
+    const blickC = q(scale([255, 255, 255], p.brightness));   // pinpoint: neutral white through the panel dimmer only
+    // Highlight row (continuous, from the light angle): the core shifts away from it, the pinpoint toward it.
+    const yHi = (H - 1) / 2 * (1 - Math.sin((s.light * Math.PI) / 180));
+    const lxS = -0.7, lxSign = p.remaining ? -1 : 1;   // light from screen-left; the liquid frame is mirrored under remaining
     for (const f of fizz[idx]) {
       const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
       // Centres stay inside this frame's surfaces (the stepper ran on an older one, so a receding surface
@@ -1494,11 +1507,24 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       // A parked bubble in its last FOAM_POP_T s pops: swells and fades out, breaking the surface.
       const pop = f.life !== 0 && Math.abs(f.life) < FOAM_POP_T ? Math.abs(f.life) / FOAM_POP_T : 1;
       const r = fizzR(p, f.v) * (1 + 0.6 * (1 - pop));
-      const m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
+      // Seen through liquid ∝ its depth: a deeper bubble fades toward the liquid, less so the clearer it is.
+      // Seen through liquid in proportion to its depth: the liquid in front tints a deeper bubble toward the
+      // body colour (a colour mix, so the disc stays an opaque store as before: rear marks are behind the bubble).
+      const depthK = 1 - p.fizzDepth * f.z * (1 - p.liquidTransparency);
+      const cInD = depthK < 1 ? blend565(pal.rows[fy], pal.bubbleIn[fy], depthK) : pal.bubbleIn[fy];
+      const cBlickD = depthK < 1 ? blend565(pal.rows[fy], blickC, depthK) : blickC;   // the pinpoint sinks with the bubble
+      const m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;
+      // Light direction in unsquashed disc space (liquid frame): x fixed toward screen-left, y toward the highlight row.
+      const ly = Math.max(-1, Math.min(1, (yHi - f.y) / (H / 2))), nrm = 1 / Math.sqrt(lxS * lxS + ly * ly);
+      const dirX = lxSign * lxS * nrm, dirY = ly * nrm;
+      const offX = -dirX * off, offY = -dirY * off;   // dark core shifted away from the light
+      // Specular pinpoint on the lit side (r >= 2.5, fizzBlick > 0): scalar rim colour mixed into the pixel before its one blend.
+      const blick = r >= 2.5 && p.fizzBlick > 0, bk = 0.4 * (r - 1), bX = dirX * bk, bY = dirY * bk, rb = Math.max(0.6, r / 4);
       for (let iy = Math.floor(f.y - ry - 1); iy <= Math.ceil(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
         const wallT = pal.dryT[iy] * pop;   // bubbles live in the bore: invisible where the ray only sees the wall band
         if (wallT <= 0) continue;
+        const cRimD = depthK < 1 ? blend565(pal.rows[iy], pal.bubbleRimRows[iy], depthK) : pal.bubbleRimRows[iy];
         // Past the profile a bubble is seen through the concave band's front-glass wedge, thickest at the
         // profile and gone at the band's outer rim; a receding edge's band thins out the same way it is drawn.
         const sR = surf[iy], sL = surfL[iy], bR = strokeR[iy], bL = strokeL[iy];   // stroke widths: 0 where no band is drawn
@@ -1512,8 +1538,13 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
             if (a1 > a0) { const q = ((a0 + a1) / 2 - sR) / bR; cov *= 1 - veilA * (a1 - a0) * (1 - q) * (1 - pullR * q); } }
           if (ix < sL && bL > 0) { const a1 = Math.min(ix + 1, sL), a0 = Math.max(ix, sL - bL);
             if (a1 > a0) { const q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - veilA * (a1 - a0) * (1 - q) * (1 - pullL * q); } }
-          const cx = dx - off, cy = dy - off, dc = Math.sqrt(cx * cx + cy * cy);
-          pxa(mapX(ix + xsI), y0 + iy, r >= 1.5 && dc < r - 1 - off ? pal.bubbleIn[fy] : pal.bubbleRim, cov);
+          const cx = dx - offX, cy = dy - offY, dc = Math.sqrt(cx * cx + cy * cy);
+          let c = r >= 1.5 && dc < r - 1 - off ? cInD : cRimD;
+          if (blick) {
+            const ex = dx - bX, ey = dy - bY, g = p.fizzBlick * Math.max(0, Math.min(1, rb + 0.5 - Math.sqrt(ex * ex + ey * ey)));
+            if (g > 0) c = blend565(c, cBlickD, g);   // specular: neutral room light, panel-dimmed, depth-tinted
+          }
+          pxa(mapX(ix + xsI), y0 + iy, c, cov);
         }
       }
     }

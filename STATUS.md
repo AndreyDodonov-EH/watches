@@ -1,6 +1,42 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-23 (see-through meniscus surface: surfaceFill / surfaceBlick, params v21)_
+_Last update: 2026-09-25 (per-bubble fizz shading: depth fade, light-relative core, pinpoint, params v23)_
+
+## Per-bubble fizz shading (2026-09-25, astra-loop)
+
+Every bubble used to be the same sprite: one rim colour, a dark core shifted lower-right. Now (sim `drawTube` step 5,
+firmware `discRowT` + the per-bubble setup, both from the same formulas):
+- **Depth** `Fizz.z` (0 front wall .. 1 back wall, drawn at spawn and every recycle, kept while moving/parking). The
+  liquid in front tints a deeper bubble toward the body: `depthK = 1 − fizzDepth·z·(1 − liquidTransparency)`, applied
+  as a colour mix toward `pal.rows` (core and pinpoint per bubble at the centre row, rim per row), not as an alpha —
+  the disc interior stays an opaque store, rear marks are behind the bubble as before. Opaque liquid: only front
+  bubbles show; clear liquid: all alike. Params **v23**: `fizzDepth` (0..1, default 0.7), `fizzBlick` (0..1, default
+  0.6); migration fills defaults; the seven presets that pinned an old `v` in their source (pinot, spritz, cuvee,
+  nocturne, tide, olive-oil ×2) lost the pin, so import no longer re-defaults their surface fill/blick.
+- **Rim per row** `bubbleRimRows[y] = rimLit·(0.35 + 0.45·w)`, `w = amb + (lambert − amb)·lightPhys` (glassW's
+  style/Lambert mix without the highlight tent and reflections), `rimLit` = the lit rim clipped to the panel (bright
+  presets drive `rim·br` past white, so the factor goes on the clipped colour) and capped below white so the pinpoint
+  reads. Firmware: one more per-row palette array (+320 B), light-keyed with the palette.
+- **Core offset follows the light**: `yHi = (H−1)/2·(1 − sin(light))` (continuous from `TubeState.light`),
+  `dir = normalise(−0.7, clamp((yHi − y)/(H/2)))` in screen space (x mirrored into the liquid frame under `remaining`);
+  the core shifts by `−dir·r·fizzShadeOff` (magnitude as before). A bubble above the highlight row has its core up,
+  below it down; the tilt sweeps flip nothing.
+- **Pinpoint** for r ≥ 2.5 and `fizzBlick` > 0: radius `max(0.6, r/4)` at `dir·0.4·(r − 1)` (straddles the lit edge
+  of the core; at 0.55 it sat on the bright ring and vanished), neutral white × `brightness`, depth-tinted, mixed into
+  the pixel colour in 888 before the one blend. Firmware kernel templated on it so small bubbles pay nothing.
+- Verified: sim tsc/build, `check:presets`, `check:meniscus` (151 frames, max 9/255, UBSan clean),
+  `check_render_frames.py --no-fizz` byte-identical to the pre-change renderer (9136 strips; new `--no-fizz` and
+  `--big-fizz` harness modes), `--big-fizz` UBSan clean. PlatformIO RAM 89 216 B (+2 240: `z` 1 920 + rim rows 320),
+  flash 1 504 319 B (+2 328). Board (same params A/B against HEAD b193d05, IMU alive): default preset fizz stage
+  +0.26 vs +0.22 ms; heavy scene (fizzCount 120, fizzSize 5, lightPhys 1) 5.83 vs 4.77 ms pinned, 5.92 vs 4.64 ms
+  with the IMU live — about +1 ms at the extreme, accepted. Five kernel variants (alpha fade, template split, veil
+  helper, interior fast path, colour mix) all measured within noise of each other on the S3 while the host shows no
+  gap at all; the remaining cost is not in the pixel arithmetic that was changed. Last board build predates the
+  pinpoint depth tint (one blend per bubble). Screenshots: `fizzSize 14` on cola/champagne, transparency 0/0.5/1,
+  across ±0.8, remaining, free slug, real sizes on six presets.
+- The morning's "baseline" (3.59 ms) was on a different preset: the v23 schema CRC reset NVS to `presets/1.json` at
+  first flash. Leftovers (KAIZEN): no depth sort, uniform ring brightness around the bubble, centre-row tint target
+  for core/pinpoint, bench tooling gaps (preset pinning, IMU-dead boots, live-IMU runs).
 
 ## Perf pass (2026-09-23)
 
