@@ -2,9 +2,13 @@
 """Compare complete firmware strips against a saved reference render.cpp (native C++).
 
 Usage: python3 firmware/tools/check_render_frames.py --reference /tmp/render-before.cpp [--no-fizz | --big-fizz]
+                                                    [--tolerance N] [--list-diffs]
 --no-fizz forces fizz off in every scene of both builds, so a fizz-only change must stay byte-identical.
 --big-fizz gives the random group large bubbles (sizes 3/5/14, spread 0.65, blick and depth fade cycling) so the
 disc interior, core, pinpoint and depth paths are exercised; both builds see the same scenes.
+--list-diffs keeps streaming past the first differing scene and prints, per scene group, how many scenes differ
+(beyond --tolerance), up to 10 of their indices and whether every one had fizz on — so a fizz-only change proves
+"only fizz-on scenes differ" in one run. Still exits non-zero if any scene differs.
 Host-only ESP stubs; no board, firmware allocation changes, or checked-in golden images.
 """
 from pathlib import Path
@@ -35,6 +39,7 @@ static void emit(int idx, const TubeState &s, const Params &scene, uint32_t gen)
 #else
   const Params &p=scene;
 #endif
+  std::fprintf(stderr,"SCENE %ld fizz=%d\n",scenes,p.fizz && p.fizzCount>0 ? 1 : 0);   // for --list-diffs
   renderTube(idx,s,p,gen,strip);
   // Fixed output size to make mismatches easy to locate; padding is deterministic.
   int n=tubeLayout(p).H*536;
@@ -207,6 +212,8 @@ def main():
                         help='force fizz off (fizz=false, fizzCount=0) in every scene of both builds')
     parser.add_argument('--big-fizz', action='store_true',
                         help='large fizz with blick/depth variety in the random group (exercises the disc interior paths)')
+    parser.add_argument('--list-diffs', action='store_true',
+                        help='do not stop at the first differing scene: list differing scenes per group with their fizz flag')
     args = parser.parse_args()
     reference = args.reference.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix='watches-frames-') as tmp:
@@ -233,6 +240,7 @@ def main():
         runs = [subprocess.Popen([str(tmp / name)], stdout=subprocess.PIPE, stderr=open(tmp / (name + '.log'), 'w'))
                 for name, _ in sides]
         scenes = scenes_differing = pixels_differing = worst = 0
+        listed = []   # --list-diffs: indices of the scenes that differ (beyond --tolerance)
         failure = None
         done = False
         try:
@@ -245,10 +253,15 @@ def main():
                     break
                 if a != b:
                     if not args.tolerance:
+                        if args.list_diffs:
+                            listed.append(scenes)
+                            scenes += 1
+                            continue
                         pixel = next(i for i, (x, y) in enumerate(zip(a, b)) if x != y) // 2
                         failure = f'different pixel at x={pixel % 536}, row={pixel // 536}'
                         break
                     scenes_differing += 1
+                    over = False
                     pa, pb = memoryview(a).cast('H'), memoryview(b).cast('H')   # strip words are byte-swapped 565; equal-or-not is layout-agnostic
                     for i in range(len(pa)):
                         if pa[i] == pb[i]:
@@ -257,11 +270,15 @@ def main():
                         d = channel_delta(pa[i], pb[i])
                         if d > worst:
                             worst = d
-                        if d > args.tolerance:
-                            failure = f'pixel x={i % 536}, row={i // 536} differs by {d} > {args.tolerance} (RGB888 steps)'
-                            break
+                        if d > args.tolerance and not over:
+                            over = True
+                            if not args.list_diffs:
+                                failure = f'pixel x={i % 536}, row={i // 536} differs by {d} > {args.tolerance} (RGB888 steps)'
+                                break
                     if failure:
                         break
+                    if over:
+                        listed.append(scenes)
                 scenes += 1
             done = not failure
         finally:
@@ -277,7 +294,7 @@ def main():
                 run.wait()
         crashed = [(name, run.returncode) for (name, _), run in zip(sides, runs) if run.returncode and run.returncode != -9]
         if crashed:
-            raise SystemExit('\n'.join(f'{name} harness exited with {code} after {scenes} scenes:\n' + (tmp / (name + '.log')).read_text()
+            raise SystemExit('\n'.join(f'{name} harness exited with {code} after {scenes} scenes:\n' + harness_log(tmp / (name + '.log'))
                                        for name, code in crashed))
         groups = [(int(m.group(1)), m.group(2)) for m in
                   re.finditer(r'^GROUP (\d+) (\S+)$', (tmp / 'reference.log').read_text(), re.M)]
@@ -285,11 +302,32 @@ def main():
             where = max((g for g in groups if g[0] <= scenes), default=(0, '?'))
             raise SystemExit(f'scene {scenes} ({where[1]} #{scenes - where[0]}): {failure}')
         summary = ', '.join(f'{name} {nxt - start}' for (start, name), (nxt, _) in zip(groups, groups[1:]))
+        if listed:
+            fizz = {int(m.group(1)): m.group(2) == '1' for m in
+                    re.finditer(r'^SCENE (\d+) fizz=([01])$', (tmp / 'current.log').read_text(), re.M)}
+            lines = [f'{len(listed)} of {scenes} render strips ({summary}) differ'
+                     + (f' by more than {args.tolerance} RGB888 steps' if args.tolerance else '') + ':']
+            for (start, name), (nxt, _) in zip(groups, groups[1:]):
+                hit = [n for n in listed if start <= n < nxt]
+                if not hit:
+                    lines.append(f'  {name}: 0')
+                    continue
+                off = [n for n in hit if not fizz.get(n, False)]
+                lines.append(f'  {name}: {len(hit)} differ, ' + ('all with fizz on' if not off else f'{len(off)} with fizz off')
+                             + '; first: ' + ' '.join(f'#{n - start}' for n in hit[:10]))
+            all_fizz = all(fizz.get(n, False) for n in listed)
+            lines.append('every differing scene had fizz on' if all_fizz else 'some differing scenes had fizz off')
+            raise SystemExit('\n'.join(lines))
         if not scenes_differing:
             print(f'{scenes} complete render strips ({summary}) are byte-identical; UBSan passed')
         else:
             print(f'{scenes} render strips ({summary}) within {args.tolerance} RGB888 steps: {scenes_differing} scenes / '
                   f'{pixels_differing} pixels differ, worst {worst}; UBSan passed')
+
+
+def harness_log(path):
+    """A harness's stderr without the per-scene SCENE lines (UBSan / crash output only)."""
+    return ''.join(l for l in path.read_text().splitlines(True) if not l.startswith('SCENE '))
 
 
 def channel_delta(a, b):

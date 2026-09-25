@@ -12,7 +12,15 @@ tools/e2e.sh --label "hand-off 1 step 2"            # build → flash → pinned
 tools/e2e.sh --stages                                # + per-stage cost table (digits, ticks, fizz, glow, …), ~2 min
 tools/e2e.sh --no-flash                              # measure what is already flashed
 tools/e2e.sh --no-ble                                # -DNO_BLE build (baseline: BLE costs ~0 ms)
+tools/e2e.sh --preset ../presets/cola.json --runs 3  # pinned preset, median of 3 runs (+ spread)
+tools/e2e.sh --ref HEAD~1 --preset ../presets/cola.json --runs 3 --stage fizz=0
+                                                     # A/B: flash+bench HEAD~1 (temp worktree, no parity), then this tree
 ```
+e2e.sh passes `--preset FILE`, `--live-imu`, `--runs N`, `--stage name=v` through to bench.py; the log header
+names the preset. `--ref COMMIT` builds and flashes a temporary `git worktree` of COMMIT under /tmp with the same
+flags, benches it with the same preset/runs/stages (label `<label> ref <sha>`, parity skipped: the sim is not that
+commit's), removes the worktree (also on failure) and then runs the current tree. `--bare` implies `--allow-dead-imu`.
+Exit 3 = dead IMU (below).
 Pass = fps not lower than the previous log entry AND `mismatched pixels` not higher, `>12/255 off: 0`.
 Baseline @ f0a3de7: **20.6 fps, render 44.4 ms**, digits 20.7 ms of it; parity ~200 px ≤1 LSB.
 
@@ -20,14 +28,31 @@ Baseline @ f0a3de7: **20.6 fps, render 44.4 ms**, digits 20.7 ms of it; parity ~
 - `tools/device.py CMD…` — one-off serial (`f` fps, `s` status, `p?` params, `pname=v`, `t HH:MM`, `d0` freeze, `r` reboot).
   Auto-detects `/dev/ttyACM*` (usbipd-attached) or Windows COMx. Prints `BOARD REBOOTED (<reason>)` if a
   boot banner shows up — reasons: poweron/sw/panic/task-wdt/brownout/usb.
-- `tools/bench.py [--stages] [--stage name=v] [--samples N]` — pinned scene (`t 10:09:30`, `d0`, `inputGain=0`),
-  median fps. Never compare unpinned `f` numbers: fps swings 19–25 with fill level/tilt.
+- `tools/bench.py [--stages] [--stage name=v] [--samples N] [--preset FILE] [--runs N] [--live-imu] [--allow-dead-imu] [--json]`
+  — pinned scene (optional preset, `t 10:09:30`, `d0`, `inputGain=0`), median fps. Never compare unpinned `f`
+  numbers: fps swings 19–25 with fill level/tilt. First output line = header: scene, preset, `tilt along X across Y
+  gyro G`, IMU pinned/live, runs.
+  - `--preset FILE`: every key of the JSON the board knows is written with `p<name>=<v>` (unknown keys and `v`
+    are listed once and skipped) and restored afterwards like any other touched param.
+  - `--runs N`: repeats base + stages N times; each line shows the median across runs and the min–max spread.
+    Fizz positions are random (±0.5 ms per run on heavy presets): budgets under ~0.5 ms need `--runs 3`+.
+  - `--live-imu`: inputGain is not pinned (moving light); `--live-imu --stage fizz=0` is the moving-fizz case.
+  - Dead IMU: `s` reading along/across/gyro exactly 0 after the pins = IMU dead after flash. bench.py reboots
+    (`r`), re-applies the pins and re-checks once; still dead → exit 3 (e2e.sh exits 3 too).
+    `--allow-dead-imu` skips the reboot and marks the header `IMU dead` (for -DNO_IMU builds).
+- `tools/check_render_frames.py --reference OLD_render.cpp [--no-fizz] [--list-diffs]` — host-only (no board):
+  every scene of the current render.cpp vs a saved copy. `--list-diffs` lists the differing scenes per group and
+  whether all had fizz on (a fizz-only change: all on, and `--no-fizz` byte-identical).
 - `tools/compare-device.py` — device strips vs `sim/tools/render-ref.ts`; writes `.compare/{device,ref,diff}.png`.
   Read `diff.png` when mismatches grow (yellow = >12/255).
 - `tools/flash.sh` / `flash-win.sh` — app-only flash, NVS-tuned params survive; the clock resets to 10:09:30.
 - `python.exe "$(wslpath -w tools/ble-session.py)" s f` — same protocol over BLE from the Windows radio.
 
 ## Rules
+- Pin a preset (`--preset`) whenever before/after straddle a Params change: a flash that changes
+  `PARAMS_SCHEMA_CRC` resets NVS to presets/1.json, so the two sides would otherwise bench different looks.
+  `--ref` across a schema change resets NVS twice (the tuned params are lost either way).
+- A run whose header shows `IMU dead` (or all-zero tilt) is not comparable with one that has a live IMU.
 - Scripts restore params from a `p?` snapshot; never send `p!` (it overwrites NVS 2 s later).
 - Open serial with DTR=RTS=1 (device.py does) — clearing them can reset the ESP32-S3.
 - One serial client at a time; the port is exclusive.
