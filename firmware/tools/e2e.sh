@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # End-to-end firmware check: build -> flash -> pinned fps bench -> pixel parity vs the sim.
 #   tools/e2e.sh [--label TEXT] [--stages] [--stage name=v ...] [--no-ble] [--bare] [--no-flash] [--samples N]
-#                [--preset FILE.json] [--live-imu] [--runs N] [--ref COMMIT]
+#                [--preset FILE.json] [--live-imu] [--runs N] [--ref COMMIT] [--stages fizz,digits] [--quick] [--no-parity]
+# Faster runs: --stages with a comma list measures only those stages; --quick halves the sampling (3 base samples,
+#   2 per stage, shorter settles); --no-parity skips the sim comparison when only timing matters; --ref reuses
+#   .pio/libdeps in the worktree.
 # --bare = no BLE and no IMU polling: USB serial + physics + render only (the ceiling); the bench then accepts
 #   the all-zero IMU (--allow-dead-imu).
 # --preset / --live-imu / --runs / --stage go to bench.py (see its docstring). Pin a preset whenever the two sides
@@ -12,12 +15,14 @@
 # Appends the bench lines + parity line to firmware/.compare/e2e.log. Board must be reachable (device.py).
 # Exit 3 = bench.py found the IMU dead even after a reboot (the run is not comparable).
 set -euo pipefail
-USAGE="usage: $0 [--label TEXT] [--stages] [--stage name=v] [--no-ble] [--bare] [--no-flash] [--samples N] [--preset FILE] [--live-imu] [--runs N] [--ref COMMIT]"
-LABEL=""; BENCH=(); FLASH=1; SAMPLES=5; FLAGS=""; SUFFIX=""; PRESET=""; REF=""
+USAGE="usage: $0 [--label TEXT] [--stages] [--stage name=v] [--no-ble] [--bare] [--no-flash] [--samples N] [--preset FILE] [--live-imu] [--runs N] [--ref COMMIT] [--stages LIST] [--quick] [--no-parity]"
+LABEL=""; BENCH=(); FLASH=1; PARITY=1; SAMPLES=5; FLAGS=""; SUFFIX=""; PRESET=""; REF=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --label) LABEL="$2"; shift ;;
-        --stages) BENCH+=(--stages) ;;
+        --stages) if [ $# -gt 1 ] && [[ "$2" != --* ]]; then BENCH+=(--stages "$2"); shift; else BENCH+=(--stages); fi ;;
+        --quick) BENCH+=(--quick) ;;
+        --no-parity) PARITY=0 ;;
         --stage) BENCH+=(--stage "$2"); shift ;;
         --no-ble) FLAGS="-DNO_BLE"; SUFFIX=" no-ble" ;;
         --bare) FLAGS="-DNO_BLE -DNO_IMU"; SUFFIX=" bare"; BENCH+=(--allow-dead-imu) ;;
@@ -59,6 +64,7 @@ if [ -n "$REF" ]; then
     cleanup() { git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"; git worktree prune; }
     trap cleanup EXIT
     git worktree add --detach "$WT" "$REF_SHA" >/dev/null
+    [ -d .pio/libdeps ] && cp -r .pio/libdeps "$WT/firmware/.pio/" 2>/dev/null || { mkdir -p "$WT/firmware/.pio" && cp -r .pio/libdeps "$WT/firmware/.pio/"; }   # no library re-download
     PLATFORMIO_BUILD_FLAGS="$FLAGS" "$WT/firmware/tools/flash.sh"   # flash.sh cds into its own firmware/ (the worktree's)
     sleep 4
     bench "$LABEL ref $REF_SHA"
@@ -69,4 +75,4 @@ if [ "$FLASH" -eq 1 ]; then
     sleep 4
 fi
 bench "$LABEL"
-python3 tools/compare-device.py | grep '^mismatched' | tee -a .compare/e2e.log
+if [ "$PARITY" -eq 1 ]; then python3 tools/compare-device.py | grep '^mismatched' | tee -a .compare/e2e.log; fi

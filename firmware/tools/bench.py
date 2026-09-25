@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """fps benchmark on the board, in a pinned scene so runs are comparable.
 
-  tools/bench.py [--scene 10:09:30] [--samples 5] [--settle 4] [--stages] [--stage name=value ...]
+  tools/bench.py [--scene 10:09:30] [--samples 5] [--settle 4] [--stages [LIST]] [--stage name=value ...] [--quick]
                  [--preset FILE.json] [--live-imu] [--allow-dead-imu] [--runs N] [--label TEXT] [--json]
 
 Pins: optional preset (--preset: every key of the JSON the board knows, written with `p<name>=<v>`; `v` and
@@ -65,18 +65,32 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--port'); ap.add_argument('--scene', default='10:09:30')
     ap.add_argument('--samples', type=int, default=5); ap.add_argument('--settle', type=float, default=4)
-    ap.add_argument('--stages', action='store_true'); ap.add_argument('--stage', action='append', default=[])
+    ap.add_argument('--stages', nargs='?', const='all', default=None, metavar='LIST',
+                    help='per-stage costs: all default stages, or a comma list of names from the default table (e.g. fizz,digits)')
+    ap.add_argument('--stage', action='append', default=[])
+    ap.add_argument('--quick', action='store_true', help='3 base samples, 2 per stage, settle 2 s / 1 s (about half the time; +-0.1 ms noisier)')
     ap.add_argument('--preset', help='preset JSON (e.g. ../presets/cola.json) loaded before the pins')
     ap.add_argument('--live-imu', action='store_true', help='do not pin inputGain=0')
     ap.add_argument('--allow-dead-imu', action='store_true', help='accept along/across/gyro all 0 (no reboot, no exit 3)')
     ap.add_argument('--runs', type=int, default=1, help='repeat base + stages N times; median and spread across runs')
     ap.add_argument('--label', default=''); ap.add_argument('--json', action='store_true')
     a = ap.parse_args()
+    stage_samples, stage_settle = max(3, a.samples - 2), 1.5
+    if a.quick:
+        if a.samples == 5: a.samples = 3
+        if a.settle == 4: a.settle = 2
+        stage_samples, stage_settle = 2, 1
     if a.runs < 1: ap.error('--runs must be >= 1')
     preset = None
     if a.preset:
         with open(a.preset) as fh: preset = json.load(fh)
-    stages = list(DEFAULT_STAGES) if a.stages else []
+    stages = []
+    if a.stages == 'all': stages = list(DEFAULT_STAGES)
+    elif a.stages:
+        table = dict(DEFAULT_STAGES)
+        for name in a.stages.split(','):
+            if name not in table: raise SystemExit(f'bench.py: --stages {name}: not a default stage ({", ".join(table)})')
+            stages.append((name, table[name]))
     for s in a.stage:
         k, v = s.split('=', 1); stages.append((k, v))
 
@@ -165,7 +179,7 @@ def main():
                 if k not in cur or same(cur[k], v): continue
                 on = cur[k]
                 setp(k, v)
-                f2, r2, _, _ = sample(dev[0], max(3, a.samples - 2), 1.5)
+                f2, r2, _, _ = sample(dev[0], stage_samples, stage_settle)
                 setp(k, on)
                 rr['stages'][k] = {'fps': f2, 'render_ms': r2, 'cost_ms': ren - r2}
             per_run.append(rr)
