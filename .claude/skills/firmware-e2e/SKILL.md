@@ -10,6 +10,7 @@ allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 ```bash
 tools/e2e.sh --label "hand-off 1 step 2"            # build → flash → pinned bench → parity, appended to .compare/e2e.log
 tools/e2e.sh --stages                                # + per-stage cost table (digits, ticks, fizz, glow, …), ~2 min
+tools/e2e.sh --stages fizz,digits --quick --no-parity   # only those stages, half the samples, no sim compare: ~30 s after the flash
 tools/e2e.sh --no-flash                              # measure what is already flashed
 tools/e2e.sh --no-ble                                # -DNO_BLE build (baseline: BLE costs ~0 ms)
 tools/e2e.sh --preset ../presets/cola.json --runs 3  # pinned preset, median of 3 runs (+ spread)
@@ -28,7 +29,10 @@ Baseline @ f0a3de7: **20.6 fps, render 44.4 ms**, digits 20.7 ms of it; parity ~
 - `tools/device.py CMD…` — one-off serial (`f` fps, `s` status, `p?` params, `pname=v`, `t HH:MM`, `d0` freeze, `r` reboot).
   Auto-detects `/dev/ttyACM*` (usbipd-attached) or Windows COMx. Prints `BOARD REBOOTED (<reason>)` if a
   boot banner shows up — reasons: poweron/sw/panic/task-wdt/brownout/usb.
-- `tools/bench.py [--stages] [--stage name=v] [--samples N] [--preset FILE] [--runs N] [--live-imu] [--allow-dead-imu] [--json]`
+- `tools/bench.py [--stages [LIST]] [--stage name=v] [--quick] [--samples N] [--preset FILE] [--runs N] [--live-imu] [--allow-dead-imu] [--json]`
+  - Time budget: every sample is one 2 s fps window (firmware `f`), 5 base + 3 per stage by default, so the full
+    table is ~130 s. `--stages fizz,digits` measures only those; `--quick` = 3 base / 2 per stage, shorter settles
+    (~half, ±0.1 ms noisier). Use `--quick` for direction, full samples + `--runs 3` for a number you will quote.
   — pinned scene (optional preset, `t 10:09:30`, `d0`, `inputGain=0`), median fps. Never compare unpinned `f`
   numbers: fps swings 19–25 with fill level/tilt. First output line = header: scene, preset, `tilt along X across Y
   gyro G`, IMU pinned/live, runs.

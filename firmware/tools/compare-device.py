@@ -69,7 +69,13 @@ def main():
         job['sprite'] = {'i': font - 5, 'w': im.width, 'h': im.height, 'cellW': meta['cellW'], 'cellH': meta['cellH'], 'widths': meta['widths'], 'rgbaFile': rgba}
     jobf = os.path.join(a.out, 'job.json'); json.dump(job, open(jobf, 'w'))
     outdir = os.path.join(SIM, 'node_modules', '.cache', 'render-ref')
-    subprocess.check_call(['npx', 'tsc', '-p', 'tools/render-ref.tsconfig.json'], cwd=SIM)
+    # tsc only when a source is newer than the compiled render-ref.js (saves ~10 s per run)
+    ref_js = os.path.join(outdir, 'sim', 'tools', 'render-ref.js')
+    srcs = [os.path.join(SIM, 'tools', 'render-ref.ts'), os.path.join(SIM, 'tools', 'render-ref.tsconfig.json')] + \
+           [os.path.join(SIM, 'src', f) for f in os.listdir(os.path.join(SIM, 'src')) if f.endswith('.ts')] + \
+           [os.path.join(SIM, '..', 'spec', f) for f in os.listdir(os.path.join(SIM, '..', 'spec')) if f.endswith('.ts')]
+    if not os.path.exists(ref_js) or max(os.path.getmtime(f) for f in srcs) > os.path.getmtime(ref_js):
+        subprocess.check_call(['npx', 'tsc', '-p', 'tools/render-ref.tsconfig.json'], cwd=SIM)
     open(os.path.join(outdir, 'package.json'), 'w').write('{}')
     # tsc keeps the '@spec/layout' specifier; alias it for node
     spec_dir = os.path.join(outdir, 'node_modules', '@spec'); os.makedirs(spec_dir, exist_ok=True)
