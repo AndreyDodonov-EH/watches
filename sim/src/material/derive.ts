@@ -337,6 +337,8 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
   };
   const designPart: Pick<Params, DesignKey> = { ...d, freeLiquid: plasma ? false : d.freeLiquid };
   const params = { ...designPart, ...derived, ...fixed } as Params;
+  // a pre-image body (opaque / translucent / metal) settled on the real palette's centre row, before the rim is fitted over it
+  if (!plasma && opacity !== 'clear') params.liquid = settleLiquid(params, q565([0, 1, 2].map((i) => enc255(colour.C0[i] + E[i]))));
   let rim = { gain: 0, error: 0, rimError: 0, bodyOver: 0 };
   if (params.rimLight > 0) {
     const { tint, ...fit } = fitRim(params, displayOffset(U_WALL, m), colour.Wall, E);
@@ -374,6 +376,21 @@ export const RIM_TOLERANCE = 5;
 /** Bounded allowance for a channel ABOVE the target with the rim at 0: one RGB565 5-bit step (the luma-only
  *  shadeDepth fit magnified by the quantisation, glow's blue); more is an unrepresentable body, rejection 12. */
 export const BODY_OVER_TOLERANCE = 8;
+/** The centre row settled on the real palette: the pre-image is rounded to 8 bits and the row then truncated
+ *  to RGB565, so a sub-level rounding loss can cross a 5-bit step (8 levels) the target does not. Per channel,
+ *  of the rounded pre-image and its ±1 neighbours (±1 always outweighs a rounding loss of ≤ ½·(1 − T)), the
+ *  value whose body-only centre row (rimLight 0; RGB565) is nearest the target is taken; ties keep the rounded one. */
+function settleLiquid(p: Params, target: RGB3): string {
+  const q = { ...p, ...BODY_ONLY, rimLight: 0 }, base = hexRgb(p.liquid);
+  const y = Math.floor((buildPalette(q, 0).rows.length - 1) / 2);
+  const best = [...base], err = [Infinity, Infinity, Infinity];
+  for (const k of [0, -1, 1]) {
+    const c = base.map((v) => clamp(v + k, 0, 255));
+    const got = rgb565to888(buildPalette({ ...q, liquid: rgbHex(c) }, 0).rows[y]);
+    for (let i = 0; i < 3; i++) if (Math.abs(got[i] - target[i]) < err[i]) { err[i] = Math.abs(got[i] - target[i]); best[i] = c[i]; }
+  }
+  return rgbHex(best);
+}
 /** rimLight gains tried in order: the smallest at which no channel of the solved tint saturates wins. */
 const RIM_GAINS = [1, 2, 3, 4] as const;
 /** The side-light rim fit on the real palette: for each gain of RIM_GAINS the tint is solved (solveRimTint);

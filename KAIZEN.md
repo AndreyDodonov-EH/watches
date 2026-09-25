@@ -381,3 +381,5 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `e2e.sh --preset` benches the pinned preset but bench.py restores the board's saved params before `compare-device.py`,
   so the logged parity line is always the board's default look, not the preset; keep the preset applied through the parity
   step (or pass it to compare-device.py) so `--preset` runs log their own parity (found on the honey run, 2026-09-25).
+- groundReflectance caps Rg at 1, so for lin(back) > E_l (parchment #f1e6cf at the defaults: 0.88 > 0.70) E_l·Rg falls short of lin(back) and the "displayed colour is ground truth" law silently breaks for light backings; decide whether to let Rg exceed 1 or reject.
+- bubbleRim on a white backing: 0.35·C0 carries the backing through a clear body, so frizzante's ring is luma 219 on #ffffff (faint), not the ≈0.45 grey the E_s term alone suggests; consider C⁰ (backing-free body) instead of C0.

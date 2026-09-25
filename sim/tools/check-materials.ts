@@ -460,13 +460,13 @@ const FIXTURES: Fixture[] = [
     ] },
   { name: 'oil on parchment', m: mat({ viscosity: 84, density: 915, surfaceTension: 32, ior: 1.47, absorptionR: 0.05, absorptionG: 0.07, absorptionB: 0.45, contactAngle: 15, contactHysteresis: 8, solidsFraction: 0.3, dryingTime: 2 }),
     d: fdesign('#f1e6cf'), want: [
-      ['viscosity', 'medium', 'x'], ['opacity', 'opaque', 'x'], ['Tlum', '0.47', 'T'], ['Tmax', '0.063', 'T'], ['T', '0.063', 'T'],
-      ['liquid', [116, 101, 0], 'c'], ['liquidLo', [39, 32, 0], 'c'], ['liquidHi', [220, 210, 163], 'c'], ['residual', '0', 'c'],
+      ['viscosity', 'medium', 'x'], ['opacity', 'opaque', 'x'], ['Tlum', '0.47', 'T'], ['Tmax', '0.133', 'T'], ['T', '0.133', 'T'],
+      ['liquid', [195, 169, 3], 'c'], ['liquidLo', [67, 55, 0], 'c'], ['liquidHi', [255, 246, 163], 'c'], ['residual', '0', 'c'],
     ] },
   { name: 'pinot on parchment', m: mat({ viscosity: 1.5, density: 990, surfaceTension: 46, ior: 1.35, absorptionR: 0.15, absorptionG: 0.65, absorptionB: 0.5, contactAngle: 20, contactHysteresis: 10, solidsFraction: 0.03 }),
     d: fdesign('#f1e6cf'), want: [
-      ['viscosity', 'watery', 'x'], ['opacity', 'opaque', 'x'], ['Tlum', '0.07', 'T'], ['Tmax', '0.012', 'T'], ['T', '0.012', 'T'],
-      ['liquid', [79, 0, 6], 'c'], ['liquidLo', [29, 0, 0], 'c'], ['liquidHi', [231, 166, 172], 'c'], ['residual', '0', 'c'],
+      ['viscosity', 'watery', 'x'], ['opacity', 'opaque', 'x'], ['Tlum', '0.07', 'T'], ['Tmax', '0.030', 'T'], ['T', '0.030', 'T'],
+      ['liquid', [129, 0, 14], 'c'], ['liquidLo', [49, 0, 0], 'c'], ['liquidHi', [253, 164, 169], 'c'], ['residual', '0', 'c'],
     ] },
   // sampled input #152 (seed 20260925): a strongly blue-absorbing liquid whose luma transmittance reads clear;
   // clear is colourless only, so the two-pass channel spread caps it at the translucent edge
@@ -719,6 +719,16 @@ for (const e of [0.02, 0.021]) {
   if (r) report(`boundary gradient backing: centre residual ${r.residual.toFixed(2)} ≤ 5 levels (T ${r.coords.T.toFixed(3)} via T_max)`, r.residual <= 5 ? [] : [`residual ${r.residual.toFixed(2)}`], []);
   const u = boundary('light uniform backing (parchment) behind oil', OIL.m, fdesign('#f1e6cf'));
   if (u) report(`boundary parchment: centre residual ${u.residual.toFixed(2)} ≤ 5 levels (T ${u.coords.T.toFixed(3)} via T_max)`, u.residual <= 5 ? [] : [`residual ${u.residual.toFixed(2)}`], []);
+}
+// bubbleRim is the side light, not the backing: a bubble reads darker than a white backing and brighter than a
+// black one (frizzante; the white design's on-top tick colours are a design rejection, not the colour's concern)
+{
+  const FR = MATERIAL_PRESETS.find((e) => e.id === 'frizzante')!;
+  for (const [back, below] of [['#ffffff', true], ['#000000', false]] as const) {
+    const rim = deriveReport(FR.material, { ...FR.design, tubeBack: back, tubeBack2: back }).params.bubbleRim;
+    const lr = luma(rim), lb = luma(back);
+    report(`bubbleRim frizzante on ${back}: luma ${lr.toFixed(1)} ${below ? '<' : '>'} backing ${lb.toFixed(1)} (${rim})`, (below ? lr < lb : lr > lb) ? [] : [`luma ${lr.toFixed(1)}`], []);
+  }
 }
 {
   const MILK = FIXTURES[6];

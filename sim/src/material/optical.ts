@@ -120,11 +120,14 @@ export function illumination(m: Material): Illumination {
     Es: m.exposure * (m.ambient + 0.25 * m.lightIntensity),
   };
 }
-/** Effective ground reflectance of the backing under the liquid: lin(back)·E_b/E_l (0 when E_l = 0).
+/** Effective ground reflectance of the backing under the liquid: lin(back)/E_l (0 when E_l = 0).
  *  Capped at 1 — a reflectance above 1 has no two-flux meaning (and makes the K→0 branch singular);
- *  it happens only for a near-white backing under a low, wide light (E_b/E_l ≤ 1.41). */
+ *  it happens when lin(back) > E_l (a light backing under dim light), where E_l·Rg falls short of lin(back). */
 export function groundReflectance(back8: readonly number[], L: Illumination): RGB3 {
-  return map3((i) => L.El > 0 ? Math.min(1, lin255(back8[i]) * L.Eb / L.El) : 0);
+  // The legacy compositor shows the dry backing at its hex brightness, so the displayed colour is the ground truth:
+  // the backing's radiance under the liquid is lin(back) (E_l·Rg = lin(back)), not E_b·albedo — otherwise a white
+  // backing derived darker on the wet side than the dry side shows it (T_max capped colourless liquids at 0.63).
+  return map3((i) => L.El > 0 ? Math.min(1, lin255(back8[i]) / L.El) : 0);
 }
 
 const K3 = (m: Material): RGB3 => [m.absorptionR, m.absorptionG, m.absorptionB];
@@ -132,10 +135,14 @@ const K3 = (m: Material): RGB3 => [m.absorptionR, m.absorptionG, m.absorptionB];
 /** C_i(u) = E_l·[R_i(d, Rg_i) + F_far·Tr_i(d)²] + E_s·u⁴·Tr_i(d), linear light. A black `back8` gives the
  *  backing-independent body C⁰ (the clear class's body: the legacy mix adds the backing itself). */
 export function bodyRadiance(m: Material, s: RowSample, back8: readonly number[], L: Illumination): RGB3 {
-  const K = K3(m), Rg = groundReflectance(back8, L), u4 = s.u ** 4;
+  // The backing term is scaled by the DISPLAYED backing colour (the legacy shows the dry backing at its hex, so the
+  // wet side must agree with it): lin(back)·[R(d, 1) − R(d, 0)] — the two-flux response to a white ground, times the
+  // ground's own radiance — plus E_l·R(d, 0), the body's own scattered light. No reflectance cap is needed.
+  const K = K3(m), u4 = s.u ** 4;
   return map3((i) => {
-    const R = km(K[i], m.scattering, s.d, Rg[i]).R, Tr = km(K[i], m.scattering, s.d, 0).Tr;
-    return L.El * (R + s.Ffar * Tr * Tr) + L.Es * u4 * Tr;
+    const k0 = km(K[i], m.scattering, s.d, 0), k1 = km(K[i], m.scattering, s.d, 1), Tr = k0.Tr;
+    const R = L.El * k0.R + lin255(back8[i]) * (k1.R - k0.R);
+    return R + L.El * s.Ffar * Tr * Tr + L.Es * u4 * Tr;
   });
 }
 
@@ -354,7 +361,8 @@ export function colourLaws(c: ColourInput): ColourOutput {
       highlightH, highlightBright, highlightSharp: 2,
       glassHi: '#dfe6ea', glassHiBright: 0.55 * Lhi, glassReflect: 0.25 * Lhi, glassRim: 0.45 + 0.35 * Lhi,
       glassBody: 0.4 * m.ambient, glassWallGlow, glassOverLiquid,
-      bubbleRim: rgbHex(map3((i) => enc255(0.35 * C0[i] + 0.65))), bubbleDark: 0.25 + 0.5 * (1 - Tsnap),
+      // a bubble's rim refracts the side light, not the backing behind it: dark on a light backing, light on a dark one
+      bubbleRim: rgbHex(map3((i) => enc255(Math.min(1, L.Es + 0.35 * Cfree[i])))), bubbleDark: 0.25 + 0.5 * (1 - Tsnap),
       // side-lit rim of a dielectric liquid; its tint is solved on the real palette (derive.ts)
       rimLight: c.metal || c.plasma ? 0 : 1,
     },

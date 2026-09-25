@@ -22,7 +22,7 @@
   "glassOverLiquid": 0.4,
   "lens": -0.5,
   "lensCurve": -0.05,
-  "bubbleRim": "#d3d3d3",
+  "bubbleRim": "#b3b3b3",
   "highlightH": 6,
   "highlightBright": 0.48271502785331705,
   "highlightSharp": 2,
