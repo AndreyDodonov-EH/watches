@@ -303,3 +303,12 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   (ticksM 2.9 ms, surfaceBand 4.7 ms on the current preset).
 - Surface band costs ~3.2 ms per tube on its own (board, live tilt, digitParallax fixed): (a) band 0.3 → 0 took the hours core
   11.35 → 8.07 ms and minutes 18.07 → 14.87. Its own drawing (`bandRow`, per-row float mixes), not the marks.
+- Parity for motion-only paths (trace-mode wet band, film > 0) can't be checked by compare-device.py, which
+  snapshots the board at rest. A host harness rendering one `job.json` state through both render-ref.ts
+  and a native render.cpp build would cover them without the board.
+- The wet-band fix adds one float division (`b / A`) per band pixel in render.cpp; only ~32 px per row while
+  a film is live, but it is a call on the S3 — fold into a reciprocal if the band loop ever shows in a trace.
+- Parity 2026-09-25 (grey preset, board tilted: acrossTilt -0.98, angle -6, light -41): 4215 px mismatched
+  (7.3%), all <= 12/255 but one at the tube's left edge, spread over every row and column band. Pre-existing:
+  the reference is byte-identical before and after the wet-band fix and the film was below the band threshold.
+  Sweep this pose against the pinned scene to find which pass drifts under across-tilt.

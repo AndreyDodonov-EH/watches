@@ -1698,7 +1698,8 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
               : (bandR ? s.filmFree * clampf(1 - (x + 0.5f - ex) * invN, 0, 1) : 0.0f);
             float a = (float)traceA[x] * rowW * (1.0f / 65536.0f);
             uint16_t c = pal.traceRows[ry];
-            if (b > 0) { a += (1 - a) * b; c = blend565(c, pal.rows[ry], b); }
+            // residue under the film, one write (see sim): film colour weight is b / alpha, not b
+            if (b > 0) { const float A = a + (1 - a) * b; c = blend565(c, pal.rows[ry], b / A); a = A; }
             if (a >= 1.0f / 255) pxa(x, y, c, fmn(1, a));
           }
         }

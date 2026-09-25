@@ -1136,7 +1136,11 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
             const b = x + 0.5 < xm
               ? (bandL ? s.filmHome * Math.min(1, Math.max(0, 1 - (exL - x - 0.5) / N)) : 0)
               : (bandR ? s.filmFree * Math.min(1, Math.max(0, 1 - (x + 0.5 - ex) / N)) : 0);
-            if (b > 0) { a += (1 - a) * b; c = blend565(c, pal.rows[ry], b); }
+            // Composite as residue (traceRows at a) UNDER the film (rows at b), folded into one write:
+            // alpha a + (1 - a) b, colour weighted by each layer's contribution (b / alpha for the film).
+            // Interpolating the colour by b alone pulls a see-through liquid's film toward the opaque
+            // residue pigment while the alpha is still near 1: the trail reads denser than the column.
+            if (b > 0) { const A = a + (1 - a) * b; c = blend565(c, pal.rows[ry], b / A); a = A; }
             if (a >= 1 / 255) pxa(x, y, c, Math.min(1, a));
           }
         }
