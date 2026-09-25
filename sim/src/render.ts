@@ -90,7 +90,7 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   const rows = new Uint16Array(H);
   const traceRows = new Uint16Array(H);
   const bubbleIn = new Uint16Array(H);
-  const bubbleRimRows = new Uint16Array(H), rimC = hexToRgb(p.bubbleRim);
+  const bubbleRimRows = new Uint16Array(H), rimC = hexToRgb(p.bubbleRim), rowL = new Float32Array(H);
   // The lit rim colour after the panel clip: bright presets push it past white, so the row shading is
   // applied to the clipped colour (otherwise it saturates away). Capped below white so the pinpoint reads.
   const rimLit = scale(rimC, br).map((v) => Math.min(255, v)) as [number, number, number];
@@ -172,10 +172,13 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     traceRows[y] = q(scale(rgb565to888(q(residue)), 0.85));
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
-    // Fizz ring follows the cylinder's light: the glassW style/Lambert mix, without the highlight tent and reflections.
-    const amb = 0.5 + 0.5 * Math.cos((t - 0.3) * Math.PI * 1.6), wr = amb + (lambert(y) - amb) * p.lightPhys;
-    bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.35 + 0.45 * wr), bodyL, ambAmt));
+    rowL[y] = luma(c);
   }
+  // Fizz ring: the lit rim shaded exactly as the liquid is at that row (its luma relative to the brightest row),
+  // capped at 0.8 so the white pinpoint reads above it. A fixed light ramp used to floor at 0.35 and left bubbles
+  // darker than the liquid around them on shallow-shaded presets with a dark bubbleRim.
+  const rowLMax = Math.max(1, ...rowL);
+  for (let y = 0; y < H; y++) bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.8 * rowL[y] / rowLMax), bodyL, ambAmt));
   return {
     rows, traceRows, tubeBackRows, body: q(scale(body, br)), tubeBack: q(scale(tubeBack, p.brightness)),
     bubbleRim: q(ambientize(scale(rimC, br), bodyL, ambAmt)), bubbleIn, bubbleRimRows, dryT,
@@ -1513,7 +1516,9 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const depthK = 1 - p.fizzDepth * f.z * (1 - p.liquidTransparency);
       const tintA = p.bubbleDark * depthK;   // interior: a dark tint over the liquid as-is (the bubble is see-through), fading with depth
       const cBlickD = depthK < 1 ? blend565(pal.rows[fy], blickC, depthK) : blickC;   // the pinpoint sinks with the bubble
-      const m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;
+      // Ring 1 px thick at its thinnest (core radius r − 1); the core shifts away from the light by fizzShadeOff·r,
+      // clamped so its centre stays in the disc: the ring thickens on the lit side, may open on the shaded side.
+      const m = fizzMag(mag, H, f.y, r), ry = r / m, off = Math.min(r * p.fizzShadeOff, r - 1);
       // Light direction in unsquashed disc space (liquid frame): x fixed toward screen-left, y toward the highlight row.
       const ly = Math.max(-1, Math.min(1, (yHi - f.y) / (H / 2))), nrm = 1 / Math.sqrt(lxS * lxS + ly * ly);
       const dirX = lxSign * lxS * nrm, dirY = ly * nrm;
@@ -1539,7 +1544,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
           if (ix < sL && bL > 0) { const a1 = Math.min(ix + 1, sL), a0 = Math.max(ix, sL - bL);
             if (a1 > a0) { const q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - veilA * (a1 - a0) * (1 - q) * (1 - pullL * q); } }
           const cx = dx - offX, cy = dy - offY, dc = Math.sqrt(cx * cx + cy * cy);
-          const inCore = r >= 1.5 && dc < r - 1 - off;
+          const inCore = r >= 1.5 && dc < r - 1;
           let g = 0;
           if (blick) { const ex = dx - bX, ey = dy - bY; g = p.fizzBlick * Math.max(0, Math.min(1, rb + 0.5 - Math.sqrt(ex * ex + ey * ey))); }
           if (inCore) {

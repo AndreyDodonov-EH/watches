@@ -44,6 +44,13 @@ firmware `discRowT` + the per-bubble setup, both from the same formulas):
   (fizzSize 5.5, bubbleDark 0.27): opaque 5.34 ms vs see-through 5.64 ms, quick-mode noise. The user's extreme
   scene (120 bubbles of size 16, 92 % transparent): 26.6 ms opaque, 29.6 ms with a 0.06 tint (every interior
   pixel blends), 25.7 ms at tint 0 — the ring's bounding-box arithmetic dominates, not the interior (KAIZEN).
+- **Rim shading and core rule (same day, user's olive preset: "bubbles sometimes too dark"):** the ring's row factor
+  is now `0.8 · luma(rows[y]) / max luma` — the rim darkens exactly as the liquid does at that row, no more (the
+  fixed 0.35–0.80 light ramp left bubbles darker than a shallow-shaded liquid around them when `bubbleRim` is
+  darker than the body). The core radius is `r − 1` (ring 1 px at its thinnest) and `fizzShadeOff` only shifts
+  it, clamped to `r − 1`: with a large offset small bubbles used to lose their core entirely (`r − 1 − off ≤ 0`)
+  and drew as solid discs of rim colour; now they are lit crescents with a see-through interior. Board, user's
+  preset: fizz stage 4.9 ms (quick mode).
 - The morning's "baseline" (3.59 ms) was on a different preset: the v23 schema CRC reset NVS to `presets/1.json` at
   first flash. Leftovers (KAIZEN): no depth sort, uniform ring brightness around the bubble, centre-row tint target
   for core/pinpoint, bench tooling gaps (preset pinning, IMU-dead boots, live-IMU runs).

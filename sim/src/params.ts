@@ -1152,7 +1152,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzCount: { help: 'Number of fizz bubbles in a full tube.', group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 120, step: 1 },
   fizzSize: { help: 'Fizz bubble size, px.', group: 'Bubble', min: 1, max: 16, step: 0.5 },
   fizzSizeVar: { help: 'Per-bubble size spread. 0 = all equal; 1 = 0.5x..1.5x. Bigger bubbles rise faster.', group: 'Bubble', label: 'fizz size spread', min: 0, max: 1, step: 0.05 },
-  fizzShadeOff: { help: 'Offset of the dark core away from the light (direction from the highlight angle, magnitude here), as a fraction of radius. Thickens the rim on the lit side.', group: 'Bubble', label: 'fizz shade offset', min: 0, max: 1, step: 0.05 },
+  fizzShadeOff: { help: 'Shift of the see-through interior away from the light (direction from the highlight angle, magnitude here), as a fraction of radius, at most radius − 1. The ring is 1 px at its thinnest; the shift thickens it on the lit side and can open it on the shaded side (a lit crescent).', group: 'Bubble', label: 'fizz shade offset', min: 0, max: 1, step: 0.05 },
   fizzSpeed: { help: 'Fizz rise speed, px/s.', group: 'Bubble', min: 0, max: 60, step: 1 },
   fizzDriftGain: { help: 'Fraction of rise speed steered toward the high end per g of along-tilt.', group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
   fizzAcrossGain: { help: 'Across-tilt → on-screen rise direction. 1 = rises toward the physically high edge.', group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },
