@@ -68,7 +68,7 @@ export interface Params {
   bubbleH: number;       // px
   bubbleGap: number;     // px, distance from fill edge to bubble centre
   bubbleY: number;       // 0..1 vertical position in the tube (0.5 = centre, like a spirit level)
-  bubbleDark: number;    // 0..1, darkening of bubble interior
+  bubbleDark: number;    // 0..1, fizz: opacity of the dark tint over the see-through interior; spirit bubble: darkening of its fill
   bubbleRollGain: number; // 0..2 bubble rise toward the high wall per g of across-tilt (1 = follows the wall)
   bubbleTiltGain: number; // px the bubble slides toward the high end per g of along-tilt
   // --- fizz (small drifting bubbles, like the reference photo) ---
@@ -1140,7 +1140,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   glowStrength: { help: 'Brightness of the glow at the edge.', group: 'Shape', min: 0, max: 1, step: 0.01 },
   cornerR: { help: 'Rounding of the column left end (tube end cap), px.', group: 'Shape', min: 0, max: 36, step: 1 },
   edgeLightGain: { help: 'How much along-tilt brightens (+) / dims (-) the fill-edge light.', group: 'Shape', label: 'edge light vs tilt', min: -1, max: 2, step: 0.05 },
-  bubbleDark: { help: 'Darkening of bubble and fizz interiors.', group: 'Bubble', label: 'bubble & fizz dark', min: 0, max: 1, step: 0.01 },
+  bubbleDark: { help: 'Fizz: opacity of a dark tint over a bubble\'s see-through interior (the liquid and what is behind it show as they are; 0 = a bare ring, the cheapest). Spirit-level bubble: darkening of its fill.', group: 'Bubble', label: 'bubble & fizz dark', min: 0, max: 1, step: 0.01 },
   bubble: { help: 'Show the spirit-level bubble.', group: 'Bubble' },
   bubbleW: { help: 'Bubble width, px.', group: 'Bubble', min: 2, max: 40, step: 1 },
   bubbleH: { help: 'Bubble height, px.', group: 'Bubble', min: 2, max: 30, step: 1 },

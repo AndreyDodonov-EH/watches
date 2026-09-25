@@ -327,3 +327,6 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   A legacy `pbegin`/`pcommit` would make a preset load atomic.
 - `e2e.sh --ref` across a PARAMS_SCHEMA_CRC change loses the board's NVS-tuned params (each flash resets them);
   a `p?` save before and replay after the A/B would keep them.
+- Fizz kernel cost is per bounding-box pixel (~60 cycles), not per drawn pixel: a 16 px bubble's box is ~450 px for a
+  ~150 px ring. Clipping each row to the outer disc chord (one sqrtApprox per row) would drop the ~250 outside pixels;
+  the see-through interior skip already jumps the core. Heavy scenes (120 bubbles of size 16) stay ~25 ms regardless.

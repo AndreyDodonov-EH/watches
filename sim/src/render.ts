@@ -1511,7 +1511,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       // Seen through liquid in proportion to its depth: the liquid in front tints a deeper bubble toward the
       // body colour (a colour mix, so the disc stays an opaque store as before: rear marks are behind the bubble).
       const depthK = 1 - p.fizzDepth * f.z * (1 - p.liquidTransparency);
-      const cInD = depthK < 1 ? blend565(pal.rows[fy], pal.bubbleIn[fy], depthK) : pal.bubbleIn[fy];
+      const tintA = p.bubbleDark * depthK;   // interior: a dark tint over the liquid as-is (the bubble is see-through), fading with depth
       const cBlickD = depthK < 1 ? blend565(pal.rows[fy], blickC, depthK) : blickC;   // the pinpoint sinks with the bubble
       const m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;
       // Light direction in unsquashed disc space (liquid frame): x fixed toward screen-left, y toward the highlight row.
@@ -1539,12 +1539,19 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
           if (ix < sL && bL > 0) { const a1 = Math.min(ix + 1, sL), a0 = Math.max(ix, sL - bL);
             if (a1 > a0) { const q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - veilA * (a1 - a0) * (1 - q) * (1 - pullL * q); } }
           const cx = dx - offX, cy = dy - offY, dc = Math.sqrt(cx * cx + cy * cy);
-          let c = r >= 1.5 && dc < r - 1 - off ? cInD : cRimD;
-          if (blick) {
-            const ex = dx - bX, ey = dy - bY, g = p.fizzBlick * Math.max(0, Math.min(1, rb + 0.5 - Math.sqrt(ex * ex + ey * ey)));
-            if (g > 0) c = blend565(c, cBlickD, g);   // specular: neutral room light, panel-dimmed, depth-tinted
+          const inCore = r >= 1.5 && dc < r - 1 - off;
+          let g = 0;
+          if (blick) { const ex = dx - bX, ey = dy - bY; g = p.fizzBlick * Math.max(0, Math.min(1, rb + 0.5 - Math.sqrt(ex * ex + ey * ey))); }
+          if (inCore) {
+            // See-through interior: the liquid and whatever is behind it stay as they are; only the pinpoint (specular,
+            // neutral room light, panel-dimmed, depth-tinted) or the dark tint is laid over, one write, nothing at tint 0.
+            // Pinpoint and tint fused: out = bg·(1 − A) + blick·cov·g with A = cov·(g + tint·(1 − g)), as one blend of
+            // blick·g/(g + tint·(1 − g)) at A — no untinted hole under the pinpoint's AA fringe (a division only there).
+            if (g > 0) { const w = g + tintA * (1 - g); pxa(mapX(ix + xsI), y0 + iy, tintA > 0 ? blend565(0, cBlickD, g / w) : cBlickD, cov * w); }
+            else if (tintA > 0) pxa(mapX(ix + xsI), y0 + iy, 0, cov * tintA);
+            continue;
           }
-          pxa(mapX(ix + xsI), y0 + iy, c, cov);
+          pxa(mapX(ix + xsI), y0 + iy, g > 0 ? blend565(cRimD, cBlickD, g) : cRimD, cov);
         }
       }
     }

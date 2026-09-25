@@ -117,7 +117,7 @@ int main() {
     Params p=PRESET_DEFAULT;
     p.fizz=i%3 != 0; p.bubble=i%5 == 0; p.digitFont=i%12;
 #ifdef BIG_FIZZ   // fizz forced on; size / blick / depth cycles decorrelated from each other and from remaining (i&1)
-    p.fizz=true; p.fizzCount=60; p.fizzSize=i%3==0?5:i%3==1?14:3; p.fizzSizeVar=0.65f; p.fizzBlick=((i/3)%2)*0.6f; p.fizzDepth=((i/6)%4)/3.0f;
+    p.fizz=true; p.fizzCount=60; p.fizzSize=i%3==0?5:i%3==1?14:3; p.fizzSizeVar=0.65f; p.fizzBlick=((i/3)%2)*0.6f; p.fizzDepth=((i/6)%4)/3.0f; p.bubbleDark=((i/12)%3)*0.5f;
 #endif
     p.digitsOnTop=i%7 == 0; p.ticksOnTop=i%5 == 0;
     p.digitShadow=i%3 != 0; p.digitShadowOffset=1+i%4;

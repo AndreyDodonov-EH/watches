@@ -34,6 +34,16 @@ firmware `discRowT` + the per-bubble setup, both from the same formulas):
   gap at all; the remaining cost is not in the pixel arithmetic that was changed. Last board build predates the
   pinpoint depth tint (one blend per bubble). Screenshots: `fizzSize 14` on cola/champagne, transparency 0/0.5/1,
   across ±0.8, remaining, free slug, real sizes on six presets.
+- **See-through interiors (same day, from the user's board test):** a fizz bubble's interior is no longer filled.
+  `bubbleDark` is now the opacity of a black tint over the liquid as-is (0 = bare ring; the spirit-level bubble keeps
+  its filled `bubbleIn`), scaled by the depth factor; the pinpoint and the tint are fused into one premultiplied
+  write (`blick·g/(g + tint·(1−g))` at `cov·(g + tint·(1−g))`, Astra's fix for the untinted hole under the
+  pinpoint's AA fringe). Rear ticks/digits show through the rings. Firmware jumps over the interior span per row
+  when tint 0 and no pinpoint on that row (output-neutral: `--big-fizz` now cycles bubbleDark 0/0.5/1 and is
+  byte-identical against the kernel without the skip). Board, `e2e.sh --ref 1366e97` on the board's own preset
+  (fizzSize 5.5, bubbleDark 0.27): opaque 5.34 ms vs see-through 5.64 ms, quick-mode noise. The user's extreme
+  scene (120 bubbles of size 16, 92 % transparent): 26.6 ms opaque, 29.6 ms with a 0.06 tint (every interior
+  pixel blends), 25.7 ms at tint 0 — the ring's bounding-box arithmetic dominates, not the interior (KAIZEN).
 - The morning's "baseline" (3.59 ms) was on a different preset: the v23 schema CRC reset NVS to `presets/1.json` at
   first flash. Leftovers (KAIZEN): no depth sort, uniform ring brightness around the bubble, centre-row tint target
   for core/pinpoint, bench tooling gaps (preset pinning, IMU-dead boots, live-IMU runs).
