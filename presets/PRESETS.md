@@ -40,6 +40,48 @@ Pinot noir, Aperol spritz, Cuvée, Nocturne, Bioluminescent tide and Phosphor sa
 
 Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; superseded by `glow`/`frizzante`).
 
+## Physical collection
+
+The same looks as material presets (`MATERIAL_PRESETS` in `sim/src/material/presets.ts`): each is a physical
+material (viscosity, density, surface tension, index, absorption / scattering, emission, wetting, residue, gas)
+plus the design keys (layout, backing, marks, digits) its legacy preset sets. All other legacy `Params` are
+derived by `sim/src/material/derive.ts` from `presets/materials/*.json` (the material files); the derived
+`Params` are in `presets/physical/<id>.json` (same format as the legacy JSONs, input of `gen_params.py`).
+`npm run dump:presets` writes both directories; `npm run check:materials` (section 14) checks that every entry
+derives without rejection, is coherent for its inferred class, has complete per-property provenance
+(`measured` / `estimated` / `artistic`) and that both files are fresh. Open one in the sim with
+`?material=<id>`. The classes below are the derived ones (derive's `classes`), not declared.
+
+| id | name | viscosity | opacity | gas | emissive | provenance |
+|---|---|---|---|---|---|---|
+| frizzante | Frizzante | watery | clear | carbonated | no | handbook; absorption 0 |
+| alpine | Alpine spring | watery | translucent | carbonated | no | handbook; trace absorption estimated |
+| olive-oil | Olive oil | medium | translucent | none | no | handbook; absorption estimated |
+| honey | Honey | viscous | translucent | trapped | no | handbook (viscosity 20 °C ~10 Pa·s); absorption estimated |
+| blood | Blood | medium | opaque | none | no | handbook; optical coefficients from tissue-optics literature (reduced scattering) |
+| milk | Milk | medium | opaque | none | no | handbook (viscosity at ~10 °C); scattering estimated |
+| mercury | Mercury | metal | opaque | none | no | handbook; reflectance estimated |
+| cola | Cola | watery | translucent | carbonated | no | estimated |
+| champagne | Champagne | watery | translucent | carbonated | no | handbook; absorption estimated |
+| cuvee | Cuvée | watery | translucent | carbonated | no | handbook; absorption estimated |
+| ink | India ink | medium | opaque | none | no | estimated |
+| nocturne | Nocturne | medium | opaque | none | no | estimated |
+| glow | Glow stick | medium | opaque | none | yes | artistic emission; fluid estimated |
+| xenon | Xenon | plasma | translucent | none | yes | density handbook (xenon gas at STP); emission artistic |
+| molten | Molten iron | metal | opaque | trapped | yes | handbook (1600 °C); emission artistic |
+| urine | Urine sample | watery | translucent | none | no | handbook; absorption estimated |
+| malt | Single malt | medium | translucent | none | no | handbook (40 % ethanol); absorption estimated |
+| cryo | Cryo oxygen | watery | clear | boiling | no | handbook (90 K) |
+| pinot | Pinot noir | watery | opaque (on parchment) | none | no | handbook (12 % ethanol); absorption estimated |
+| spritz | Aperol spritz | watery | opaque (on white) | carbonated | no | estimated |
+| tide | Bioluminescent tide | watery | opaque | carbonated | yes | sea water handbook; emission artistic |
+| phosphor | Phosphor sample | watery | opaque (on white paper) | none | no | estimated |
+
+Design changes against the legacy look, each forced by a derive rejection: olive-oil `digitBright` 2 → 1.8,
+cuvee `tickBright` 1.5 → 1.3, pinot and spritz `tickBright` 2 → 1.3, `digitBright` 2 → 1.8. Glow derives
+opaque: its emission is summed into the body in linear light, and a bright emitter over a dark backing can
+only be shown near opaque (`T_up`). Xenon keeps the legacy design (`freeLiquid` false: a plasma is pinned).
+
 ## Base look (from `examples/`)
 
 All liquids are built over `MODERN_BASE` in `params.ts` (= `examples/nice_meniscus.json` minus its colours

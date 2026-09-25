@@ -1,6 +1,38 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-25 (per-bubble fizz shading: depth fade, light-relative core, pinpoint, params v23)_
+_Last update: 2026-09-25 (physical materials: derived liquids, params v24 rim light, standalone physical renderer retired)_
+
+## Physical materials: liquids derived from physical properties (2026-09-25, astra-loop)
+
+The physical simulator is finished as a **material layer over the legacy renderer**, not as the phase-1 standalone renderer
+(retired the same day). A liquid is authored from 30 physical properties (`spec/material-schema.json`: refractive index,
+absorption RGB in 1/mm, reduced scattering, emission, metallic, phase, density, viscosity, surface tension, contact angle
+and hysteresis, solids fraction, drying time, gas mode/level/bubble radius/foam, bore radius, wall, wall index, light
+elevation/size/intensity, ambient, exposure) plus a design object (marks, layout, backing, watch behaviour: the
+`design.allow` list). `derive(material, design)` (`sim/src/material/derive.ts`, laws in `docs/physical-renderer.md`) fills
+every legacy `Params` key — colour by two-flux Kubelka–Munk per channel on the cylinder trace, transparency as the two-pass
+transmittance bounded by what the legacy scalar mix can show, dynamics through one viscosity coordinate `μ/(ρr²)`, Ohnesorge,
+capillary number and capillary length (Cox–Voinov dynamic angle, Landau–Levich film, Stokes bubble rise) mapped onto the
+watch's slowed regime by anchored monotone maps — and rejects (11 numbered reasons) instead of clamping. Every derived
+`Params` passes the unchanged preset coherence rules (`sim/src/material/coherence.ts`, extracted from `check-presets.ts`),
+so realism is by construction: `npm run check:materials` (≈1000 fixtures: doc fixtures, class boundaries, monotone
+viscosity sweep, 800 seeded random materials × designs, real `buildPalette` centre and wall rows at 0 levels).
+- **Sim**: "physical material" mode on the main page (`sim/src/material/ui.ts`): physical controls, derived legacy rows
+  locked and shown live, design rows editable, `?material=<id>&m.<key>=`, envelope import/export, `check:material-ui`.
+- **Collection**: 22 material presets (`sim/src/material/presets.ts`, `presets/materials/*.json`, derived
+  `presets/physical/*.json` for `gen_params.py` / `e2e.sh`), provenance per property; `images/presets/physical/`.
+- **Renderer/firmware**: Params **v24** adds `rimLight`/`rimTint` (side-lit rim of a tinted liquid on a dark ground,
+  additive `rimLight·u²·rimTint` per row; 0 in every legacy preset ⇒ byte-identical; mirrored in `render.cpp`,
+  `gen_params.py`, presets regenerated; NVS schema CRC 0xb28ec40d → 0x91818d7f, the board drops its saved blob once).
+  The phase-1 standalone renderer (`physical.html`, `firmware/src/physical`, `R physical` / `Pbegin…` protocol, 343 KB
+  PSRAM layers) is removed; its TS optical kernel lives on under `sim/src/material/optics/`.
+- **Board** (2026-09-25, e2e.sh, ESP32-S3 via WSL): `presets/physical/honey.json` flashed and pinned — 46.1 fps, render
+  14.89 ms (median of 3 runs × 5), IMU alive, no reboots; parity against the sim on honey `mismatched 1158 of 49312
+  (2.35 %), >12/255 off: 0`, the rim band visible on the device; blood 60.8 fps / 9.25 ms. The e2e log's own parity
+  line (117 px > 12/255) was taken on the board's restored default preset, not honey (KAIZEN: e2e.sh --preset parity).
+- Limits (KAIZEN): the legacy scalar transparency cannot show a colour-filtered backing, so tinted liquids on light backings
+  derive opaque with the colour in the body (rear marks hidden); clear liquids' haze clamps in the mix; emissive bodies
+  render flat; a weakly self-lit liquid cannot keep the room light (binary emissive rule).
 
 ## Per-bubble fizz shading (2026-09-25, astra-loop)
 

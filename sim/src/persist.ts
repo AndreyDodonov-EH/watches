@@ -6,6 +6,9 @@
 // DEFAULT_PARAMS, since a stored value always wins over a new default for a key that already existed.
 import { DEFAULT_PARAMS, migrateParams, type Params } from './params';
 import { DEFAULT_OVERLAY, type OverlayOpts } from './overlay';
+import {
+  DEFAULT_MATERIAL, MATERIAL_ENVELOPE_KIND, MATERIAL_VERSION, parseMaterialEnvelope, type Design, type Material, type MaterialProvenance,
+} from './material/model';
 
 const KEY = 'liquid-watch-session-v1';
 const LEGACY_PARAMS = 'liquid-watch-params-v2'; // params-only store used before the session blob
@@ -25,7 +28,36 @@ export const DEFAULT_VIEW: ViewState = {
   scale: 0.5, showGrid: false, paused: false, timeMode: 'real', demoSpeed: 60,
   setClock: { h: 10, m: 9 }, manual: { along: 0, across: 0 }, overlay: { ...DEFAULT_OVERLAY },
 };
-export interface Session { params: Params; view: ViewState }
+/** Physical-material mode (material/ui.ts): in 'material' mode `params` is derive(material, design).
+ *  `name` / `provenance` are the envelope metadata of the loaded material (a preset's or an imported
+ *  file's), carried to the export; absent for a material with none. */
+export interface MaterialState {
+  mode: 'legacy' | 'material'; material: Material; design: Design; name?: string; provenance?: MaterialProvenance;
+}
+export const defaultMaterialState = (): MaterialState => ({ mode: 'legacy', material: { ...DEFAULT_MATERIAL }, design: {} });
+export interface Session { params: Params; view: ViewState; material: MaterialState }
+
+/** A stored material state, validated as a material envelope (material, design, optional name and
+ *  provenance) plus the mode; anything invalid falls back to legacy mode with the defaults. */
+function loadMaterialState(raw: unknown): MaterialState {
+  if (typeof raw !== 'object' || raw === null) return defaultMaterialState();
+  const o = raw as Record<string, unknown>;
+  try {
+    if (o.mode !== 'legacy' && o.mode !== 'material') throw new Error(`mode ${String(o.mode)}`);
+    const has = (k: string): boolean => Object.prototype.hasOwnProperty.call(o, k);
+    const env = parseMaterialEnvelope({
+      kind: MATERIAL_ENVELOPE_KIND, version: MATERIAL_VERSION, material: o.material, design: o.design,
+      ...(has('name') ? { name: o.name } : {}), ...(has('provenance') ? { provenance: o.provenance } : {}),
+    });
+    return {
+      mode: o.mode, material: env.material, design: env.design,
+      ...(env.name !== undefined ? { name: env.name } : {}), ...(env.provenance ? { provenance: env.provenance } : {}),
+    };
+  } catch (error) {
+    console.warn(`stored material state ignored (${(error as Error).message}); legacy mode`);
+    return defaultMaterialState();
+  }
+}
 
 function read(key: string): Record<string, unknown> | null {
   try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : null; } catch { return null; }
@@ -36,7 +68,7 @@ function read(key: string): Record<string, unknown> | null {
 export function loadSession(fresh = false): Session {
   const params: Params = { ...DEFAULT_PARAMS };
   const view: ViewState = { ...DEFAULT_VIEW, overlay: { ...DEFAULT_OVERLAY }, setClock: { ...DEFAULT_VIEW.setClock }, manual: { ...DEFAULT_VIEW.manual } };
-  if (fresh) return { params, view };
+  if (fresh) return { params, view, material: defaultMaterialState() };
   const stored = read(KEY);
   const v = stored?.view as Partial<ViewState> | undefined;
   const storedParams = (stored?.params as Record<string, unknown> | undefined) ?? read(LEGACY_PARAMS);
@@ -52,7 +84,7 @@ export function loadSession(fresh = false): Session {
     view.setClock = { ...DEFAULT_VIEW.setClock, ...v.setClock };
     view.manual = { ...DEFAULT_VIEW.manual, ...v.manual };
   }
-  return { params, view };
+  return { params, view, material: loadMaterialState(stored?.material) };
 }
 
 let pending: Session | null = null;

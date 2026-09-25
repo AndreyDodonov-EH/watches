@@ -4,7 +4,13 @@ import { DEFAULT_PARAMS, PARAM_META, PRESETS, migrateParams, presetParams, type 
 /** `key` is set for a single-field edit; absent for preset/import/reset (whole struct changed). */
 export interface UiHooks { onChange: (key?: keyof Params) => void; }
 
-export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refresh: () => void } {
+export interface Panel {
+  refresh: () => void;
+  /** Disable the inputs (range + numeric twin, colour, checkbox, select) of `keys`; every other key is enabled. */
+  setLocked: (keys: ReadonlySet<string>) => void;
+}
+
+export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): Panel {
   const inputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
   const groups = new Map<string, HTMLElement>();
   const grp = (name: string): HTMLElement => {
@@ -18,7 +24,7 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   };
   for (const key of Object.keys(PARAM_META) as (keyof Params)[]) {
     const meta = PARAM_META[key];
-    const row = document.createElement('label'); row.className = 'row';
+    const row = document.createElement('label'); row.className = 'row'; row.dataset.key = key;
     const name = document.createElement('span'); name.textContent = meta.label ?? key; name.title = meta.help ? key + '\n' + meta.help : key; row.appendChild(name);
     const v = p[key];
     const inp = typeof v === 'number' && meta.options ? document.createElement('select') : document.createElement('input');
@@ -81,5 +87,14 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): { refr
   btn('Import JSON', () => file.click());
   bar.appendChild(file);
   root.prepend(bar);
-  return { refresh };
+  const setLocked = (keys: ReadonlySet<string>) => {
+    for (const [k, inp] of inputs) {
+      const locked = keys.has(k);
+      inp.disabled = locked;
+      const twin = inp.nextElementSibling;
+      if (twin instanceof HTMLInputElement) twin.disabled = locked;
+      inp.closest('.row')?.classList.toggle('locked', locked);
+    }
+  };
+  return { refresh, setLocked };
 }

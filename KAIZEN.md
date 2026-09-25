@@ -48,9 +48,9 @@
 ## Tooling / firmware
 - Push all writes fields one at a time, so the board renders transient combinations (e.g. new
   `tubeHeight` with the old fizz positions, which used to hit the task watchdog). A `Pbegin`/`Pcommit`
-  transaction like the physical renderer's would apply a whole preset atomically.
-- Internal heap on the board idles at ~19 KB free (`s`: heap 19676) with the physical renderer's
-  343 KB resident; watch it before adding anything that allocates at runtime (BLE, NVS writes).
+  transaction like the retired physical renderer's would apply a whole preset atomically.
+- Internal heap on the board idled at ~19 KB free (`s`: heap 19676) with the (retired 2026-09-25) physical
+  renderer's 343 KB PSRAM layers resident; re-measure; watch it before adding anything that allocates at runtime (BLE, NVS writes).
 - A task-wdt reboot while the browser holds the serial port leaves the panel black until a manual
   reset (host DTR/RTS state during re-enumeration); the sim could detect the boot banner and reconnect.
   Same root as the close-reset: on the S3's USB-serial-JTAG, DTR low with RTS high is a reset.
@@ -61,8 +61,7 @@
 - `f` now includes whole-frame p95; physics, IMU I2C and serial poll still lack separate cost figures.
 - Fixed clock (`d0` + `t`/`T`) can sit milliseconds before the requested second because demo offset
   advances on fixed physics ticks; at a minute boundary `s` can consequently show the preceding minute.
-- COM6 bridge reopen reverted volatile physical mode to legacy during testing; capture/select in one
-  connection. Audit the Windows driver's close/open reset behavior separately.
+- COM6 bridge reopen reverted the (now retired) volatile physical mode to legacy during testing. Audit the Windows driver's close/open reset behavior separately.
 - Firmware autosaves every `p` write after 2 s, so tooling pins (`bench.py` `inputGain 0`, the `x` dump's
   `fizz 0`) reach NVS mid-run and survive if the session closes before the restore is flushed. A volatile
   write (`p~name=value`, no autosave) would make pins safe by construction.
@@ -77,6 +76,8 @@
 - Board keeps flipping between Windows COM6 and WSL `/dev/ttyACM0` (usbipd auto-attach?); re-enumeration
   looks like a reset from the firmware side. Decide one home for it.
 - Clock is lost on every esptool flash (no RTC battery) — `flash.sh` could re-send `T <epoch>` afterwards.
+- run-sim shots are not repeatable: two `material=honey&settle=1&fresh=1` shots differ in ~170 px (fizz/bubble positions are
+  unseeded), so before/after pixel diffs carry that noise; a `seed=` URL param would make shot comparisons exact.
 
 ## Rendering: incrementality / optimisation — primarily for POWER (memory wins too)
 _Added 2026-08-20 after Phase 3 (liquid face live, 38–40 fps)._
@@ -322,7 +323,7 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Fizz depth fade tints the core and pinpoint toward the CENTRE row's body colour (one blend per bubble; the rim per row): at
   full extinction a big bubble across the highlight band leaves a faint flat-coloured footprint. Per-row targets fix it at
   ~0.4 ms on a 240-bubble scene (Astra review, 2026-09-25); a 4-level depth quantisation with per-row tint tables would be free.
-- `Pbegin`/`P k=v`/`Pcommit` only stage the physical renderer's params; legacy `p` params have no batch, so
+- The retired physical renderer's `Pbegin`/`P k=v`/`Pcommit` was the only batch; legacy `p` params have none, so
   `bench.py --preset` sends ~100 single `p` writes (each re-renders a half-applied look and re-arms the NVS autosave).
   A legacy `pbegin`/`pcommit` would make a preset load atomic.
 - `e2e.sh --ref` across a PARAMS_SCHEMA_CRC change loses the board's NVS-tuned params (each flash resets them);
@@ -330,3 +331,53 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Fizz kernel cost is per bounding-box pixel (~60 cycles), not per drawn pixel: a 16 px bubble's box is ~450 px for a
   ~150 px ring. Clipping each row to the outer disc chord (one sqrtApprox per row) would drop the ~250 outside pixels;
   the see-through interior skip already jumps the core. Heavy scenes (120 bubbles of size 16) stay ~25 ms regardless.
+- PRESETS.md rules drift from coherence.ts: translucent shadeDepth doc 0.5–0.85 vs code 0.4–0.85; emissive liquidBright doc 1.15–1.35 vs code 1.15–1.5.
+- coherence.ts fizz range messages say "for <viscosity>" (e.g. "for watery") where the range comes from the gas class; unclear wording.
+- coherence.ts luma(#101010) = 15.999… so a grey-16 tube back passes the emissive "luma < 16" rule (float edge).
+- coherence.ts `check` had an unused `id` param (dropped in coherenceIssues); tsc CLI tool builds (check:presets etc.) run non-strict.
+- material/model.ts validateDesign checks only the JS type (+ hex for strings) of design numbers: Params has no bounds metadata, so `tubeHeight: 9999` passes; bounds would need a Params range table (gen_params.py has some).
+- Two exported `Material` types now: params.ts (class tags viscosity/opacity/…) and material/model.ts (30 physical numbers); renaming the params.ts one (e.g. `MaterialClass`) would avoid alias imports.
+- Physical materials (2026-09-25): the coherence checker's opacity bands leave gaps (0.12–0.25, 0.55–0.7); the derivation snaps
+  a computed transparency to the nearer band edge, a visible jump while sliding absorption. Continuous bands would remove it.
+- The checker's emissive rules are binary (lightPhys 0, dark backing); a weakly self-lit liquid in room light (the tide look)
+  cannot be expressed by the derivation — `lightPhys ∝ 1 − emission share` would need the rule relaxed.
+- The legacy palette cannot show a haze brighter than (1 − T)·255 on a clear liquid (its colour and mark visibility share
+  `liquidTransparency`), so the derived body of clear liquids clamps; a separate haze term in `buildPalette` would fix it.
+- Fixture numbers in docs/physical-renderer.md came from a Python prototype in the session scratchpad; derive.ts is the
+  reference from block B on.
+- derive: the KM ground reflectance lin(back)·E_b/E_l is capped at 1 (a near-white backing under a low wide light gives up
+  to 1.41 and makes the K→0 branch singular); an illumination-split two-flux model would not need the cap.
+- derive: the emissive dark-backing rejection uses luma ≥ 16 (the checker's `< 16`), the doc says "brighter than 16".
+- derive: rejection 11 (coherence) is evaluated only when no material rejection (1–6, 8–10) fired, so a rejected
+  material lists its own reason, not the checker's echo of it; a design error on a rejected material shows up on retry.
+- check:imu fails at HEAD ca81f30 already (alpine/pinot/spritz/cuvee/tide "reading did not settle (160.8)").
+- derive: surfaceBlick = 0.9·highlightBright gives 1.17 for metal (highlightBright 1.3), above the UI range 0..1.
+- Material mode: the legacy compositor's scalar `liquidTransparency` mixes the raw backing, so a tinted liquid on a light
+  backing (spritz, pinot, phosphor on paper) derives opaque and its rear marks vanish behind the liquid; physically they show
+  through the least-absorbed channel. A per-channel transparency in `buildPalette`/`throughLiquid` would restore them.
+- Legacy LAYOUT_WIDE (tubeHeight 55, minutesY 224) and olive-oil (60 px at 185) rely on tubeLayout's silent clamp; derive rejects
+  them (rejection 7), so material presets write the clamped row (185 / 180). Normalising the legacy presets would remove the gap.
+- Legacy olive-oil preset has digitBright 2.0, above the coherence trim range [0.8, 1.8] (it has no `mat`, so nothing checks it).
+- main.ts `flush()` is not serialised: a push batch that takes > 50 ms can overlap the next one. Material mode pushes every key
+  on a whole-state change (mode entry, preset, import), so a slow BLE link would see interleaved batches.
+- Legacy panel number twins print raw floats (derived values show e.g. 0.525130…); a per-step display format would read better.
+- Legacy cuvee tickBright 1.5 and pinot/spritz tickBright/digitBright 2 sit outside the coherence trim ranges (no `mat`, unchecked).
+- Material mode, body emission was added in encoded 8-bit space (molten iron derived cream instead of orange); the fix sums
+  C + E in linear light before encoding. Any future "add light" law must add in linear.
+- Material mode: T_up lets a pre-image reach 255 levels, but rejection 9 fires at luma 248 (the highlight floor's headroom);
+  a T_up ceiling of ~247 would turn those rejections into a lower T (the self-lit boundary fixture moved 0.5 → 0.3 for it).
+- Emissive bodies now shade only their reflected share (liquidLo ≈ liquid for glow/tide/xenon): with lightPhys 0 they read flat;
+  a small emission-side falloff toward the walls (limb darkening of a glowing column) would restore depth.
+- Glow derives opaque now (T_up holds a bright emitter near opaque), so its rear digits vanish (markContrast 0); its design
+  may want digits on top.
+- check:meniscus has no rimLight > 0 scene; an ad-hoc run (6 physical presets × 3 scenes) gave the same parity as rimLight 0
+  (2106 vs 2228 differing px, max 9/255). Add one when the parity baseline is next re-counted.
+- Glow's wall row overshoots the target in blue by one RGB565 step (8 levels) at rim tint 0: a ~1.8-level real miss of the
+  luma-only shadeDepth fit, magnified by 5-bit truncation. Reported as `rim.bodyOver`, not rejection 12; a per-channel wall fit would close it.
+- Wall targets go through `q565` (rgb565 truncates, not nearest): the 5-level tolerance sits below the 8-level 5-bit step, so
+  any channel the fit cannot move reads 0 or 8. Comparing the RGB565 row to the unquantised target would be a fairer metric.
+- Material `name`/`provenance` stay as loaded when a field is edited in the UI or by `?m.`: an edited value keeps its preset's
+  "measured". Dropping the edited key's provenance (or the name) on edit would keep exports honest.
+- `e2e.sh --preset` benches the pinned preset but bench.py restores the board's saved params before `compare-device.py`,
+  so the logged parity line is always the board's default look, not the preset; keep the preset applied through the parity
+  step (or pass it to compare-device.py) so `--preset` runs log their own parity (found on the honey run, 2026-09-25).

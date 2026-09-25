@@ -7,5 +7,4 @@ export default defineConfig({
   base: basePath ? `${basePath.replace(/\/$/, '')}/` : '/',
   resolve: { alias: { '@spec': fileURLToPath(new URL('../spec', import.meta.url)) } },
   server: { port: 5190, strictPort: true, fs: { allow: ['..'] } },
-  build: { rollupOptions: { input: { legacy: fileURLToPath(new URL('./index.html', import.meta.url)), physical: fileURLToPath(new URL('./physical.html', import.meta.url)) } } },
 });

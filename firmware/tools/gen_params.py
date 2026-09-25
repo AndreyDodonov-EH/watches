@@ -19,7 +19,7 @@ SHEETS = [
 FIELDS = [
  ('v','int'),
  ('tubeHeight','float'),('hoursY','float'),('minutesY','float'),
- ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('tubeBack','rgb'),('tubeBack2','rgb'),('tubeBackGradient','float'),('glassHi','rgb'),('glassBody','float'),('glassHiBright','float'),('glassReflect','float'),('glassRim','float'),('glassWall','float'),('glassWallGlow','float'),('glassOverLiquid','float'),('lens','float'),('lensCurve','float'),('bubbleRim','rgb'),
+ ('liquid','rgb'),('liquidHi','rgb'),('liquidLo','rgb'),('tubeBack','rgb'),('tubeBack2','rgb'),('tubeBackGradient','float'),('glassHi','rgb'),('glassBody','float'),('glassHiBright','float'),('glassReflect','float'),('glassRim','float'),('glassWall','float'),('glassWallGlow','float'),('rimLight','float'),('rimTint','rgb'),('glassOverLiquid','float'),('lens','float'),('lensCurve','float'),('bubbleRim','rgb'),
  ('remaining','bool'),('highlightH','float'),('highlightInset','float'),('highlightBright','float'),('highlightSharp','float'),('shadeDepth','float'),('liquidThin','float'),('contactAngle','float'),
  ('contactHyst','float'),('contactDyn','float'),('capLength','float'),('meniscusLens','float'),
   ('meniscusK','float'),('meniscusDamp','float'),('meniscusInertia','float'),('wetFilm','float'),('traces','bool'),('traceAmount','float'),('traceDry','float'),('traceFollow','float'),('traceStain','float'),('traceThin','float'),('traceFilm','float'),('edgeSoft','float'),

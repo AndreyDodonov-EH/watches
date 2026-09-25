@@ -97,6 +97,7 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   const tubeBackRows = new Uint16Array(H);
   const tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
   const liquidHiScaled = scale(hi, br), glassHiScaled = scale(ghi, p.brightness);
+  const rimTint = scale(hexToRgb(p.rimTint), p.brightness);
   const bodyL = ambientBodyL(p), ambAmt = ambientAmt(p);
   /** Glass wall shading weight 0..1 for a row: specular tent on the top wall, a faint band on the
    *  lower wall, brighter outermost rows. */
@@ -152,6 +153,12 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     c = scale(c, br);
     let residue = c;
     c = mix(c, scale(back, p.brightness), p.liquidTransparency);
+    // Side-lit rim (rimLight/rimTint): light entering through the side walls of a tinted liquid on a
+    // dark ground, rising as u² toward the walls. Body only: the trace residue keeps its own shading.
+    if (p.rimLight > 0) {
+      const rk = p.rimLight * u * u;
+      c = [Math.min(255, c[0] + rk * rimTint[0]), Math.min(255, c[1] + rk * rimTint[1]), Math.min(255, c[2] + rk * rimTint[2])];
+    }
     if (y >= hiTop && y < hiTop + p.highlightH) {
       const k = Math.pow(1 - Math.abs((y - hiTop) / Math.max(1, p.highlightH - 1) - 0.5) * 2, p.highlightSharp); // tent
       c = mix(c, liquidHiScaled, Math.min(1, (0.35 + 0.65 * k) * p.highlightBright));

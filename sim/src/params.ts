@@ -18,6 +18,8 @@ export interface Params {
   glassRim: number;      // 0..1 grazing reflection across the wall band, brightest at the silhouette
   glassWall: number;     // px wall thickness at the top/bottom silhouette: dry rows behind it show no tube back (only the grazing reflection), rear marks fade out there
   glassWallGlow: number; // 0..1 the wall band lit by light piped along the glass (visible on a black tube back); plateau across the band under the grazing rim
+  rimLight: number;      // 0..4 gain: side-lit rim of a tinted liquid on a dark ground: adds rimLight·u²·rimTint to the liquid rows toward the walls
+  rimTint: string;       // colour of that rim light (8-bit, scaled by brightness)
   glassOverLiquid: number; // 0..1 how much of the glass specular is laid over the liquid too
   lens: number;          // -1..1 vertical distortion; negative compresses, positive magnifies
   lensCurve: number;     // -3..3 profile; negative reverses the distortion direction
@@ -187,7 +189,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 23;
+export const PARAMS_VERSION = 24;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -208,6 +210,8 @@ export const DEFAULT_PARAMS: Params = {
   glassRim: 0.4,
   glassWall: 4,
   glassWallGlow: 0.25,
+  rimLight: 0,
+  rimTint: '#000000',
   glassOverLiquid: 0.4,
   lens: 0.6,
   lensCurve: 1,
@@ -1073,6 +1077,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
     if (typeof lag === 'number') r.contactHyst = Math.max(0, Math.min(25, lag * 6, Math.abs(90 - a) - 1));
   }
   if (from < 23) { r.fizzDepth = DEFAULT_PARAMS.fizzDepth; r.fizzBlick = DEFAULT_PARAMS.fizzBlick; }
+  if (from < 24) { r.rimLight = DEFAULT_PARAMS.rimLight; r.rimTint = DEFAULT_PARAMS.rimTint; }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -1096,6 +1101,8 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   glassRim: { help: 'Grazing reflection across the wall band: brightest at the silhouette, fading inward.', group: 'Glass', label: 'wall rims', min: 0, max: 1, step: 0.01 },
   glassWall: { help: 'Wall thickness at the top/bottom silhouette in px. Behind it the empty tube shows no tube back (only the rim reflection) and rear marks fade out; the liquid reaches the silhouette.', group: 'Glass', label: 'wall thickness', min: 0, max: 10, step: 0.5 },
   glassWallGlow: { help: 'Light piped along the glass lights the wall band itself, so the walls read on a black tube back. Plateau across the band, the grazing rim on top.', group: 'Glass', label: 'wall glow', min: 0, max: 1, step: 0.01 },
+  rimLight: { help: 'Side-lit rim of a tinted liquid on a dark ground: adds rimLight·u²·rimTint to the liquid rows toward the walls (a gain 0..4; the sum clamps at 255).', group: 'Glass', label: 'rim light', min: 0, max: 4, step: 0.01 },
+  rimTint: { help: 'Side-lit rim of a tinted liquid on a dark ground: adds rimLight·u²·rimTint to the liquid rows toward the walls.', group: 'Glass', label: 'rim tint' },
   glassOverLiquid: { help: 'How much of the glass specular is laid over the liquid too.', group: 'Glass', label: 'specular over liquid', min: 0, max: 1, step: 0.01 },
   brightness: { help: 'Global panel dimmer (emulates cmd 0x51).', group: 'Colour', label: 'brightness (panel)', min: 0.1, max: 1, step: 0.01 },
   liquidBright: { help: 'Per-layer trim on top of brightness: liquid body, highlight, shade, bubble, fizz.', group: 'Colour', label: '· liquid trim', min: 0, max: 2, step: 0.01 },
@@ -1232,7 +1239,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   freeGain: { help: 'Slug acceleration per g of along-tilt, px/s².', group: 'Free liquid', label: 'gravity px/s²/g', min: 0, max: 2000, step: 10 },
   freeDamp: { help: 'Viscous drag on the slug, 1/s. Higher = syrup.', group: 'Free liquid', label: 'drag', min: 0, max: 20, step: 0.1 },
   freeBounce: { help: 'Restitution when the slug hits a tube end. 0 = splat, 1 = elastic.', group: 'Free liquid', label: 'end bounce', min: 0, max: 1, step: 0.05 },
-  freeHomeK: { help: 'Pull toward the home end while reading, 1/s² (critically damped).', group: 'Free liquid', label: 'home pull K', min: 1, max: 300, step: 1 },
+  freeHomeK: { help: 'Pull toward the home end while reading, 1/s² (critically damped).', group: 'Free liquid', label: 'home pull K', min: 0, max: 300, step: 1 },
   readTiltStart: { help: 'Degrees from horizontal, counting both tilt axes. Below this angle the liquid settles to the exact time; above it the home pull gradually releases.', group: 'Free liquid', label: 'read below °', min: 0, max: 89, step: 1 },
   readTiltEnd: { help: 'Degrees from horizontal at which the liquid flows completely freely. The transition is smooth; this is kept at least 1° above the reading angle.', group: 'Free liquid', label: 'fully free above °', min: 1, max: 90, step: 1 },
   playHold: { help: 'Seconds to keep flowing freely after substantial back-and-forth tilts within 2 seconds. Further tilts refresh the hold; a steady pose does not. Zero disables the hold.', group: 'Free liquid', label: 'play hold s', min: 0, max: 30, step: 0.5 },
