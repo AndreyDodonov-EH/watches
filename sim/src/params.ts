@@ -76,7 +76,7 @@ export interface Params {
   fizzCount: number;
   fizzSize: number;      // px (1..16)
   fizzSizeVar: number;   // 0..1, per-bubble size spread (bigger ones rise faster)
-  fizzShadeOff: number;  // 0..1, dark core offset toward lower-right, fraction of radius
+  fizzShadeOff: number;  // 0..1, dark core offset away from the light, fraction of radius
   fizzSpeed: number;
   fizzDriftGain: number; // 0..2 steering: fraction of rise speed that goes toward the high end per g of along-tilt
   fizzAcrossGain: number; // 0..2, across-tilt → on-screen rise direction (1 = rises toward the physically high edge)
@@ -84,6 +84,8 @@ export interface Params {
   fizzSquash: number;     // 0.5..2, extra vertical pre-squash on fizz discs at mid-height, fading to 1 at the edges
   fizzEdgeRise: number;   // 0..1, face-up rise toward the fill edge (the surface) as a fraction of fizzSpeed, so bubbles reach it at rest
   fizzFoamLife: number;   // s, mean time a bubble sits parked under the surface before it pops (0 = never parks, the old respawn)
+  fizzDepth: number;      // 0..1 how much a bubble deeper in the bore fades toward the liquid (scaled by 1 − liquidTransparency)
+  fizzBlick: number;      // 0..1 specular pinpoint on bubbles ≥ 2.5 px radius, on the lit side
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
@@ -185,7 +187,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 22;
+export const PARAMS_VERSION = 23;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -263,6 +265,8 @@ export const DEFAULT_PARAMS: Params = {
   fizzSquash: 1,
   fizzEdgeRise: 0.3,
   fizzFoamLife: 6,
+  fizzDepth: 0.7,
+  fizzBlick: 0.6,
   fizzSpeed: 14,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 16, tickMinorWidthH: 1, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMinorWidthM: 1, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
@@ -698,7 +702,7 @@ const PRESET_FREE: Partial<Params> = {
 /** User-tuned olive oil (2026-09-18), preserved independently of the material-class ranges. */
 const PRESET_OLIVE_OIL: Partial<Params> = {
   contactAngle: 15, contactHyst: 8, contactDyn: 40, capLength: 1.9,
-  v: 18, tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: false,
+  tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: false,
   liquid: '#5e5b08', liquidHi: '#8a8619', liquidLo: '#89861f',
   tubeBack: '#110b03', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#322d2a',
   glassBody: 0.32, glassHiBright: 0.77, glassReflect: 0.35, glassRim: 0.69, glassWall: 5, glassWallGlow: 0.6, glassOverLiquid: 0.64,
@@ -740,7 +744,7 @@ const PRESET_OLIVE_OIL: Partial<Params> = {
  *  Standard rod only, exempt from the material-class ranges (it keeps the current tuned slug physics). */
 const PRESET_PINOT: Partial<Params> = {
   contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
-  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#8c0a1c', liquidHi: '#ffb8c0',
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#8c0a1c', liquidHi: '#ffb8c0',
   liquidLo: '#4a0410', tubeBack: '#f1e6cf', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#5c5654',
   glassBody: 0, glassHiBright: 0.08, glassReflect: 0.2, glassRim: 0.63, glassWall: 4.5, glassWallGlow: 0,
   glassOverLiquid: 0.25, lens: -0.2, lensCurve: 0.2, bubbleRim: '#3a0a10', highlightH: 10,
@@ -778,7 +782,7 @@ const PRESET_PINOT: Partial<Params> = {
  *  through the drink. Standard rod only, on the current tuned slug physics (exempt from the class ranges). */
 const PRESET_SPRITZ: Partial<Params> = {
   contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
-  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#e8420a', liquidHi: '#f7a44c',
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#e8420a', liquidHi: '#f7a44c',
   liquidLo: '#8f1c06', tubeBack: '#fbf7ee', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#5c5654',
   glassBody: 0, glassHiBright: 0.08, glassReflect: 0.4, glassRim: 0.63, glassWall: 4.5, glassWallGlow: 0,
   glassOverLiquid: 0.6, lens: -0.2, lensCurve: 0.2, bubbleRim: '#5a1605', highlightH: 9, highlightBright: 0.4,
@@ -815,7 +819,7 @@ const PRESET_SPRITZ: Partial<Params> = {
  *  The reading pose parks the liquid; strong tilt releases it. Standard rod only. */
 const PRESET_CUVEE: Partial<Params> = {
   contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
-  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#c1a04a', liquidHi: '#fff7de',
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#c1a04a', liquidHi: '#fff7de',
   liquidLo: '#7b6229', tubeBack: '#f4f0e5', tubeBack2: '#f4f0e5', tubeBackGradient: 0, glassHi: '#9a9b8d',
   glassBody: 0, glassHiBright: 0.12, glassReflect: 0.28, glassRim: 0.55, glassWall: 4.5, glassWallGlow: 0,
   glassOverLiquid: 0.7, lens: -0.2, lensCurve: 0.2, bubbleRim: '#f4edce', highlightH: 9, highlightBright: 0.4,
@@ -852,7 +856,7 @@ const PRESET_CUVEE: Partial<Params> = {
  *  drag and draining residue make the ink feel weighty. Standard rod only. */
 const PRESET_NOCTURNE: Partial<Params> = {
   contactAngle: 30, contactHyst: 15, contactDyn: 15, capLength: 2.3,
-  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: false, liquid: '#182943', liquidHi: '#849bbc',
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: false, liquid: '#182943', liquidHi: '#849bbc',
   liquidLo: '#050b16', tubeBack: '#6d7883', tubeBack2: '#3c4652', tubeBackGradient: 2, glassHi: '#91a2b6',
   glassBody: 0.025, glassHiBright: 0.16, glassReflect: 0.13, glassRim: 0.55, glassWall: 4.5,
   glassWallGlow: 0.04, glassOverLiquid: 0.3, lens: -0.2, lensCurve: 0.2, bubbleRim: '#f4edce', highlightH: 11,
@@ -891,7 +895,7 @@ const PRESET_NOCTURNE: Partial<Params> = {
  *  cold, calm. Standard rod only, current tuned slug physics (exempt from the class ranges). */
 const PRESET_TIDE: Partial<Params> = {
   contactAngle: 20, contactHyst: 10, contactDyn: 8, capLength: 2.4,
-  v: 20, tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#0d4658', liquidHi: '#9dfaff',
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#0d4658', liquidHi: '#9dfaff',
   liquidLo: '#031419', tubeBack: '#04070b', tubeBack2: '#0a1219', tubeBackGradient: 0, glassHi: '#7fb8c4',
   glassBody: 0.05, glassHiBright: 0.25, glassReflect: 0.15, glassRim: 0.45, glassWall: 4.5,
   glassWallGlow: 0.12, glassOverLiquid: 0.35, lens: -0.2, lensCurve: 0.2, bubbleRim: '#d8ffff',
@@ -1068,6 +1072,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
     const a = typeof r.contactAngle === 'number' ? r.contactAngle : DEFAULT_PARAMS.contactAngle;
     if (typeof lag === 'number') r.contactHyst = Math.max(0, Math.min(25, lag * 6, Math.abs(90 - a) - 1));
   }
+  if (from < 23) { r.fizzDepth = DEFAULT_PARAMS.fizzDepth; r.fizzBlick = DEFAULT_PARAMS.fizzBlick; }
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -1147,7 +1152,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzCount: { help: 'Number of fizz bubbles in a full tube.', group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 120, step: 1 },
   fizzSize: { help: 'Fizz bubble size, px.', group: 'Bubble', min: 1, max: 16, step: 0.5 },
   fizzSizeVar: { help: 'Per-bubble size spread. 0 = all equal; 1 = 0.5x..1.5x. Bigger bubbles rise faster.', group: 'Bubble', label: 'fizz size spread', min: 0, max: 1, step: 0.05 },
-  fizzShadeOff: { help: 'Offset of the dark core toward lower-right, as a fraction of radius. Thickens the rim on the lit side.', group: 'Bubble', label: 'fizz shade offset', min: 0, max: 1, step: 0.05 },
+  fizzShadeOff: { help: 'Offset of the dark core away from the light (direction from the highlight angle, magnitude here), as a fraction of radius. Thickens the rim on the lit side.', group: 'Bubble', label: 'fizz shade offset', min: 0, max: 1, step: 0.05 },
   fizzSpeed: { help: 'Fizz rise speed, px/s.', group: 'Bubble', min: 0, max: 60, step: 1 },
   fizzDriftGain: { help: 'Fraction of rise speed steered toward the high end per g of along-tilt.', group: 'Bubble', label: 'fizz steers to high end', min: 0, max: 2, step: 0.05 },
   fizzAcrossGain: { help: 'Across-tilt → on-screen rise direction. 1 = rises toward the physically high edge.', group: 'Bubble', label: 'fizz rises vs across-tilt', min: 0, max: 2, step: 0.05 },
@@ -1155,6 +1160,8 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzSquash: { help: 'Extra vertical pre-squash on fizz discs at mid-height (fades to none at top/bottom), on top of lens + topLens compensation. >1 flattens the center on screen so the stronger glass magnification there rounds them.', group: 'Bubble', label: 'fizz squash', min: 0.5, max: 2, step: 0.05 },
   fizzEdgeRise: { help: 'Face-up rise toward the fill edge (the liquid surface) as a fraction of fizz speed, so bubbles reach the surface at rest. 0 = they only rise toward the viewer.', group: 'Bubble', label: 'fizz rise to surface', min: 0, max: 1, step: 0.05 },
   fizzFoamLife: { help: 'Bubbles reaching the surface park under it (following the meniscus, sliding to its corners and packing into a foam ring) and pop after this many seconds on average (each ±50 %). Shaking pops them faster; tilting the surface down releases them. 0 = respawn at the far end as before.', group: 'Bubble', label: 'foam life s', min: 0, max: 30, step: 0.5 },
+  fizzDepth: { help: 'Each bubble sits at a random depth in the bore; a deeper one is seen through more liquid and fades toward it by this much (at the back wall). Scaled by 1 − liquidTransparency: an opaque liquid shows only the front bubbles, a clear one shows all alike. 0 = every bubble at full strength.', group: 'Bubble', label: 'fizz depth fade', min: 0, max: 1, step: 0.05 },
+  fizzBlick: { help: 'Specular pinpoint on the lit side of bubbles of 2.5 px radius and up: neutral white room light (dimmed by brightness only), placed where the lit rim meets the dark core. 0 = none.', group: 'Bubble', label: 'fizz blick', min: 0, max: 1, step: 0.05 },
   ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
   tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
   tickDryLens: { help: 'Cylinder warp for rear ticks where the tube is empty. Liquid magnifies the middle; air barely lenses, and negative stretches the edges instead, so the scale visibly jumps at the fill edge. Rear parallax is liquid-only.', group: 'Ticks', label: 'dry-side lens', min: -1, max: 1, step: 0.05 },

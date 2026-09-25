@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Compare complete firmware strips against a saved reference render.cpp (native C++).
 
-Usage: python3 firmware/tools/check_render_frames.py --reference /tmp/render-before.cpp
+Usage: python3 firmware/tools/check_render_frames.py --reference /tmp/render-before.cpp [--no-fizz | --big-fizz]
+--no-fizz forces fizz off in every scene of both builds, so a fizz-only change must stay byte-identical.
+--big-fizz gives the random group large bubbles (sizes 3/5/14, spread 0.65, blick and depth fade cycling) so the
+disc interior, core, pinpoint and depth paths are exercised; both builds see the same scenes.
 Host-only ESP stubs; no board, firmware allocation changes, or checked-in golden images.
 """
 from pathlib import Path
@@ -26,7 +29,12 @@ static uint32_t rng=721;
 static float randf() { rng=rng*1664525u+1013904223u; return (rng>>8)*(1.0f/16777216.0f); }
 static long scenes=0;
 static void group(const char *name) { std::fprintf(stderr,"GROUP %ld %s\n",scenes,name); }
-static void emit(int idx, const TubeState &s, const Params &p, uint32_t gen) {
+static void emit(int idx, const TubeState &s, const Params &scene, uint32_t gen) {
+#ifdef NO_FIZZ
+  Params p=scene; p.fizz=false; p.fizzCount=0;   // --no-fizz: after every scene override, on both builds
+#else
+  const Params &p=scene;
+#endif
   renderTube(idx,s,p,gen,strip);
   // Fixed output size to make mismatches easy to locate; padding is deterministic.
   int n=tubeLayout(p).H*536;
@@ -103,6 +111,9 @@ int main() {
   for(int i=0;i<4000;i++) {
     Params p=PRESET_DEFAULT;
     p.fizz=i%3 != 0; p.bubble=i%5 == 0; p.digitFont=i%12;
+#ifdef BIG_FIZZ   // fizz forced on; size / blick / depth cycles decorrelated from each other and from remaining (i&1)
+    p.fizz=true; p.fizzCount=60; p.fizzSize=i%3==0?5:i%3==1?14:3; p.fizzSizeVar=0.65f; p.fizzBlick=((i/3)%2)*0.6f; p.fizzDepth=((i/6)%4)/3.0f;
+#endif
     p.digitsOnTop=i%7 == 0; p.ticksOnTop=i%5 == 0;
     p.digitShadow=i%3 != 0; p.digitShadowOffset=1+i%4;
     p.digitScaleX=p.digitScaleXMin=0.5f+(i%12)*0.5f;
@@ -192,6 +203,10 @@ def main():
     parser.add_argument('--reference', required=True, type=Path)
     parser.add_argument('--tolerance', type=int, default=0,
                         help='max per-channel difference (RGB888 steps) still accepted; 0 = byte-identical (default)')
+    parser.add_argument('--no-fizz', action='store_true',
+                        help='force fizz off (fizz=false, fizzCount=0) in every scene of both builds')
+    parser.add_argument('--big-fizz', action='store_true',
+                        help='large fizz with blick/depth variety in the random group (exercises the disc interior paths)')
     args = parser.parse_args()
     reference = args.reference.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix='watches-frames-') as tmp:
@@ -205,7 +220,8 @@ def main():
         cpp = tmp / 'frames.cpp'
         cpp.write_text(HARNESS)
         sides = [('reference', reference), ('current', ROOT / 'firmware/src/render.cpp')]
-        builds = [subprocess.Popen([os.environ.get('CXX', 'c++'), '-std=c++17', '-O2',
+        defines = (['-DNO_FIZZ'] if args.no_fizz else []) + (['-DBIG_FIZZ'] if args.big_fizz else [])
+        builds = [subprocess.Popen([os.environ.get('CXX', 'c++'), '-std=c++17', '-O2', *defines,
                                     '-ffp-contract=off', '-fsanitize=undefined,float-cast-overflow', '-fno-sanitize-recover=all',
                                     '-I', str(tmp), '-I', str(ROOT / 'firmware/src'), '-I', str(ROOT / 'spec'),
                                     str(cpp), str(source), str(ROOT / 'firmware/src/physics.cpp'),

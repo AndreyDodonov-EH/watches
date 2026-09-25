@@ -1,3 +1,4 @@
+#include <climits>
 #include "render.h"
 #include "gen/sprites_gen.h"
 #include "layout.h"
@@ -130,6 +131,13 @@ static void __attribute__((noinline)) rampRowL(uint16_t *row, int xStart, int bE
 // newlib's sqrtf is a bit-by-bit software loop here. Reciprocal-sqrt seed + 3 Newton steps: relative error <= 2.1e-7
 // against sqrtf for 1e-30 <= x < 1200 (below that it returns < 1e-10); as an 8-bit coverage it moved 1 step in
 // 2.5e-7 of the samples. Not for values that must match the sim bit for bit.
+static inline float rsqrtApprox(float x) {   // 1/sqrt(x), same seed and Newton steps as sqrtApprox
+  uint32_t i; memcpy(&i, &x, 4); i = 0x5f3759dfu - (i >> 1);
+  float y; memcpy(&y, &i, 4);
+  const float hx = 0.5f * x;
+  y = y * (1.5f - hx * y * y); y = y * (1.5f - hx * y * y); y = y * (1.5f - hx * y * y);
+  return y;
+}
 static inline float sqrtApprox(float x) {
   uint32_t i; memcpy(&i, &x, 4); i = 0x5f3759dfu - (i >> 1);
   float y; memcpy(&y, &i, 4);
@@ -141,29 +149,54 @@ static inline float sqrtApprox(float x) {
 // with a 1e-4 relative margin that float rounding cannot cross; a root is taken only in the anti-aliased ring
 // (approximate, see sqrtApprox) and in the core's margin (exact).
 struct DiscRow {
-  float fx, dy, r, in2, out2, off, kc, core2Lo, core2Hi, wallT;
+  float fx, dy, r, in2, out2, offX, offY, kc, core2Lo, core2Hi, wallT;
   float sR, sL, bR, bL, veilA, pullR, pullL;   // surface fronts, band widths, FOAM_VEIL x stroke opacity, pulls
-  bool core, mirror; int xsI, L; uint16_t cIn, cRim;
+  int veilLo, veilHi;                           // first ix the time-edge band can veil / last ix + 1 the home-edge band can (INT_MAX / INT_MIN when no band)
+  float blickK, bX, bY, rbOut, bIn2, bOut2;    // pinpoint: fizzBlick, centre offset, rb + 0.5, (rb - 0.5)^2 and (rb + 0.5)^2 with margins
+  bool core, mirror, blick; int xsI, L; uint16_t cIn, cRim, cBlick;
 };
-static void __attribute__((noinline)) discRow(uint16_t *row, int ixa, int ixb, const DiscRow &d) {
-  const float fx = d.fx, dy = d.dy, dy2 = dy * dy, r = d.r, in2 = d.in2, out2 = d.out2, off = d.off, wallT = d.wallT;
-  const float sR = d.sR, sL = d.sL, bR = d.bR, bL = d.bL;
+// Veil of one disc pixel by the pixel's footprint over each surface band [profile, profile +- width]: continuous
+// as the edge moves. Out of the pixel loop (noinline) so its nine floats are not live there; a division per
+// veiled pixel only (bubbles touching a band). Multiplies cov in the sim's order, so the result is bit-identical.
+static float __attribute__((noinline)) discVeil(int ix, const DiscRow &d, float cov) {   // returns the veiled cov, sim order
+  if (ix + 1 > d.sR && d.bR > 0) { const float a1 = fmn(ix + 1, d.sR + d.bR), a0 = fmx(ix, d.sR);
+    if (a1 > a0) { const float q = ((a0 + a1) / 2 - d.sR) / d.bR; cov *= 1 - d.veilA * (a1 - a0) * (1 - q) * (1 - d.pullR * q); } }
+  if (ix < d.sL && d.bL > 0) { const float a1 = fmn(ix + 1, d.sL), a0 = fmx(ix, d.sL - d.bL);
+    if (a1 > a0) { const float q = (d.sL - (a0 + a1) / 2) / d.bL; cov *= 1 - d.veilA * (a1 - a0) * (1 - q) * (1 - d.pullL * q); } }
+  return cov;
+}
+// Two instantiations: BLICK false is the plain disc (small bubbles, fizzBlick 0) and carries none of the pinpoint
+// state in its pixel loop; BLICK true also skips the pinpoint test on rows its disc cannot reach.
+template <bool BLICK>
+static void __attribute__((noinline)) discRowT(uint16_t *row, int ixa, int ixb, const DiscRow &d) {
+  const float fx = d.fx, dy = d.dy, dy2 = dy * dy, r = d.r, in2 = d.in2, out2 = d.out2, offX = d.offX, offY = d.offY, wallT = d.wallT;
+  const float bdy = BLICK ? dy - d.bY : 0, bRem = BLICK ? d.bOut2 - bdy * bdy : 0;   // pinpoint reach left for dx² on this row
+  const bool blickRow = BLICK && bRem > 0;
+  const int veilLo = d.veilLo, veilHi = d.veilHi;
   for (int ix = ixa; ix <= ixb; ix++) {
     const float dx = ix + 0.5f - fx;
     const float d2 = dx * dx + dy2;
     if (d2 >= out2) continue;   // d > r + 0.5: no coverage
     float cov = (d2 <= in2 ? 1.0f : fmn(1, r + 0.5f - sqrtApprox(d2))) * wallT;
     if (cov <= 0) continue;
-    // Veil by the pixel's footprint over each band [profile, profile +- width]: continuous as the edge moves.
-    if (ix + 1 > sR && bR > 0) { const float a1 = fmn(ix + 1, sR + bR), a0 = fmx(ix, sR);
-      if (a1 > a0) { const float q = ((a0 + a1) / 2 - sR) / bR; cov *= 1 - d.veilA * (a1 - a0) * (1 - q) * (1 - d.pullR * q); } }
-    if (ix < sL && bL > 0) { const float a1 = fmn(ix + 1, sL), a0 = fmx(ix, sL - bL);
-      if (a1 > a0) { const float q = (sL - (a0 + a1) / 2) / bL; cov *= 1 - d.veilA * (a1 - a0) * (1 - q) * (1 - d.pullL * q); } }
-    const float cx = dx - off, cy = dy - off, dc2 = cx * cx + cy * cy;
+    if (ix >= veilLo || ix < veilHi) cov = discVeil(ix, d, cov);   // only bubbles at a surface band pay for the veil
+    const float cx = dx - offX, cy = dy - offY, dc2 = cx * cx + cy * cy;
     const bool inCore = d.core && (dc2 < d.core2Lo || (dc2 <= d.core2Hi && sqrtf(dc2) < d.kc));
+    uint16_t c = inCore ? d.cIn : d.cRim;
+    if (blickRow) {   // pinpoint: mixed into the colour (888, integer) before the one blend
+      const float bdx = dx - d.bX, bdx2 = bdx * bdx;
+      if (bdx2 < bRem) {
+        const float db2 = bdx2 + bdy * bdy;
+        const float g = d.blickK * (db2 <= d.bIn2 ? 1.0f : clampf(d.rbOut - sqrtApprox(db2), 0, 1));
+        if (g > 0) c = blend565(c, d.cBlick, g);
+      }
+    }
     const int x = d.mirror ? d.L - 1 - (ix + d.xsI) : ix + d.xsI;
-    if (x >= 0 && x < PANEL_W) rowPxa(row, x, inCore ? d.cIn : d.cRim, cov);
+    if (x >= 0 && x < PANEL_W) rowPxa(row, x, c, cov);
   }
+}
+static inline void discRow(uint16_t *row, int ixa, int ixb, const DiscRow &d) {
+  if (d.blick) discRowT<true>(row, ixa, ixb, d); else discRowT<false>(row, ixa, ixb, d);
 }
 // Step 3e concave surface band over [xa, xb): pixel-footprint stroke from the inner shoulder to the outer
 // colour at interior opacity `fill` (surfaceFill), thinned by the receding pull, the blick (`blickK`: this
@@ -274,6 +307,7 @@ struct Tube;
 // ---------------------------------------------------------------------------------------------
 struct Palette {
   uint16_t rows[TUBE_HEIGHT_MAX], bubbleIn[TUBE_HEIGHT_MAX], tubeBackRows[TUBE_HEIGHT_MAX];
+  uint16_t bubbleRimRows[TUBE_HEIGHT_MAX];   // fizz ring colour per row, dimmed by the cylinder's light (scalar bubbleRim: spirit bubble, pinpoint)
   uint16_t traceRows[TUBE_HEIGHT_MAX]; // dried pigment, independent of bulk liquid transparency
   uint16_t body, tubeBack, bubbleRim;
   float rowK[TUBE_HEIGHT_MAX];   // luma weight per row for front brightening (sim step 3a)
@@ -421,7 +455,7 @@ struct Wet {
 static int fizzOverflowPeak = 0;   // largest count requested past MAX_FIZZ (0 = everything fitted), see fizzOverflow()
 // px in the liquid frame; life != 0 = parked under a surface, |life| s left before it pops: > 0 under the time
 // edge, < 0 under the home edge of a free slug.
-struct Fizz { float x, y, v, life; };
+struct Fizz { float x, y, v, life, z; };   // z: depth in the bore (0 front wall, 1 back), drawn at spawn and every recycle
 // Foam constants (mirror sim/src/render.ts): pop swell + fade time, slide speed along the surface as a
 // fraction of fizzSpeed per px/row of meniscus slope, lag rate behind an advancing surface (also how a caught
 // bubble glides onto the surface), how far short of the profile a free bubble's rim is caught (or recycled, at
@@ -619,6 +653,8 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   float bodyL = ambientBodyL(p), ambAmt = ambientAmt(p);
   float yc = (H - 1) / 2.0f, lightRad = 2 * lightDeg * (float)M_PI / 180;
   int hiTop = highlightTop(p, lightDeg);
+  const RGB rimC = hexToRgb(p.bubbleRim);
+  const RGB rimLit = { fmn(255, rimC.r * br), fmn(255, rimC.g * br), fmn(255, rimC.b * br) };   // clipped lit rim (sim rimLit)
   // Wall band (sim buildPalette): rows whose ray misses the bore never reach the back (dryT 0),
   // ramping up over a few rows inside; the liquid still shows through there. A neutral grazing
   // rim rises toward the silhouette on both sides (glassRim). glassWall 0 keeps a one-row rim.
@@ -669,10 +705,13 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     pal.traceRows[y] = q(scale(to888(q(residue)), 0.85f));
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
+    // Fizz ring follows the cylinder's light: glassW's style/Lambert mix, without the highlight tent and reflections.
+    float amb = 0.5f + 0.5f * cosf((t - 0.3f) * (float)M_PI * 1.6f), wr = amb + (lam - amb) * p.lightPhys;
+    pal.bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.35f + 0.45f * wr), bodyL, ambAmt));
   }
   pal.body = q(scale(body, br));
   pal.tubeBack = q(scale(tubeBack, p.brightness));
-  pal.bubbleRim = q(ambientize(scale(hexToRgb(p.bubbleRim), br), bodyL, ambAmt));
+  pal.bubbleRim = q(ambientize(scale(rimC, br), bodyL, ambAmt));
   float lmax = 1;
   for (int y = 0; y < H; y++) { pal.rowK[y] = luma(to888(pal.rows[y])); lmax = fmx(lmax, pal.rowK[y]); }
   for (int y = 0; y < H; y++) pal.rowK[y] /= lmax;
@@ -1232,7 +1271,7 @@ void Tube::ensureFizz(const Params &p, float len, float agitation) {
   fizzLen = len;
   int want = (int)ffloor(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want < 0) want = 0;
   if (want > MAX_FIZZ) { if (want > fizzOverflowPeak) fizzOverflowPeak = want; want = MAX_FIZZ; }
-  while (fizzN < want) { float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v, 0 }; }
+  while (fizzN < want) { float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v, 0, frand() }; }
   fizzN = want;
 }
 // Surface front `surf` (liquid frame) at float row y, in u = side * x: where a parked bubble's centre sits.
@@ -1357,7 +1396,7 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
         }
         else {
           const float left = fabsf(f.life) - dt * (1 + 3 * agitation);   // shaking pops the foam
-          if (left <= 0) { f.life = 0; f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, -1); }
+          if (left <= 0) { f.life = 0; f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, -1); f.z = frand(); }
           else f.life = side * left;
           continue;
         }
@@ -1366,7 +1405,7 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
       f.x += vx * f.v * dt;
       // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
       const float hide = fizzHideY(p, f.v);
-      if (f.y < hide || f.y >= H - hide) { f.v = 0.5f + frand(); const float h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; fizzRespawnX(t, p, f, -1); continue; }
+      if (f.y < hide || f.y >= H - hide) { f.v = 0.5f + frand(); const float h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; fizzRespawnX(t, p, f, -1); f.z = frand(); continue; }
       // The flow carrying its rim within FOAM_CATCH of a surface (the whole disc, so big bubbles never poke
       // through), or into the foam already there (it joins at the back): at the surface the rise heads for it
       // parks (settleFoam); anywhere else it is recycled at the side the flow comes from. A bubble the flow does
@@ -1374,7 +1413,7 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
       const float r = fizzR(p, f.v);
       const bool outR = vx > 0 && f.x > discFit(t.fizzSurf, H, f.y, r, 1) - FOAM_CATCH, outL = vx < 0 && -f.x > discFit(t.fizzSurfL, H, f.y, r, -1) - FOAM_CATCH;
       if ((side > 0 && outR) || (side < 0 && outL) || (side != 0 && touchesFoam(t, f, r, p, side))) f.life = side * p.fizzFoamLife * (0.5f + frand());
-      else if (outR || outL) { f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, vx < 0 ? 0 : 1); }
+      else if (outR || outL) { f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, vx < 0 ? 0 : 1); f.z = frand(); }
       else f.x = fmx(-foamFront(t.fizzSurfL, H, f.y, -1), fmn(foamFront(t.fizzSurf, H, f.y, 1), f.x));
     }
     if (side != 0) settleFoam(t, p, speed, side > 0 ? t.fizzSurf : t.fizzSurfL, side, dt);
@@ -1983,6 +2022,11 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   // 5: fizz — AA discs, pre-squashed by the local lens magnification (see sim step 5)
   if (p.fizz) {
     const float *mag = rc.mag;
+    const uint16_t blickC = q({255 * p.brightness, 255 * p.brightness, 255 * p.brightness});   // sim blickC
+    // Highlight row (continuous, from the light angle): the core shifts away from it, the pinpoint toward it (see sim).
+    const float yHi = (H - 1) / 2.0f * (1 - sinf(st.light * (float)M_PI / 180));
+    const float lxS = -0.7f, lxSign = p.remaining ? -1.0f : 1.0f;   // light from screen-left; liquid frame mirrored under remaining
+    const float invHalfH = 2.0f / H;   // one division per tube, not per bubble
     for (int k = 0; k < fizzN; k++) {
       const Fizz &f = fizz[k];
       int fy = (int)clampf(jround(f.y), 0, H - 1);
@@ -1992,14 +2036,26 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       // A parked bubble in its last FOAM_POP_T s pops: swells and fades out, breaking the surface.
       const float pop = f.life != 0 && fabsf(f.life) < FOAM_POP_T ? fabsf(f.life) / FOAM_POP_T : 1;
       const float r = fizzR(p, f.v) * (1 + 0.6f * (1 - pop));
-      const float m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;   // dark core shifted lower-right (in lens-squashed space)
+      // Seen through liquid in proportion to its depth: a deeper bubble fades toward the liquid (see sim).
+      const float depthK = 1 - p.fizzDepth * f.z * (1 - p.liquidTransparency);   // colour mix toward the body (sim cInD / cRimD), not an alpha: the disc stays an opaque store
+      const float m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;
+      // Light direction in unsquashed disc space (liquid frame): x fixed toward screen-left, y toward the highlight row.
+      const float ly = clampf((yHi - f.y) * invHalfH, -1, 1), nrm = rsqrtApprox(lxS * lxS + ly * ly);   // sim: exact 1/sqrt; <= 2.1e-7 rel.
+      const float dirX = lxSign * lxS * nrm, dirY = ly * nrm;
       const float rIn = r - 0.5f, rOut = r + 0.5f, kc = r - 1 - off;
       DiscRow d;
-      d.fx = fx; d.r = r; d.off = off; d.kc = kc;
+      d.fx = fx; d.r = r; d.offX = -dirX * off; d.offY = -dirY * off; d.kc = kc;   // dark core shifted away from the light
+      // Specular pinpoint on the lit side (r >= 2.5, fizzBlick > 0).
+      d.blick = r >= 2.5f && p.fizzBlick > 0;
+      if (d.blick) {
+        const float bk = 0.4f * (r - 1), rb = fmx(0.6f, r * 0.25f), rbIn = rb - 0.5f;
+        d.blickK = p.fizzBlick; d.bX = dirX * bk; d.bY = dirY * bk; d.rbOut = rb + 0.5f;
+        d.bIn2 = rbIn * rbIn * (1 - 1e-4f); d.bOut2 = d.rbOut * d.rbOut * (1 + 1e-4f); d.cBlick = depthK < 1 ? blend565(pal.rows[fy], blickC, depthK) : blickC;   // specular, depth-tinted (sim cBlickD)
+      } else { d.blickK = d.bX = d.bY = d.rbOut = d.bIn2 = d.bOut2 = 0; d.cBlick = 0; }
       d.in2 = rIn >= 1 ? rIn * rIn * (1 - 1e-4f) : -1; d.out2 = rOut * rOut * (1 + 1e-4f);
       d.core = r >= 1.5f && kc > 0; d.core2Lo = kc * kc * (1 - 1e-4f); d.core2Hi = kc * kc * (1 + 1e-4f);
       d.veilA = veilA; d.pullR = pullR; d.pullL = pullL;
-      d.mirror = p.remaining; d.xsI = xsI; d.L = L; d.cIn = pal.bubbleIn[fy]; d.cRim = pal.bubbleRim;
+      d.mirror = p.remaining; d.xsI = xsI; d.L = L; d.cIn = depthK < 1 ? blend565(pal.rows[fy], pal.bubbleIn[fy], depthK) : pal.bubbleIn[fy];
       const int ixa = (int)ffloor(fx - r - 1), ixb = (int)fceil(fx + r);
       for (int iy = (int)ffloor(f.y - ry - 1); iy <= (int)fceil(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
@@ -2008,7 +2064,9 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
         // Past the profile a bubble is seen through the concave band's front-glass wedge, thickest at the
         // profile and gone at the band's outer rim.
         d.sR = fizzSurf[iy]; d.sL = fizzSurfL[iy]; d.bR = strokeR[iy]; d.bL = strokeL[iy];   // stroke widths: 0 where no band is drawn
+        d.veilLo = d.bR > 0 ? (int)ffloor(d.sR) : INT_MAX; d.veilHi = d.bL > 0 ? (int)fceil(d.sL) : INT_MIN;   // ix + 1 > sR  <=>  ix >= floor(sR); ix < sL  <=>  ix < ceil(sL)
         d.dy = (iy + 0.5f - f.y) * m;
+        d.cRim = depthK < 1 ? blend565(pal.rows[iy], pal.bubbleRimRows[iy], depthK) : pal.bubbleRimRows[iy];
         discRow(FB + iy * PANEL_W, ixa, ixb, d);
       }
     }
