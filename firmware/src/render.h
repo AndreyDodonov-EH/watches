@@ -19,3 +19,8 @@ bool render_init();
 // gen: params generation counter (bumped by main on every param write / preset load / NVS restore);
 // all param-only tables inside the renderer are keyed on it.
 void renderTube(int idx, const TubeState &s, const Params &p, uint32_t gen, uint16_t *strip);
+#ifdef DIGIT_PROF
+// Last frame's digit-path counters of one tube (build with -DDIGIT_PROF): glyphs, rows, int px plain,
+// int px liquid, frac px plain, frac px liquid, slow (band) px, runs.
+const uint32_t *render_profile(int idx);
+#endif
