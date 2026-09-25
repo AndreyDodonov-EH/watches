@@ -312,23 +312,18 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   (7.3%), all <= 12/255 but one at the tube's left edge, spread over every row and column band. Pre-existing:
   the reference is byte-identical before and after the wet-band fix and the film was below the band threshold.
   Sweep this pose against the pinned scene to find which pass drifts under across-tilt.
-- check_render_frames.py stops at the first differing scene; a `--list-diffs` mode (scene index + fizz on/off)
-  would let a fizz-only change prove "only fizz-on scenes differ" in one run.
 - Fizz shading (2026-09-25) leftovers: no draw-order sort by depth `z`, so a faded back bubble can paint over a front one where
   they overlap (common in packed foam); a 4-bucket counting sort over the static pool would fix it cheaply.
 - Fizz ring is uniformly bright around the bubble; a per-pixel cos(angle to the light) modulation (one dot product with 1/r
   hoisted) would give the real dark-ring / lit-arc look at big sizes. Also: cylinder optics (deeper bubbles magnified more),
   scattering blur with depth, depth-dependent drift speed — none modelled.
-- A flash whose `PARAMS_SCHEMA_CRC` changed silently resets NVS to presets/1.json, so before/after benches across a Params
-  change are not comparable unless the preset is pinned: bench.py / e2e.sh should load a named preset first and log it.
-- bench.py cannot bench with the IMU live (it pins inputGain=0 and `--stage inputGain=1` is skipped when the snapshot already
-  holds 1); a moving-light case needed a one-off device.py script. Fizz positions are random: ±0.5 ms per run on heavy presets,
-  so a +0.3 ms budget needs ≥ 3 runs. e2e.sh could take `--ref <commit>` for a same-params A/B instead of a manual worktree.
 - `compare-device.py`'s ">12/255 off" count swings ±50 px between runs of the same build (the meniscus crescents, liquid
   position dependent), so it cannot be a strict pass/fail number without pinning the liquid state.
 - Fizz depth fade tints the core and pinpoint toward the CENTRE row's body colour (one blend per bubble; the rim per row): at
   full extinction a big bubble across the highlight band leaves a faint flat-coloured footprint. Per-row targets fix it at
   ~0.4 ms on a 240-bubble scene (Astra review, 2026-09-25); a 4-level depth quantisation with per-row tint tables would be free.
-- The IMU can come up dead after a flash (`s` shows `along 0.000 across 0.000 gyro 0.0` exactly) until a reboot; the
-  "pinned" bench scene still depends on the tilt (dead IMU: 11.75 vs 12.5 ms), so e2e.sh/bench.py should check `s` and
-  record the tilt. The e2e.log entry "fizz-shading v5" 12:42:47 is such an invalid run (marked in the log).
+- `Pbegin`/`P k=v`/`Pcommit` only stage the physical renderer's params; legacy `p` params have no batch, so
+  `bench.py --preset` sends ~100 single `p` writes (each re-renders a half-applied look and re-arms the NVS autosave).
+  A legacy `pbegin`/`pcommit` would make a preset load atomic.
+- `e2e.sh --ref` across a PARAMS_SCHEMA_CRC change loses the board's NVS-tuned params (each flash resets them);
+  a `p?` save before and replay after the A/B would keep them.

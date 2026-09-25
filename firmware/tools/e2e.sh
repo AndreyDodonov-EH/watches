@@ -1,29 +1,72 @@
 #!/usr/bin/env bash
 # End-to-end firmware check: build -> flash -> pinned fps bench -> pixel parity vs the sim.
-#   tools/e2e.sh [--label TEXT] [--stages] [--no-ble] [--bare] [--no-flash] [--samples N]
-# --bare = no BLE and no IMU polling: USB serial + physics + render only (the ceiling).
-# Appends the bench line + parity line to firmware/.compare/e2e.log. Board must be reachable (device.py).
+#   tools/e2e.sh [--label TEXT] [--stages] [--stage name=v ...] [--no-ble] [--bare] [--no-flash] [--samples N]
+#                [--preset FILE.json] [--live-imu] [--runs N] [--ref COMMIT]
+# --bare = no BLE and no IMU polling: USB serial + physics + render only (the ceiling); the bench then accepts
+#   the all-zero IMU (--allow-dead-imu).
+# --preset / --live-imu / --runs / --stage go to bench.py (see its docstring). Pin a preset whenever the two sides
+#   of a comparison straddle a Params change: a PARAMS_SCHEMA_CRC change resets NVS to presets/1.json on flash.
+# --ref COMMIT = A/B in one go: first a temporary git worktree of COMMIT (under /tmp) is built and flashed with the
+#   same flags and benched with the same preset/runs/stages (label "<label> ref <sha>", no parity step: the sim
+#   is not that commit's), the worktree is removed, then the current tree runs the normal flow.
+# Appends the bench lines + parity line to firmware/.compare/e2e.log. Board must be reachable (device.py).
+# Exit 3 = bench.py found the IMU dead even after a reboot (the run is not comparable).
 set -euo pipefail
-cd "$(dirname "$0")/.."
-LABEL="$(git rev-parse --short HEAD)$(git diff --quiet || echo '+dirty')"; STAGES=(); FLASH=1; SAMPLES=5; FLAGS=""
+USAGE="usage: $0 [--label TEXT] [--stages] [--stage name=v] [--no-ble] [--bare] [--no-flash] [--samples N] [--preset FILE] [--live-imu] [--runs N] [--ref COMMIT]"
+LABEL=""; BENCH=(); FLASH=1; SAMPLES=5; FLAGS=""; SUFFIX=""; PRESET=""; REF=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --label) LABEL="$2"; shift ;;
-        --stages) STAGES=(--stages) ;;
-        --no-ble) FLAGS="-DNO_BLE"; LABEL="$LABEL no-ble" ;;
-        --bare) FLAGS="-DNO_BLE -DNO_IMU"; LABEL="$LABEL bare" ;;
+        --stages) BENCH+=(--stages) ;;
+        --stage) BENCH+=(--stage "$2"); shift ;;
+        --no-ble) FLAGS="-DNO_BLE"; SUFFIX=" no-ble" ;;
+        --bare) FLAGS="-DNO_BLE -DNO_IMU"; SUFFIX=" bare"; BENCH+=(--allow-dead-imu) ;;
         --no-flash) FLASH=0 ;;
         --samples) SAMPLES="$2"; shift ;;
-        *) echo "usage: $0 [--label TEXT] [--stages] [--no-ble] [--bare] [--no-flash] [--samples N]"; exit 2 ;;
+        --preset) PRESET="$(realpath -e "$2")"; shift ;;   # resolved before the cd below
+        --live-imu) BENCH+=(--live-imu) ;;
+        --runs) BENCH+=(--runs "$2"); shift ;;
+        --ref) REF="$2"; shift ;;
+        -h|--help) echo "$USAGE"; exit 0 ;;
+        *) echo "$USAGE"; exit 2 ;;
     esac; shift
 done
+cd "$(dirname "$0")/.."
+[ -n "$LABEL" ] || LABEL="$(git rev-parse --short HEAD)$(git diff --quiet || echo '+dirty')"
+LABEL="$LABEL$SUFFIX"
+[ -n "$PRESET" ] && BENCH+=(--preset "$PRESET")
+if [ -n "$PRESET" ]; then PRESET_TAG="preset $(basename "$PRESET")"; else PRESET_TAG="preset (board NVS)"; fi
+mkdir -p .compare
+
+# bench LABEL: header + bench.py into the log; returns bench.py's status (3 = dead IMU).
+bench() {
+    local rc
+    set +e
+    {
+        echo "== $(date '+%F %T')  $1  $PRESET_TAG"
+        python3 tools/bench.py --samples "$SAMPLES" --label "$1" ${BENCH[@]+"${BENCH[@]}"}
+    } | tee -a .compare/e2e.log
+    rc=${PIPESTATUS[0]}
+    set -e
+    [ "$rc" -eq 3 ] && echo "e2e.sh: IMU dead after a reboot (bench.py exit 3); run not comparable" | tee -a .compare/e2e.log
+    return "$rc"
+}
+
+if [ -n "$REF" ]; then
+    [ "$FLASH" -eq 1 ] || { echo "e2e.sh: --ref needs to flash (drop --no-flash)"; exit 2; }
+    REF_SHA="$(git rev-parse --short "$REF^{commit}")"
+    WT="$(mktemp -d /tmp/lw-ref-XXXXXX)"
+    cleanup() { git worktree remove --force "$WT" 2>/dev/null || rm -rf "$WT"; git worktree prune; }
+    trap cleanup EXIT
+    git worktree add --detach "$WT" "$REF_SHA" >/dev/null
+    PLATFORMIO_BUILD_FLAGS="$FLAGS" "$WT/firmware/tools/flash.sh"   # flash.sh cds into its own firmware/ (the worktree's)
+    sleep 4
+    bench "$LABEL ref $REF_SHA"
+    cleanup; trap - EXIT
+fi
 if [ "$FLASH" -eq 1 ]; then
     PLATFORMIO_BUILD_FLAGS="$FLAGS" tools/flash.sh
     sleep 4
 fi
-mkdir -p .compare
-{
-    echo "== $(date '+%F %T')  $LABEL"
-    python3 tools/bench.py --samples "$SAMPLES" --label "$LABEL" "${STAGES[@]}"
-    python3 tools/compare-device.py | grep '^mismatched'
-} | tee -a .compare/e2e.log
+bench "$LABEL"
+python3 tools/compare-device.py | grep '^mismatched' | tee -a .compare/e2e.log
