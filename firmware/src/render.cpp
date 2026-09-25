@@ -153,7 +153,8 @@ struct DiscRow {
   float sR, sL, bR, bL, veilA, pullR, pullL;   // surface fronts, band widths, FOAM_VEIL x stroke opacity, pulls
   int veilLo, veilHi;                           // first ix the time-edge band can veil / last ix + 1 the home-edge band can (INT_MAX / INT_MIN when no band)
   float blickK, bX, bY, rbOut, bIn2, bOut2;    // pinpoint: fizzBlick, centre offset, rb + 0.5, (rb - 0.5)^2 and (rb + 0.5)^2 with margins
-  bool core, mirror, blick; int xsI, L; uint16_t cIn, cRim, cBlick;
+  float tintA;                                  // bubbleDark x depthK: opacity of the dark tint over the see-through interior
+  bool core, mirror, blick; int xsI, L; uint16_t cRim, cBlick;
 };
 // Veil of one disc pixel by the pixel's footprint over each surface band [profile, profile +- width]: continuous
 // as the edge moves. Out of the pixel loop (noinline) so its nine floats are not live there; a division per
@@ -173,7 +174,15 @@ static void __attribute__((noinline)) discRowT(uint16_t *row, int ixa, int ixb, 
   const float bdy = BLICK ? dy - d.bY : 0, bRem = BLICK ? d.bOut2 - bdy * bdy : 0;   // pinpoint reach left for dx² on this row
   const bool blickRow = BLICK && bRem > 0;
   const int veilLo = d.veilLo, veilHi = d.veilHi;
+  // See-through interior with no tint and no pinpoint on this row: pixels certainly inside the core (dc2 < core2Lo
+  // with a pixel of slack) would reach `continue` without a write, so the loop jumps over them. Output-neutral.
+  int skipLo = INT_MAX, skipHi = INT_MIN;
+  if (d.core && d.tintA <= 0 && !blickRow) {
+    const float cy = dy - offY, rem = d.core2Lo * (1 - 1e-4f) - cy * cy;
+    if (rem > 0) { const float hw = sqrtApprox(rem) - 1; if (hw > 0) { skipLo = (int)fceil(fx + offX - hw - 0.5f); skipHi = (int)ffloor(fx + offX + hw - 0.5f); } }
+  }
   for (int ix = ixa; ix <= ixb; ix++) {
+    if (ix == skipLo && skipHi >= skipLo) { ix = skipHi; continue; }
     const float dx = ix + 0.5f - fx;
     const float d2 = dx * dx + dy2;
     if (d2 >= out2) continue;   // d > r + 0.5: no coverage
@@ -182,17 +191,19 @@ static void __attribute__((noinline)) discRowT(uint16_t *row, int ixa, int ixb, 
     if (ix >= veilLo || ix < veilHi) cov = discVeil(ix, d, cov);   // only bubbles at a surface band pay for the veil
     const float cx = dx - offX, cy = dy - offY, dc2 = cx * cx + cy * cy;
     const bool inCore = d.core && (dc2 < d.core2Lo || (dc2 <= d.core2Hi && sqrtf(dc2) < d.kc));
-    uint16_t c = inCore ? d.cIn : d.cRim;
-    if (blickRow) {   // pinpoint: mixed into the colour (888, integer) before the one blend
+    float g = 0;
+    if (blickRow) {   // pinpoint weight
       const float bdx = dx - d.bX, bdx2 = bdx * bdx;
-      if (bdx2 < bRem) {
-        const float db2 = bdx2 + bdy * bdy;
-        const float g = d.blickK * (db2 <= d.bIn2 ? 1.0f : clampf(d.rbOut - sqrtApprox(db2), 0, 1));
-        if (g > 0) c = blend565(c, d.cBlick, g);
-      }
+      if (bdx2 < bRem) { const float db2 = bdx2 + bdy * bdy; g = d.blickK * (db2 <= d.bIn2 ? 1.0f : clampf(d.rbOut - sqrtApprox(db2), 0, 1)); }
     }
     const int x = d.mirror ? d.L - 1 - (ix + d.xsI) : ix + d.xsI;
-    if (x >= 0 && x < PANEL_W) rowPxa(row, x, c, cov);
+    if (x < 0 || x >= PANEL_W) continue;
+    if (inCore) {   // see-through interior (sim): the pinpoint or the dark tint over the liquid as-is, one write, nothing at tint 0
+      if (g > 0) { const float w = g + d.tintA * (1 - g); rowPxa(row, x, d.tintA > 0 ? blend565(0, d.cBlick, g / w) : d.cBlick, cov * w); }   // fused with the tint (sim)
+      else if (d.tintA > 0) rowPxa(row, x, 0, cov * d.tintA);
+      continue;
+    }
+    rowPxa(row, x, g > 0 ? blend565(d.cRim, d.cBlick, g) : d.cRim, cov);   // ring, pinpoint mixed in 888 before the one blend
   }
 }
 static inline void discRow(uint16_t *row, int ixa, int ixb, const DiscRow &d) {
@@ -2037,7 +2048,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       const float pop = f.life != 0 && fabsf(f.life) < FOAM_POP_T ? fabsf(f.life) / FOAM_POP_T : 1;
       const float r = fizzR(p, f.v) * (1 + 0.6f * (1 - pop));
       // Seen through liquid in proportion to its depth: a deeper bubble fades toward the liquid (see sim).
-      const float depthK = 1 - p.fizzDepth * f.z * (1 - p.liquidTransparency);   // colour mix toward the body (sim cInD / cRimD), not an alpha: the disc stays an opaque store
+      const float depthK = 1 - p.fizzDepth * f.z * (1 - p.liquidTransparency);   // rim/pinpoint: colour mix toward the body (sim cRimD / cBlickD); interior tint: alpha scale
       const float m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;
       // Light direction in unsquashed disc space (liquid frame): x fixed toward screen-left, y toward the highlight row.
       const float ly = clampf((yHi - f.y) * invHalfH, -1, 1), nrm = rsqrtApprox(lxS * lxS + ly * ly);   // sim: exact 1/sqrt; <= 2.1e-7 rel.
@@ -2055,7 +2066,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       d.in2 = rIn >= 1 ? rIn * rIn * (1 - 1e-4f) : -1; d.out2 = rOut * rOut * (1 + 1e-4f);
       d.core = r >= 1.5f && kc > 0; d.core2Lo = kc * kc * (1 - 1e-4f); d.core2Hi = kc * kc * (1 + 1e-4f);
       d.veilA = veilA; d.pullR = pullR; d.pullL = pullL;
-      d.mirror = p.remaining; d.xsI = xsI; d.L = L; d.cIn = depthK < 1 ? blend565(pal.rows[fy], pal.bubbleIn[fy], depthK) : pal.bubbleIn[fy];
+      d.mirror = p.remaining; d.xsI = xsI; d.L = L; d.tintA = p.bubbleDark * depthK;   // sim tintA
       const int ixa = (int)ffloor(fx - r - 1), ixb = (int)fceil(fx + r);
       for (int iy = (int)ffloor(f.y - ry - 1); iy <= (int)fceil(f.y + ry); iy++) {
         if (iy < 0 || iy >= H) continue;
