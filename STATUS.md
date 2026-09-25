@@ -459,6 +459,44 @@ else `display_init` fails at boot before `ble_init`.
   firmware vs the sim reference: 0 px > 12/255 on four captured states; `compare-device` on the board
   likewise (see e2e log).
 
+## Digit compositor: row runs (2026-09-24, firmware, pixel-exact)
+- The sprite-digit draw (`drawSpriteGlyph`) no longer classifies every texel on its own. A glyph row is cut
+  once into runs on which everything is constant — on top / behind air / behind liquid (the row's liquid
+  interval as `ceil(lo)..ceil(hi)`, the same test `Mark::inLiquid` makes) — and each run goes through a
+  small `noinline` loop (`spriteRunInt` / `spriteRunFrac`, MODE 0 plain, 1 baked-T liquid, 2 general). Only
+  pixels under a possible surface-band footprint (a conservative superset of `Mark::bandMark`'s coverage
+  test, both sides, mirrored) keep the per-pixel compositor. Bitmap fonts still use the generic path.
+- Glyph row spans: `scaledGlyphs` bakes per plane the first/one-past-last covered column of every row
+  (`GLYPH_SPAN_BYTES` = 5 KB per tube, PSRAM, boot-time, same `ok` check as the pool); runs are clipped to
+  them, the fractional path to the union of rows cy / cy−1 one column wider. Glyphs taller than 128 rows
+  or wider than 255 columns (only reachable over serial) draw full rows.
+- Gate: `firmware/tools/check_render_frames.py --reference <frozen render.cpp> --tolerance 0` now runs
+  9136 scenes (random 4000 with all 12 fonts; digit-grid 3456: fonts × top/rear × shadow variants ×
+  transparency × contrast × 8 fill modes with rotating fractional shifts, scales, tube heights; sequences
+  1680: base → mutation → base over motion frames) under UBSan, and kills the surviving renderer when one
+  side crashes. Byte-identical for every step below.
+- `-DDIGIT_PROF` (build flag) adds per-tube digit-path counters printed by `f` (`digit-prof h/m …`):
+  glyphs, rows, pixels per path (int/frac × plain/liquid), band-slow pixels, runs. Zero cost otherwise.
+- Board, spritz params, normal build, pinned 10:09:30 (median of 5):
+
+| step | fps | render | digits stage |
+|---|---|---|---|
+| baseline | 29.3 | 25.94 ms | 17.86 ms |
+| row runs | 38.3 | 18.05 ms | 8.36 ms |
+| + row spans | 41.2 | 16.33 ms | 8.15 ms |
+| + tightened frac loop (final) | 42.3 | 15.73 ms | 7.58 ms |
+
+  11:59:50 (digits behind air): 44.5 → 61.1 fps. Bare build: 48.2 fps / 13.73 ms. Preset 1: 48.3 fps.
+  Clock sweep pinned: 00:05 17.0 ms, 06:30 15.3, 11:55 11.7. Pinned parity 489 px ≤ 1 LSB (was 514),
+  0 > 12/255. Live parity runs show a few fizz pixels > 12 — pin the scene (`d0`, `inputGain 0`) first.
+- Live tilt (IMU on, board resting): the minutes tube draws ~8.2k digit pixels behind liquid per frame
+  through the fractional refraction path and pays ~3.2 ms for it (digitParallax 5.5 → 0: 18.05 → 14.9 ms;
+  hours tube 0.4 ms). Carrying the left taps (two loads per pixel, zero rows instead of bounds checks) did
+  not move that number, and a per-tube resampled-tile cache would rebuild every frame with the live tilt
+  over about as many texels as it saves, so it was not built. The remaining levers there are approximations
+  (2-tap horizontal, quantised weights + tile cache) — not taken; see KAIZEN for the surface band (~3.3 ms
+  per tube on its own).
+
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.
 - **fps (full frame 536×240×16bpp):** 32.3 fps render+push, **41.7 fps push-only**, **71.4 fps pushing only

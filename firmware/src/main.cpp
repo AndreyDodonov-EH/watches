@@ -233,6 +233,13 @@ static void report_fps() {
              fps, renderMs, waitMs, hoursMs, minutesMs, mode,
              renderer == Renderer::Physical ? "physical" : "legacy", params.liquidTransparency,
              (unsigned)frameP95Ms);
+#ifdef DIGIT_PROF
+  for (int i = 0; i < 2; i++) {
+    const uint32_t *c = render_profile(i);
+    out.printf("digit-prof %c glyphs %u rows %u int-plain %u int-liq %u frac-plain %u frac-liq %u slow %u runs %u\n",
+               i ? 'm' : 'h', (unsigned)c[0], (unsigned)c[1], (unsigned)c[2], (unsigned)c[3], (unsigned)c[4], (unsigned)c[5], (unsigned)c[6], (unsigned)c[7]);
+  }
+#endif
 }
 
 // ---- liquid face ----

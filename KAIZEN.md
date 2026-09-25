@@ -296,3 +296,10 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   fizz 2.1, minute ticks 2.1. Normal build `f` showed cores h 16 / m 27 ms — the minutes tube on core 1 sets the frame;
   rebalancing work between the cores is a candidate — see docs/perf-core-balance.md.
 - Standalone HTML preview (2026-09-24): Chromium cannot start inside the sandbox (`sandbox_host_linux.cc`, EPERM); browser verification ran with approved escalation.
+- Digit row-run compositor (2026-09-24) only covers sprite fonts; bitmap fonts (`digitFont` < SPRITE_FONT) still go
+  through the generic per-texel `drawGlyph` template. Same row-run treatment would apply.
+- Ticks (`drawTicks`) still call `Mark::operator()` per pixel, so every rear tick pixel runs the surface-band
+  test; the conservative per-row band footprint from `drawSpriteGlyph` would let ticks use plain runs too
+  (ticksM 2.9 ms, surfaceBand 4.7 ms on the current preset).
+- Surface band costs ~3.2 ms per tube on its own (board, live tilt, digitParallax fixed): (a) band 0.3 → 0 took the hours core
+  11.35 → 8.07 ms and minutes 18.07 → 14.87. Its own drawing (`bandRow`, per-row float mixes), not the marks.

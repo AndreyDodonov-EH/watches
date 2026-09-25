@@ -309,12 +309,19 @@ static const int SPRITE_FONT = NUM_FONTS;
 // w x h texels (body plus the baked shadow margin); `adv` is the body width the layout advances by.
 // c/a: the glyph as drawn behind air; cw/aw: as drawn behind liquid (the shadow composite depends on the
 // liquid's transparency, see bakeShadow). Without a shadow both pairs alias the same plane.
-struct ScaledGlyph { int w, h, adv; uint16_t *c, *cw; uint8_t *a, *aw; };
+// span[plane]: per row the first and one-past-last column with coverage (both 0 = empty row), so the
+// compositor skips the transparent margins; nullptr when the glyph is taller than the span table.
+struct ScaledGlyph { int w, h, adv; uint16_t *c, *cw; uint8_t *a, *aw; const uint8_t *span[2]; };
+// Span table per tube (boot-time, PSRAM like the pool): 10 glyphs x 2 planes x GLYPH_SPAN_ROWS rows x 2 B.
+// GLYPH_SPAN_ROWS covers the bh cap (96) plus the largest slider shadow offset (4); a glyph pushed taller
+// (or wider than 255 columns) over serial draws without spans (full rows), never past the table.
+#define GLYPH_SPAN_ROWS 128
+#define GLYPH_SPAN_BYTES (10 * 2 * GLYPH_SPAN_ROWS * 2)
 struct ScaledSet {
   int sheet = -1, bw = 0, bh = 0; float brightness = -1, tintAmt = -1, tone = 0; uint32_t tint = 0;
   int shadow = -2, shadowOff = 0; float shadowA = -1, transK = -1;
   ScaledGlyph g[10] = {};
-  uint16_t *poolC = nullptr; uint8_t *poolA = nullptr;
+  uint16_t *poolC = nullptr; uint8_t *poolA = nullptr; uint8_t *poolS = nullptr;
 };
 // ---------------------------------------------------------------------------------------------
 // marks (ticks + labels) seen through the liquid
@@ -455,6 +462,9 @@ struct EffectTable { uint32_t gen = 0; int H = 0; float lightK = -1; bool valid 
 struct Tube {
   uint16_t *FB = nullptr; int baseY = 0, H = TUBE_HEIGHT_PX; int idx = 0;
   Palette pal; RowCache rc; Labels labels; ScaledSet set;
+#ifdef DIGIT_PROF
+  mutable uint32_t prof[8] = {};   // per frame: glyphs, rows, int px plain, int px liquid, frac px plain, frac px liquid, slow px, runs
+#endif
   EffectTable glowT[2];                                       // 0 = time edge, 1 = home edge
   float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
   float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds for the mark compositor (edges + surface stroke)
@@ -718,7 +728,7 @@ ScaledGlyph *Tube::scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, 
     int gw = (int)fmx(1, jround(sp.widths[d] * (float)bw / sp.cellW));
     float cx0 = d * sp.cellW + (sp.cellW - sp.widths[d]) / 2.0f;
     const int tw = gw + off, th = bh + off, planes = off > 0 ? 2 : 1;
-    if (used + planes * tw * th > GLYPH_POOL_PX) { S.g[d] = { 0, 0, 0, S.poolC, S.poolC, S.poolA, S.poolA }; continue; }   // over budget: glyph dropped
+    if (used + planes * tw * th > GLYPH_POOL_PX) { S.g[d] = { 0, 0, 0, S.poolC, S.poolC, S.poolA, S.poolA, { nullptr, nullptr } }; continue; }   // over budget: glyph dropped
     S.g[d].w = tw; S.g[d].h = th; S.g[d].adv = gw;
     S.g[d].c = S.poolC + used; S.g[d].a = S.poolA + used; used += tw * th;
     if (planes == 2) { S.g[d].cw = S.poolC + used; S.g[d].aw = S.poolA + used; used += tw * th; }
@@ -745,6 +755,20 @@ ScaledGlyph *Tube::scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, 
       memcpy(S.g[d].cw, S.g[d].c, tw * th * 2); memcpy(S.g[d].aw, S.g[d].a, tw * th);
       bakeShadow(S.g[d].c, S.g[d].a, tw, th, gw, bh, off, (uint16_t)shadow, shadowA, 1.0f);
       bakeShadow(S.g[d].cw, S.g[d].aw, tw, th, gw, bh, off, (uint16_t)shadow, shadowA, transK);
+    }
+    // Row spans of both planes (the behind-liquid plane can be all-transparent at transparency 0).
+    S.g[d].span[0] = S.g[d].span[1] = nullptr;
+    if (S.poolS && th <= GLYPH_SPAN_ROWS && tw <= 255) {   // endpoints are bytes: a wider glyph draws full rows
+      for (int pl = 0; pl < planes; pl++) {
+        uint8_t *sp = S.poolS + (d * 2 + pl) * GLYPH_SPAN_ROWS * 2; const uint8_t *ap = pl ? S.g[d].aw : S.g[d].a;
+        for (int y = 0; y < th; y++) {
+          int x0 = 0, x1 = 0;
+          for (int x = 0; x < tw; x++) if (ap[y * tw + x]) { if (x1 == 0) x0 = x; x1 = x + 1; }
+          sp[y * 2] = (uint8_t)x0; sp[y * 2 + 1] = (uint8_t)x1;
+        }
+        S.g[d].span[pl] = sp;
+      }
+      if (planes == 1) S.g[d].span[1] = S.g[d].span[0];
     }
   }
   S.sheet = sheetIdx; S.bw = bw; S.bh = bh; S.brightness = brightness; S.tint = tintHex; S.tintAmt = tintAmt; S.tone = tone;
@@ -823,14 +847,6 @@ bool Tube::layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float
 }
 
 // Coverage (0..255) and colour of glyph pixel (cx, cy); both only defined inside w x h.
-struct SpriteSampler {
-  const ScaledGlyph &g; int w, h;
-  explicit SpriteSampler(const ScaledGlyph &gg) : g(gg), w(gg.w), h(gg.h) {}
-  int a(int cx, int cy) const { return g.a[cy * g.w + cx]; }
-  uint16_t c(int cx, int cy) const { return g.c[cy * g.w + cx]; }
-  int aw(int cx, int cy) const { return g.aw[cy * g.w + cx]; }        // behind-liquid plane
-  uint16_t cw(int cx, int cy) const { return g.cw[cy * g.w + cx]; }
-};
 struct BitmapSampler {
   const uint8_t *g; const Font &f; const Labels &lb; int w, h, msb;
   BitmapSampler(const Font &ff, int d, const Labels &l) : g(ff.g[d]), f(ff), lb(l), w(l.bw), h(l.bh), msb(1 << (ff.w - 1)) {}
@@ -910,9 +926,198 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
     }
   }
 }
+// ---------------------------------------------------------------------------------------------
+// sprite glyphs: row-run compositor (pixel-exact rewrite of drawGlyph<SpriteSampler>)
+// ---------------------------------------------------------------------------------------------
+// The generic path classified every texel on its own (edge test, band test, strip test, plane choice),
+// which is branchy enough to spill on Xtensa. Here a glyph row is cut once into runs on which every
+// decision is constant — top / behind air / behind liquid, and whether the surface band's footprint may
+// cover the pixel — and each run goes through a small loop. Only the pixels under a possible band
+// footprint (a conservative superset of Mark::bandMark's own test) keep the per-pixel compositor, so
+// the output is byte-identical to the generic path (check_render_frames.py against the frozen renderer).
+static inline int clampI(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+// MODE 0: on top or behind air (coverage scaled by scaleT: 256 on top, the row's dryT behind air).
+// MODE 1: behind liquid, transparency baked into the plane and no contrast floor: the texel colour as is.
+// MODE 2: behind liquid, general (throughLiquid per pixel).
+template <int MODE>
+static void __attribute__((noinline)) spriteRunInt(const Tube &t, int y, int px0, int px1, const uint8_t *a, const uint16_t *c,
+                                                   int scaleT, int T, int C) {
+  uint16_t *const fb = t.FB + (y - t.baseY) * PANEL_W;
+  for (int px = px0; px < px1; px++, a++, c++) {
+    const int al = *a; if (!al) continue;
+    int covT = LUT_alphaT16[al];
+    if (MODE == 0) { covT = covT * scaleT >> 8; if (covT <= 0) continue; }
+    uint16_t col = *c;
+    const uint16_t bg = __builtin_bswap16(fb[px]);
+    if (MODE == 2) col = throughLiquid(bg, col, T, C);
+    fb[px] = __builtin_bswap16(covT >= 256 ? col : blend565T(bg, col, covT));
+  }
+}
+// Fractional refraction shift: destination column cx samples taps (cx, cy), (cx-1, cy), (cx, cy-1),
+// (cx-1, cy-1) of one plane (weights 1/65536, taps outside the glyph are 0); the colour is the heaviest
+// tap's, ties resolved in that order (as the generic path).
+// Zero rows stand in for taps outside the glyph (a glyph is at most 128 columns wide in the draw, see gw).
+static const uint8_t ZERO_A[256] = {}; static const uint16_t ZERO_C[256] = {};
+template <int MODE>
+static void __attribute__((noinline)) spriteRunFrac(const Tube &t, int y, int px0, int px1, int cx, int cy, const uint8_t *aP, const uint16_t *cP,
+                                                    int w, int h, int w00, int w10, int w01, int w11, int scaleT, int T, int C) {
+  const bool r0 = cy >= 0 && cy < h, r1 = cy - 1 >= 0 && cy - 1 < h;
+  const uint8_t *a0 = r0 ? aP + cy * w : ZERO_A, *a1 = r1 ? aP + (cy - 1) * w : ZERO_A;
+  const uint16_t *c0 = r0 ? cP + cy * w : ZERO_C, *c1 = r1 ? cP + (cy - 1) * w : ZERO_C;
+  const int wz = r0 || r1 ? w : 256;   // zero rows: any column reads 0
+  // The left taps of column cx are the right taps of cx - 1: carry them, two loads per pixel.
+  int p0 = cx >= 1 && cx - 1 < wz ? a0[cx - 1] : 0, p1 = cx >= 1 && cx - 1 < wz ? a1[cx - 1] : 0;
+  uint16_t *const fb = t.FB + (y - t.baseY) * PANEL_W;
+  for (int px = px0; px < px1; px++, cx++) {
+    const int n0 = cx < wz ? a0[cx] : 0, n1 = cx < wz ? a1[cx] : 0;
+    const int a00 = n0 * w00, a10 = p0 * w10, a01 = n1 * w01, a11 = p1 * w11;
+    p0 = n0; p1 = n1;
+    const int al = (a00 + a10 + a01 + a11 + 32768) >> 16; if (!al) continue;
+    int covT = LUT_alphaT16[al];
+    if (MODE == 0) { covT = covT * scaleT >> 8; if (covT <= 0) continue; }
+    int m = a00; if (a10 > m) m = a10; if (a01 > m) m = a01; if (a11 > m) m = a11;
+    uint16_t col = m == a00 ? c0[cx] : m == a10 ? c0[cx - 1] : m == a01 ? c1[cx] : c1[cx - 1];
+    const uint16_t bg = __builtin_bswap16(fb[px]);
+    if (MODE == 2) col = throughLiquid(bg, col, T, C);
+    fb[px] = __builtin_bswap16(covT >= 256 ? col : blend565T(bg, col, covT));
+  }
+}
+// Pixels a surface band may touch: the generic compositor, texel by texel (plane per pixel as before).
+static void __attribute__((noinline)) spriteRunSlow(const Mark &mark, const ScaledGlyph &g, int y, int ry, int px0, int px1, int cx, int cy,
+                                                    bool frac, int w00, int w10, int w01, int w11) {
+  for (int px = px0; px < px1; px++, cx++) {
+    const bool L = mark.inLiquid(px, ry);
+    const uint8_t *aP = L ? g.aw : g.a; const uint16_t *cP = L ? g.cw : g.c;
+    int al; uint16_t col;
+    if (!frac) { al = aP[cy * g.w + cx]; if (!al) continue; col = cP[cy * g.w + cx]; }
+    else {
+      auto tap = [&](int tx, int ty) -> int { return tx < 0 || ty < 0 || tx >= g.w || ty >= g.h ? 0 : aP[ty * g.w + tx]; };
+      const int a00 = tap(cx, cy) * w00, a10 = tap(cx - 1, cy) * w10, a01 = tap(cx, cy - 1) * w01, a11 = tap(cx - 1, cy - 1) * w11;
+      al = (a00 + a10 + a01 + a11 + 32768) >> 16; if (!al) continue;
+      int m = a00; if (a10 > m) m = a10; if (a01 > m) m = a01; if (a11 > m) m = a11;
+      col = m == a00 ? cP[cy * g.w + cx] : m == a10 ? cP[cy * g.w + cx - 1] : m == a01 ? cP[(cy - 1) * g.w + cx] : cP[(cy - 1) * g.w + cx - 1];
+    }
+    mark(px, y, col, LUT_alphaT16[al]);
+  }
+}
+
+// One glyph row of one copy (dry: unshifted, wet: shifted by the integer part of the parallax): panel
+// columns [px0, px1) map to glyph columns from cx0; cut into runs and blit.
+struct SpriteRow {
+  const Tube &t; const Mark &mark; const ScaledGlyph &g; int y, ry;
+  int Li, Hi;            // this row's liquid interval [Li, Hi) in panel x (empty when Hi <= Li)
+  int nb; int b0[2], b1[2];   // possible surface-band footprints on this row, sorted, half-open
+  int w00, w10, w01, w11, liqMode, Tuse;
+  void run(int px0, int px1, int cx0, int cy, bool frac) const {
+    if (px0 < 0) { cx0 += -px0; px0 = 0; }
+    if (px1 > PANEL_W) px1 = PANEL_W;
+    for (int k = 0; k < nb && px0 < px1; k++) {   // band footprints: the slow path there, plain runs between
+      if (b1[k] <= px0) continue;
+      if (b0[k] > px0) { const int e = b0[k] < px1 ? b0[k] : px1; plain(px0, e, cx0, cy, frac); cx0 += e - px0; px0 = e; }
+      if (px0 < px1) {
+        const int e = b1[k] < px1 ? b1[k] : px1;
+#ifdef DIGIT_PROF
+        t.prof[6] += e - px0; t.prof[7]++;
+#endif
+        spriteRunSlow(mark, g, y, ry, px0, e, cx0, cy, frac, w00, w10, w01, w11); cx0 += e - px0; px0 = e;
+      }
+    }
+    if (px0 < px1) plain(px0, px1, cx0, cy, frac);
+  }
+  void plain(int px0, int px1, int cx0, int cy, bool frac) const {
+    if (mark.onTop) { seg<0>(px0, px1, cx0, cy, frac, false, 256); return; }
+    const int dT = t.pal.dryT[ry];
+    if (Hi <= Li || px1 <= Li || px0 >= Hi) { seg<0>(px0, px1, cx0, cy, frac, false, dT); return; }
+    if (px0 < Li) { seg<0>(px0, Li, cx0, cy, frac, false, dT); cx0 += Li - px0; px0 = Li; }
+    const int e = Hi < px1 ? Hi : px1;
+    if (liqMode == 1) seg<1>(px0, e, cx0, cy, frac, true, 256); else seg<2>(px0, e, cx0, cy, frac, true, 256);
+    cx0 += e - px0; px0 = e;
+    if (px0 < px1) seg<0>(px0, px1, cx0, cy, frac, false, dT);
+  }
+  template <int MODE>
+  void seg(int px0, int px1, int cx0, int cy, bool frac, bool L, int scaleT) const {
+    if (px0 >= px1) return;
+    const uint8_t *aP = L ? g.aw : g.a; const uint16_t *cP = L ? g.cw : g.c;
+    if (const uint8_t *sp = g.span[L ? 1 : 0]) {   // clip to the columns that have coverage
+      int s0 = 0, s1 = 0;
+      if (!frac) { s0 = sp[cy * 2]; s1 = sp[cy * 2 + 1]; }
+      else {   // destination cx draws taps cx and cx - 1 of rows cy and cy - 1: the union of their spans, one wider
+        s0 = 1 << 30; s1 = 0;
+        if (cy < g.h && sp[cy * 2 + 1] > sp[cy * 2]) { s0 = sp[cy * 2]; s1 = sp[cy * 2 + 1] + 1; }
+        if (cy > 0 && sp[cy * 2 - 1] > sp[cy * 2 - 2]) { if (sp[cy * 2 - 2] < s0) s0 = sp[cy * 2 - 2]; if (sp[cy * 2 - 1] + 1 > s1) s1 = sp[cy * 2 - 1] + 1; }
+      }
+      if (s1 <= s0) return;
+      const int lo = px0 + (s0 - cx0), hi = px0 + (s1 - cx0);
+      if (lo > px0) { cx0 += lo - px0; px0 = lo; }
+      if (hi < px1) px1 = hi;
+      if (px0 >= px1) return;
+    }
+#ifdef DIGIT_PROF
+    t.prof[(frac ? 4 : 2) + (MODE ? 1 : 0)] += px1 - px0; t.prof[7]++;
+#endif
+    if (!frac) spriteRunInt<MODE>(t, y, px0, px1, aP + cy * g.w + cx0, cP + cy * g.w + cx0, scaleT, Tuse, mark.C);
+    else spriteRunFrac<MODE>(t, y, px0, px1, cx0, cy, aP, cP, g.w, g.h, w00, w10, w01, w11, scaleT, Tuse, mark.C);
+  }
+};
+
 void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
-  SpriteSampler s(g);
-  drawGlyph(s, x, y0, lb, wet, mark, false);   // the shadow is baked into the sprite (scaledGlyphs)
+  const int sourceTop = lb.yTop - y0, gw = g.w > 128 ? 128 : g.w;
+  const int ix = (int)ffloor(lb.wetDx), iy = (int)ffloor(lb.wetDy);
+  const int wx1 = (int)((lb.wetDx - ix) * 256 + 0.5f), wx0 = 256 - wx1, wy1 = (int)((lb.wetDy - iy) * 256 + 0.5f), wy0 = 256 - wy1;
+  const bool frac = wx1 != 0 || wy1 != 0;
+  // Column ranges of the two copies from the middle-row split (generic path: dcol / wcol): the dry copy
+  // where the panel column is outside [lo, hi), the wet copy where the shifted column is inside it, one
+  // extra wet column for the fractional overhang. A column shows exactly one copy.
+  int dA0 = 0, dA1 = 0, dB0 = gw, dB1 = gw, w0 = 0, w1 = frac ? gw + 1 : gw;
+  if (!wet.all) {
+    const int lo = (int)fceil(wet.lo), hi = (int)fceil(wet.hi);   // integer x >= lo  <=>  x >= ceil(lo)
+    if (hi <= lo) { dA1 = gw; w1 = w0; }
+    else { dA1 = clampI(lo - x, 0, gw); dB0 = clampI(hi - x, 0, gw); w0 = clampI(lo - x - ix, 0, w1); w1 = clampI(hi - x - ix, w0, w1); }
+  }
+  const bool anyDry = dA1 > dA0 || dB1 > dB0, anyWet = w1 > w0;
+  if (!anyDry && !anyWet) return;
+#ifdef DIGIT_PROF
+  prof[0]++;
+#endif
+  SpriteRow r{*this, mark, g, 0, 0, 0, 0, 0, {0, 0}, {0, 0}, wx0 * wy0, wx1 * wy0, wx0 * wy1, wx1 * wy1,
+              mark.C <= 0 && mark.bakedT ? 1 : 2, mark.bakedT ? 256 : mark.T};
+  const int a0 = lb.dryRy0 < lb.ry0 ? lb.dryRy0 : lb.ry0, a1 = lb.dryRy1 > lb.ry1 ? lb.dryRy1 : lb.ry1;
+  const BandInfo *band = mark.onTop ? nullptr : mark.edges.band;
+  for (int ry = a0; ry <= a1; ry++) {
+    const int y = y0 + ry;
+    if (y < baseY || y >= baseY + H) continue;
+    r.y = y; r.ry = ry;
+#ifdef DIGIT_PROF
+    prof[1]++;
+#endif
+    if (!mark.onTop) { r.Li = (int)fceil(mark.edges.lo[ry]); r.Hi = (int)fceil(mark.edges.hi[ry]); }
+    r.nb = 0;
+    if (band) {
+      // Where bandMark can return true on this row: per side with a stroke, its footprint in the render
+      // frame is -hw - 0.5 < tt < w + 0.5 (see bandMark); widened by a pixel each way and mirrored back.
+      for (int side = 0; side < 2; side++) {
+        const float wEff = band->w[side][ry]; if (wEff <= 0) continue;
+        const float xm = band->xm[side][ry], hw = band->hw;
+        const float lo = side == 0 ? xm - hw - 1 : xm - wEff - 1, hi = side == 0 ? xm + wEff : xm + hw;
+        int r0 = (int)ffloor(lo) - 1, r1 = (int)fceil(hi) + 1;
+        if (band->mirror) { const int t0 = band->L - 1 - r1, t1 = band->L - 1 - r0; r0 = t0; r1 = t1; }
+        r.b0[r.nb] = r0; r.b1[r.nb] = r1 + 1; r.nb++;
+      }
+      if (r.nb == 2 && r.b0[1] < r.b0[0]) { int t0 = r.b0[0], t1 = r.b1[0]; r.b0[0] = r.b0[1]; r.b1[0] = r.b1[1]; r.b0[1] = t0; r.b1[1] = t1; }
+      if (r.nb == 2 && r.b0[1] < r.b1[0]) { if (r.b1[1] > r.b1[0]) r.b1[0] = r.b1[1]; r.nb = 1; }   // overlapping: one footprint
+    }
+    const int cyD = lb.drySourceRows[ry] - sourceTop;
+    if (anyDry && ry >= lb.dryRy0 && ry <= lb.dryRy1 && cyD >= 0 && cyD < g.h) {
+      if (dA1 > dA0) r.run(x + dA0, x + dA1, dA0, cyD, false);
+      if (dB1 > dB0) r.run(x + dB0, x + dB1, dB0, cyD, false);
+    }
+    const int cy = lb.sourceRows[ry] - sourceTop - iy;
+    if (anyWet && ry >= lb.ry0 && ry <= lb.ry1 && cy >= 0 && cy <= g.h) {
+      if (!frac) { if (cy < g.h) r.run(x + ix + w0, x + ix + w1, w0, cy, false); }
+      else r.run(x + ix + w0, x + ix + w1, w0, cy, true);
+    }
+  }
 }
 void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
   BitmapSampler s(f, d, lb);
@@ -1839,7 +2044,8 @@ bool render_init() {
   for (int i = 0; i < 2; i++) {
     tubes[i].set.poolC = (uint16_t *)heap_caps_malloc(GLYPH_POOL_PX * 2, MALLOC_CAP_SPIRAM);
     tubes[i].set.poolA = (uint8_t *)heap_caps_malloc(GLYPH_POOL_PX, MALLOC_CAP_SPIRAM);
-    ok = ok && tubes[i].set.poolC && tubes[i].set.poolA;
+    tubes[i].set.poolS = (uint8_t *)heap_caps_malloc(GLYPH_SPAN_BYTES, MALLOC_CAP_SPIRAM);
+    ok = ok && tubes[i].set.poolC && tubes[i].set.poolA && tubes[i].set.poolS;
   }
   return ok;
 }
@@ -1847,6 +2053,9 @@ bool render_init() {
 // Safe to call for idx 0 and 1 concurrently from different tasks: each touches only tubes[idx] and its
 // own strip; params / state are read-only for the duration of the call.
 void renderTube(int idx, const TubeState &s, const Params &p, uint32_t gen, uint16_t *strip) {
+#ifdef DIGIT_PROF
+  memset(tubes[idx].prof, 0, sizeof(tubes[idx].prof));
+#endif
   Tube &t = tubes[idx & 1];
   TubeLayout lay = tubeLayout(p);
   t.FB = strip; t.H = lay.H; t.baseY = idx == 0 ? lay.yH : lay.yM; t.idx = idx & 1;
@@ -1858,3 +2067,7 @@ void renderTube(int idx, const TubeState &s, const Params &p, uint32_t gen, uint
   }
   t.drawTube(t.baseY, s, p, gen, idx == 0 ? 12 : 60);
 }
+
+#ifdef DIGIT_PROF
+const uint32_t *render_profile(int idx) { return tubes[idx].prof; }
+#endif
