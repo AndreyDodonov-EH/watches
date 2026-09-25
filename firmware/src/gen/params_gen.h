@@ -32,15 +32,14 @@ struct Params {
   float highlightSharp;
   float shadeDepth;
   float liquidThin;
-  float meniscusDepth;
-  float meniscusPow;
-  float meniscusTiltGain;
-  float meniscusAsym;
+  float contactAngle;
+  float contactHyst;
+  float contactDyn;
+  float capLength;
   float meniscusLens;
   float meniscusK;
   float meniscusDamp;
   float meniscusInertia;
-  float contactLag;
   float wetFilm;
   bool traces;
   float traceAmount;
@@ -173,8 +172,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 167
-#define PARAMS_SCHEMA_CRC 0x8ec186c1u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 166
+#define PARAMS_SCHEMA_CRC 0x33b8c243u  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -207,15 +206,14 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"highlightSharp", 'f', (uint16_t)offsetof(Params, highlightSharp)},
   {"shadeDepth", 'f', (uint16_t)offsetof(Params, shadeDepth)},
   {"liquidThin", 'f', (uint16_t)offsetof(Params, liquidThin)},
-  {"meniscusDepth", 'f', (uint16_t)offsetof(Params, meniscusDepth)},
-  {"meniscusPow", 'f', (uint16_t)offsetof(Params, meniscusPow)},
-  {"meniscusTiltGain", 'f', (uint16_t)offsetof(Params, meniscusTiltGain)},
-  {"meniscusAsym", 'f', (uint16_t)offsetof(Params, meniscusAsym)},
+  {"contactAngle", 'f', (uint16_t)offsetof(Params, contactAngle)},
+  {"contactHyst", 'f', (uint16_t)offsetof(Params, contactHyst)},
+  {"contactDyn", 'f', (uint16_t)offsetof(Params, contactDyn)},
+  {"capLength", 'f', (uint16_t)offsetof(Params, capLength)},
   {"meniscusLens", 'f', (uint16_t)offsetof(Params, meniscusLens)},
   {"meniscusK", 'f', (uint16_t)offsetof(Params, meniscusK)},
   {"meniscusDamp", 'f', (uint16_t)offsetof(Params, meniscusDamp)},
   {"meniscusInertia", 'f', (uint16_t)offsetof(Params, meniscusInertia)},
-  {"contactLag", 'f', (uint16_t)offsetof(Params, contactLag)},
   {"wetFilm", 'f', (uint16_t)offsetof(Params, wetFilm)},
   {"traces", 'b', (uint16_t)offsetof(Params, traces)},
   {"traceAmount", 'f', (uint16_t)offsetof(Params, traceAmount)},
@@ -350,7 +348,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  21, // v
+  22, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -378,15 +376,14 @@ static const Params PRESET_1 = {
   1.0f, // highlightSharp
   0.49f, // shadeDepth
   0.4f, // liquidThin
-  -12.0f, // meniscusDepth
-  3.2f, // meniscusPow
-  0.55f, // meniscusTiltGain
-  0.5f, // meniscusAsym
+  25.0f, // contactAngle
+  10.0f, // contactHyst
+  8.0f, // contactDyn
+  2.7f, // capLength
   0.0f, // meniscusLens
   180.0f, // meniscusK
   9.0f, // meniscusDamp
   6.0f, // meniscusInertia
-  0.5f, // contactLag
   6.0f, // wetFilm
   false, // traces
   0.6f, // traceAmount

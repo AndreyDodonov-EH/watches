@@ -90,11 +90,10 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
     }
   }
 
-  // Meniscus dynamics: centre pushed ahead of the contact lines by edge acceleration (inertia) and
-  // velocity (contact-angle hysteresis), springing back with a wobble.
+  // Meniscus wobble: centre pushed ahead of the contact lines by edge acceleration (inertia), springing
+  // back; a steadily moving line is the renderer's dynamic contact angle.
   const float edgeVel = s.fillVel + s.slugVel, edgeAcc = fillKick + slugAcc;   // forcing only, see sim
-  const float capRest = p.contactLag * edgeVel * 0.1f;
-  const float capAcc = -p.meniscusK * (s.cap - capRest) - p.meniscusDamp * s.capVel + p.meniscusInertia * edgeAcc;
+  const float capAcc = -p.meniscusK * s.cap - p.meniscusDamp * s.capVel + p.meniscusInertia * edgeAcc;
   s.capVel += capAcc * dt;
   s.cap += s.capVel * dt;
   if (s.cap > CAP_DYN_MAX_PX) { s.cap = CAP_DYN_MAX_PX; s.capVel = fminf(0, s.capVel); }

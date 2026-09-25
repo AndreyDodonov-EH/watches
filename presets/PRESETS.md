@@ -55,15 +55,15 @@ tilts keep it free for `playHold`, default 5 s). Opaque liquids and lab glasswar
 
 `freeGain` is gravity (570 for every slug); viscosity class → slug drag/bounce, surface spring, hysteresis, film, static skew, flick kick:
 
-| class | freeDamp | freeBounce | meniscusK | meniscusDamp | contactLag | wetFilm | skew °/g | gyro kick |
-|---|---|---|---|---|---|---|---|---|
-| watery | 0.4–1.5 | 0.15–0.35 | 400–550 | 3–16 | 1.5–3 | 8–15 | 5–9 | 0.3–0.55 |
-| medium | 1.5–4 | 0.05–0.15 | 200–350 | 12–25 | 2–3 | 12–20 | 3–5 | 0.15–0.35 |
-| viscous | 6–14 | 0 | 60–150 | 25–50 | 3 | 20–30 | 0.5–2.5 | 0.02–0.12 |
-| metal | 0.8–1.5 | 0.4–0.7 | 500–800 | 8–16 | 0–0.3 | 0 | 1.5–3 | 0.3–0.5 |
-| plasma | pinned (freeLiquid off) | | any | any | 0 | 0 | 0–1 | 0–0.06 |
+| class | freeDamp | freeBounce | meniscusK | meniscusDamp | wetFilm | skew °/g | gyro kick |
+|---|---|---|---|---|---|---|---|
+| watery | 0.4–1.5 | 0.15–0.35 | 400–550 | 3–16 | 8–15 | 5–9 | 0.3–0.55 |
+| medium | 1.5–4 | 0.05–0.15 | 200–350 | 12–25 | 12–20 | 3–5 | 0.15–0.35 |
+| viscous | 6–14 | 0 | 60–150 | 25–50 | 20–30 | 0.5–2.5 | 0.02–0.12 |
+| metal | 0.8–1.5 | 0.4–0.7 | 500–800 | 8–16 | 0 | 1.5–3 | 0.3–0.5 |
+| plasma | pinned (freeLiquid off) | | any | any | 0 | 0–1 | 0–0.06 |
 
-Non-wetting liquids (mercury, molten, xenon) take the metal-like surface rule (meniscusK 350–800, lag ≤ 0.3, film 0) whatever their bulk class.
+Non-wetting liquids (mercury, molten, xenon) take the metal-like surface rule (meniscusK 350–800, film 0) whatever their bulk class.
 
 Traces (residue on the glass where an edge receded — blood smear, syrup coating, legs — whose wet part drains back after the liquid before its stain dries): need a wetting liquid — non-wetting and plasma presets must have `traces` off. A wetting preset that leaves it on keeps `traceAmount` 0.2–2 (>1 boosts opacity through the streak/height attenuation, blood 1.1), `traceDry` 0.1–2 s — the flat-watch drying time constant; tilting along the tube dries up to 5× faster (blood 1.5, honey 2, ink 1.2, malt 0.6) — `traceFollow` 0–1 tracking viscosity — watery liquids snap back (≥ 0.2, ink 0.5), viscous ones barely crawl (≤ 0.15, honey 0.08) — and `traceStain` 0.05–0.7 for how intense the leftover stain is (thick coatings high: honey 0.45; thin legs low: malt 0.2). `traceThin` 0–3 thins the deposit with edge speed (fast smears come out faint, dense near the liquid): thin liquids high (ink 1.5), syrup low (honey 0.3). `traceFilm` 0–1 is a permanent film over the whole glass as a residue level (0 = bare glass between smears; 0.03–0.1 reads as a lightly coated tube): coating liquids (blood, honey, olive oil) may carry one, watery ones stay near 0.
 
@@ -79,8 +79,11 @@ Light:
 - edgeSoft is a coverage ramp centred on the edge (0 = hard edge, 1 = classic 1-px AA, ≥ 2 a visibly soft meniscus); with a soft edge the glow folds into the same per-pixel alpha (min(1, cov + glow)) — seamless at any width, and the edge moves sub-pixel smooth.
 
 Wetting:
-- wetting: meniscusDepth > 0 (concave), wetFilm per class.
-- non-wetting: meniscusDepth < 0 (convex bead), wetFilm 0, contactLag ≤ 0.3.
+- The meniscus is a contact-angle model (`contactAngle`, `contactHyst`, `contactDyn`, `capLength`): both ends are spherical caps set by
+  their angle; tilt pressure moves it within the hysteresis band, a moving line sits at the advancing / receding angle (Cox–Voinov on top).
+- wetting: `contactAngle + contactHyst` < 90° (concave at both ends), wetFilm per class.
+- non-wetting: `contactAngle − contactHyst` > 90° (convex bead), wetFilm 0.
+- plasma: no meniscus dynamics (`meniscusInertia`, `contactHyst`, `contactDyn` all 0).
 
 Gas:
 - none: fizz off.

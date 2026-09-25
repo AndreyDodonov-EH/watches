@@ -43,9 +43,9 @@ export interface TubeState {
   agitation: number;   // 0..1, gyro energy with fast attack / slow decay: fizz speed, edge glow
   edgeLight: number;   // -1..1, slow along-tilt follower — brightens/dims the fill edge (render only)
   acrossTilt: number;  // -1..1, slow across-tilt follower — meniscus sag toward the low wall (render only)
-  // Meniscus dynamics: the wall contact lines are pinned by capillarity, the free surface between
+  // Meniscus wobble: the wall contact lines are pinned by capillarity, the free surface between
   // them is not. `cap` = px the surface centre leads the contact lines in +x (panel frame): an
-  // impulse bulges it ahead (inertia), a moving edge drags its contact lines behind (hysteresis).
+  // impulse bulges it ahead (inertia) and it rings at the surface spring.
   cap: number;
   capVel: number;
   // Trailing wet film 0..1 left on the glass by a receding edge (drains away in ~0.5 s).
@@ -176,13 +176,12 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
     }
   }
 
-  // Meniscus dynamics (panel frame, +x): the surface centre is pushed ahead of the pinned contact
+  // Meniscus wobble (panel frame, +x): the surface centre is pushed ahead of the pinned contact
   // lines by the forcing on the edge — the flick kick and the slug's acceleration, not the fill
-  // spring's own restoring force, which is what keeps the column pinned — and by the edge's velocity
-  // (contact-angle hysteresis: an advancing line lags, a receding one clings); springs back with a wobble.
+  // spring's own restoring force, which is what keeps the column pinned — and springs back with a
+  // wobble. A steadily moving line is the renderer's dynamic contact angle, not an offset here.
   const edgeVel = s.fillVel + s.slugVel, edgeAcc = fillKick + slugAcc;
-  const capRest = p.contactLag * edgeVel * 0.1;
-  const capAcc = -p.meniscusK * (s.cap - capRest) - p.meniscusDamp * s.capVel + p.meniscusInertia * edgeAcc;
+  const capAcc = -p.meniscusK * s.cap - p.meniscusDamp * s.capVel + p.meniscusInertia * edgeAcc;
   s.capVel += capAcc * dt;
   s.cap += s.capVel * dt;
   if (s.cap > CAP_DYN_MAX_PX) { s.cap = CAP_DYN_MAX_PX; s.capVel = Math.min(0, s.capVel); }

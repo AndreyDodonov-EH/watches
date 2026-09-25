@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end firmware check: build -> flash -> pinned fps bench -> pixel parity vs the sim.
-#   tools/e2e.sh [--label TEXT] [--stages] [--no-ble] [--no-flash] [--samples N]
+#   tools/e2e.sh [--label TEXT] [--stages] [--no-ble] [--bare] [--no-flash] [--samples N]
+# --bare = no BLE and no IMU polling: USB serial + physics + render only (the ceiling).
 # Appends the bench line + parity line to firmware/.compare/e2e.log. Board must be reachable (device.py).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -10,9 +11,10 @@ while [ $# -gt 0 ]; do
         --label) LABEL="$2"; shift ;;
         --stages) STAGES=(--stages) ;;
         --no-ble) FLAGS="-DNO_BLE"; LABEL="$LABEL no-ble" ;;
+        --bare) FLAGS="-DNO_BLE -DNO_IMU"; LABEL="$LABEL bare" ;;
         --no-flash) FLASH=0 ;;
         --samples) SAMPLES="$2"; shift ;;
-        *) echo "usage: $0 [--label TEXT] [--stages] [--no-ble] [--no-flash] [--samples N]"; exit 2 ;;
+        *) echo "usage: $0 [--label TEXT] [--stages] [--no-ble] [--bare] [--no-flash] [--samples N]"; exit 2 ;;
     esac; shift
 done
 if [ "$FLASH" -eq 1 ]; then

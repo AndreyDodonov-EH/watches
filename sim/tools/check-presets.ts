@@ -6,11 +6,11 @@ import { PRESETS, presetParams, type Material, type Params } from '../src/params
 type Range = [number, number];
 const VISC: Record<Material['viscosity'], Record<string, Range>> = {
   // free slug (gravity / drag / end bounce), surface spring, hysteresis, film, static skew and flick kick
-  watery:  { freeDamp: [0.4, 1.5], freeBounce: [0.15, 0.35], meniscusK: [400, 550], meniscusDamp: [3, 16], contactLag: [1.5, 3], wetFilm: [8, 15], angleTiltGain: [5, 9], angleGyroGain: [0.3, 0.55] },
-  medium:  { freeDamp: [1.5, 4], freeBounce: [0.05, 0.15], meniscusK: [200, 350], meniscusDamp: [12, 25], contactLag: [2, 3], wetFilm: [12, 20], angleTiltGain: [3, 5], angleGyroGain: [0.15, 0.35] },
-  viscous: { freeDamp: [6, 14], freeBounce: [0, 0], meniscusK: [60, 150], meniscusDamp: [25, 50], contactLag: [3, 3], wetFilm: [20, 30], angleTiltGain: [0.5, 2.5], angleGyroGain: [0.02, 0.12] },
-  metal:   { freeDamp: [0.8, 1.5], freeBounce: [0.4, 0.7], meniscusK: [500, 800], meniscusDamp: [8, 16], contactLag: [0, 0.3], wetFilm: [0, 0], angleTiltGain: [1.5, 3], angleGyroGain: [0.3, 0.5] },
-  plasma:  { fillSloshGain: [0, 1], angleTiltGain: [0, 1], angleGyroGain: [0, 0.06], contactLag: [0, 0], wetFilm: [0, 0] },
+  watery:  { freeDamp: [0.4, 1.5], freeBounce: [0.15, 0.35], meniscusK: [400, 550], meniscusDamp: [3, 16], wetFilm: [8, 15], angleTiltGain: [5, 9], angleGyroGain: [0.3, 0.55] },
+  medium:  { freeDamp: [1.5, 4], freeBounce: [0.05, 0.15], meniscusK: [200, 350], meniscusDamp: [12, 25], wetFilm: [12, 20], angleTiltGain: [3, 5], angleGyroGain: [0.15, 0.35] },
+  viscous: { freeDamp: [6, 14], freeBounce: [0, 0], meniscusK: [60, 150], meniscusDamp: [25, 50], wetFilm: [20, 30], angleTiltGain: [0.5, 2.5], angleGyroGain: [0.02, 0.12] },
+  metal:   { freeDamp: [0.8, 1.5], freeBounce: [0.4, 0.7], meniscusK: [500, 800], meniscusDamp: [8, 16], wetFilm: [0, 0], angleTiltGain: [1.5, 3], angleGyroGain: [0.3, 0.5] },
+  plasma:  { fillSloshGain: [0, 1], angleTiltGain: [0, 1], angleGyroGain: [0, 0.06], wetFilm: [0, 0] },
 };
 
 const hex = (s: string): [number, number, number] => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
@@ -32,10 +32,10 @@ function check(id: string, p: Params, m: Material): string[] {
   if (p.freeLiquid) want(p.freeGain >= 500 && p.freeGain <= 800, `freeGain ${p.freeGain} is gravity, the same for every liquid: 500–800`);
   // a wetting liquid's surface follows its viscosity class; a non-wetting one is surface-tension
   // dominated (stiff cap, no hysteresis, no film) whatever its bulk viscosity — checked below
-  if (m.wetting) { inR('wetFilm', p.wetFilm, V.wetFilm); inR('contactLag', p.contactLag, V.contactLag); inR('meniscusK', p.meniscusK, V.meniscusK); }
+  if (m.wetting) { inR('wetFilm', p.wetFilm, V.wetFilm); inR('meniscusK', p.meniscusK, V.meniscusK); }
   else if (m.viscosity !== 'plasma') inR('meniscusK (non-wetting)', p.meniscusK, [350, 800]);
   if (m.viscosity === 'plasma') {
-    want(p.meniscusInertia === 0 && p.meniscusTiltGain === 0 && p.meniscusAsym === 0, 'plasma has no meniscus dynamics (inertia/tiltGain/asym must be 0)');
+    want(p.meniscusInertia === 0 && p.contactHyst === 0 && p.contactDyn === 0, 'plasma has no meniscus dynamics (inertia/hysteresis/dynamic angle must be 0)');
     want(p.angleMax <= 3, 'plasma: angleMax ≤ 3');
   }
 
@@ -70,11 +70,11 @@ function check(id: string, p: Params, m: Material): string[] {
   }
 
   // wetting
-  if (m.wetting) want(p.meniscusDepth > 0, `wetting: meniscusDepth ${p.meniscusDepth} must be concave (> 0)`);
+  // the whole hysteresis band stays on one side of 90°, so neither end ever turns over at rest
+  if (m.wetting) want(p.contactAngle + p.contactHyst < 90, `wetting: contact angle ${p.contactAngle} ± ${p.contactHyst} must stay below 90° (concave)`);
   else {
-    want(p.meniscusDepth < 0, `non-wetting: meniscusDepth ${p.meniscusDepth} must be convex (< 0)`);
+    want(p.contactAngle - p.contactHyst > 90, `non-wetting: contact angle ${p.contactAngle} ± ${p.contactHyst} must stay above 90° (convex)`);
     want(p.wetFilm === 0, `non-wetting: wetFilm ${p.wetFilm} must be 0`);
-    want(p.contactLag <= 0.3, `non-wetting: contactLag ${p.contactLag} > 0.3`);
   }
 
   // traces: a residue smeared on the wall needs a wetting liquid; a non-wetting bead or a

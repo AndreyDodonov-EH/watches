@@ -44,7 +44,7 @@ int main() {
     p.remaining=i&1; p.freeLiquid=(i>>1)&1;
     p.traces=true; p.traceAmount=(i%17)*0.25f; p.traceFilm=(i%11)*0.1f;
     p.wetFilm=i%31; p.edgeSoft=i%5;
-    p.meniscusDepth=(i%25)-12; p.meniscusAsym=2;
+    p.contactAngle=(i%25)*7.5f; p.contactHyst=(i%4)*5; p.contactDyn=(i%3)*30; p.capLength=1+(i%5);
     TubeState s; s.fillTarget=randf(); s.fillPos=randf()*20-10; s.angle=randf()*12-6;
     s.slugPos=randf()*(536-columnLen(s.fillTarget,p)); s.cap=randf()*20-10;
     s.light=randf()*85; s.edgeLight=randf()*2-1; s.acrossTilt=randf()*2-1;

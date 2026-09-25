@@ -4,12 +4,14 @@ const assert = require('assert/strict');
 const path = require('path');
 const [cache, out, root] = process.argv.slice(2);
 const R = require(path.join(cache, 'sim/src/render.js'));
-const { DEFAULT_PARAMS } = require(path.join(cache, 'sim/src/params.js'));
+const { DEFAULT_PARAMS, migrateParams } = require(path.join(cache, 'sim/src/params.js'));
+// Contact angle whose spherical cap has wall depth `depth` px in the 61 px test tube (R = 30).
+const ang = (depth) => 90 - 2 * Math.atan(depth / 30) * 180 / Math.PI;
 const { newTube } = require(path.join(cache, 'sim/src/physics.js'));
 const jobs = [];
 const base = { ...DEFAULT_PARAMS, tubeHeight: 61, hoursY: 0, minutesY: 100,
-  freeLiquid: true, remaining: false, meniscusDepth: 12, meniscusPow: 2,
-  meniscusLens: 0, meniscusTiltGain: 1, surfaceBand: 0.8, surfaceRim: 0.8,
+  freeLiquid: true, remaining: false, contactAngle: ang(12), contactHyst: 0, contactDyn: 0,
+  meniscusLens: 0, surfaceBand: 0.8, surfaceRim: 0.8,
   surfaceWidth: 4, surfaceTone: 0, edgeSoft: 4, frontBright: 0, edgeGlow: 0,
   wetFilm: 0, traces: false, bubble: false, fizz: false, glassReflect: 0,
   lens: 0, highlightInset: 0, digits: false, ticksH: false, ticksM: false,
@@ -37,8 +39,8 @@ for (let y = 0; y < 61; y++) for (let x = 100; x < 170; x++)
 const a = render('subpixel-before', {}, { fillPos: 0.49 });
 const b = render('subpixel-after', {}, { fillPos: 0.51 });
 assert(delta(a, b) <= 17, 'surface/rim must move without a one-pixel brightness jump');
-const flatA = render('flatten-before', { meniscusDepth: 0.49 });
-const flatB = render('flatten-after', { meniscusDepth: 0.51 });
+const flatA = render('flatten-before', { contactAngle: ang(0.49) });
+const flatB = render('flatten-after', { contactAngle: ang(0.51) });
 assert(delta(flatA, flatB) <= 17, 'flattening surface must not pop at half a pixel');
 const clean = render('band-disabled', { surfaceBand: 0, traces: true, traceAmount: 2 }, {}, base, true);
 const faint = render('band-faint', { surfaceBand: 0.005, traces: true, traceAmount: 2 }, {}, base, true);
@@ -89,9 +91,10 @@ for (const remaining of [false, true]) for (const home of [false, true]) {
   assert.equal(zoneDelta(rest, restNoTicks), 0, `settled opaque band must hide rear marks like the body (${tag})`);
   const pulled = shot({}, moving), pulledNoTicks = shot({ ticksH: false }, moving);
   assert(zoneDelta(pulled, pulledNoTicks) > 100, `receding band thinning into its trail must not hide rear marks (${tag})`);
-  for (const meniscusDepth of [0.2, 0.45]) {
-    const flat = shot({ meniscusDepth }, {}), flatNoTicks = shot({ meniscusDepth, ticksH: false }, {});
-    assert(delta([flat.zone[0]], [flatNoTicks.zone[0]]) > 150, `flattening band must not hide rear marks (${tag}, depth ${meniscusDepth})`);
+  for (const depth of [0.2, 0.45]) {
+    const contactAngle = ang(depth);
+    const flat = shot({ contactAngle }, {}), flatNoTicks = shot({ contactAngle, ticksH: false }, {});
+    assert(delta([flat.zone[0]], [flatNoTicks.zone[0]]) > 150, `flattening band must not hide rear marks (${tag}, depth ${depth})`);
   }
   // See-through dish (surfaceFill 0): the rim is drawn over the mark, not erased by it.
   const open = shot({ surfaceFill: 0 }, {}), openNoTicks = shot({ surfaceFill: 0, ticksH: false }, {});
@@ -124,10 +127,14 @@ assert(new Set(gradient.slice(30 * 536 + 400, 30 * 536 + 406)).size >= 4, 'surfa
 const covered = render('opaque-residue', { traces: true, traceAmount: 2 }, {}, base, true);
 for (let x = 400; x < 406; x++) assert.equal(covered[30 * 536 + x], symmetric[30 * 536 + x], 'opaque surface must cover residue');
 for (const film of [0.1, 0.5, 0.9]) render('settling-' + film, { traces: true, wetFilm: 15 }, { filmFree: film, filmHome: film }, base, true);
-for (const depth of [-30, -0.1, 0, 0.1, 40]) for (const remaining of [false, true])
-  render(`depth-${depth}-${remaining}`, { meniscusDepth: depth, remaining }, { edgeLight: 0.4, acrossTilt: -0.2, cap: 3 });
+for (const angle of [0, 45, 89.9, 90, 90.1, 140, 180]) for (const remaining of [false, true])
+  render(`angle-${angle}-${remaining}`, { contactAngle: angle, remaining }, { edgeLight: 0.4, acrossTilt: -0.2, cap: 3 });
+// Hysteresis band under tilt pressure, and moving lines (advancing / receding, Cox–Voinov) at both ends.
+for (const angle of [30, 140]) for (const remaining of [false, true])
+  for (const [tag, state] of [['tilt', { edgeLight: 0.6, acrossTilt: 0.5 }], ['slide', { slugVel: 40, fillVel: -10, cap: -2 }]])
+    render(`contact-${angle}-${remaining}-${tag}`, { contactAngle: angle, contactHyst: 12, contactDyn: 20, remaining }, state);
 for (const n of ['cryo', 'olive-oil', 'blood', 'mercury']) {
-  const preset = { ...DEFAULT_PARAMS, ...JSON.parse(fs.readFileSync(path.join(root, 'presets', n + '.json'))),
+  const preset = { ...DEFAULT_PARAMS, ...migrateParams(JSON.parse(fs.readFileSync(path.join(root, 'presets', n + '.json')))),
     fizz: false, bubble: false, digits: false, ticksH: false, ticksM: false, hoursY: 0 };
   render(n + '-settled', {}, {}, preset);
   render(n + '-moving', {}, { edgeLight: 0.4, cap: 2, filmHome: 0.6 }, preset, true);
@@ -137,7 +144,7 @@ for (const H of [4, 80]) for (const fill of [0, 0.001, 1])
 // Reported white trailing crescent: white tube back, strong tilt bulge, remaining mode.
 // A reversal can make the receding edge convex while the previous wet film is still up.
 const trailingPreset = { ...DEFAULT_PARAMS,
-  ...JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/meniscus-trailing.json'))),
+  ...migrateParams(JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/meniscus-trailing.json')))),
   fizz: false, bubble: false, digits: false, ticksH: false, ticksM: false };
 // If the wet film is fully developed, the inner half of the body AA and the film
 // are the same liquid colour. Their junction must not expose the white tube back.
@@ -176,7 +183,7 @@ for (const remaining of [false, true]) for (const home of [false, true]) for (co
 }
 for (const remaining of [false, true]) for (const edgeGlow of [0, 5]) {
   const bead = render(`wet-bead-${remaining}-${edgeGlow}`,
-    { remaining, edgeGlow, traces: true, traceFilm: 0, meniscusDepth: 0, surfaceBand: 0 },
+    { remaining, edgeGlow, traces: true, traceFilm: 0, contactAngle: 90, surfaceBand: 0 },
     { fillTarget: remaining ? 1 - 2 / 536 : 2 / 536, slugPos: 267 }, base);
   for (let y = 0; y < 61; y++) for (let x = 263; x < 268; x++)
     assert.equal(bead[y * 536 + x], bead[y * 536 + 535 - x], 'overlapping AA ramps must composite a bead symmetrically');
