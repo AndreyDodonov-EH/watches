@@ -44,6 +44,32 @@ select.presets { background: #222; color: var(--fg); border: 1px solid #333; bor
 button { background: #222; color: var(--fg); border: 1px solid #333; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
 button:hover { background: #2c2c2c; }
 
+/* ---- Material group (material/ui.ts): fixed-size readouts so changing text never reflows the panel ---- */
+aside details.material { border-color: #34463c; }
+aside details.material.on { border-color: #4f7a60; }
+.mhead { display: flex; gap: 8px; align-items: center; margin: 4px 0; min-width: 0; }
+.mmode { display: inline-flex; gap: 4px; align-items: center; flex: none; }
+.mhead select { flex: 1; min-width: 0; }
+.mstatus { font-family: monospace; font-size: 11px; height: 4.4em; overflow-y: auto; overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--muted); border: 1px solid #222; border-radius: 3px; padding: 1px 4px; }
+.mstatus.ok { color: #7fc79a; } .mstatus.warn { color: #e0b050; } .mstatus.err { color: #ff8a80; }
+.mono.mreadout { height: 5.8em; margin: 4px 0; line-height: 1.4; }
+.mbar { margin: 4px 0; }
+aside details.msub { border: 0; padding: 0 0 0 2px; margin: 0; min-inline-size: 0; }
+aside details.msub summary { font-weight: 500; color: var(--muted); }
+.mrow { display: grid; grid-template-columns: 96px minmax(0, 1fr) 54px 50px; gap: 4px; align-items: center; padding: 1px 0; min-width: 0; }
+.mrow span { color: var(--muted); font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow output { font-family: monospace; font-size: 10px; color: var(--muted); overflow: hidden; white-space: nowrap; }
+.mrow input[type=range] { width: 100%; margin: 0; min-width: 0; }
+.mrow input[type=number] { width: 100%; font-family: monospace; font-size: 11px; text-align: right; background: #111; color: inherit; border: 1px solid #2a2a2a; border-radius: 3px; padding: 1px 2px; -moz-appearance: textfield; }
+.mrow input[type=number]::-webkit-inner-spin-button { display: none; }
+.mrow input[type=number].bad { border-color: #c44; }
+.mrow select { grid-column: 2 / 4; min-width: 0; background: #111; color: inherit; border: 1px solid #2a2a2a; border-radius: 3px; padding: 2px; }
+.mrow :disabled { opacity: 0.5; }
+/* legacy rows owned by the material (derived / fixed) in material mode */
+.row.locked span { opacity: 0.5; }
+.row.locked :disabled { opacity: 0.55; }
+
 /* ---- leather cuff overlay (presentation only) ---- */
 .leather { position: absolute; inset: -60px -40px; pointer-events: none;
   background-color: #3a2416;

@@ -1,5 +1,5 @@
 {
-  "v": 23,
+  "v": 24,
   "tubeHeight": 60,
   "hoursY": 0,
   "minutesY": 185,
@@ -17,6 +17,8 @@
   "glassRim": 0.69,
   "glassWall": 5,
   "glassWallGlow": 0.6,
+  "rimLight": 0,
+  "rimTint": "#000000",
   "glassOverLiquid": 0.64,
   "lens": -0.2,
   "lensCurve": 0.2,

@@ -21,6 +21,8 @@ struct Params {
   float glassRim;
   float glassWall;
   float glassWallGlow;
+  float rimLight;
+  uint32_t rimTint;
   float glassOverLiquid;
   float lens;
   float lensCurve;
@@ -174,8 +176,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 168
-#define PARAMS_SCHEMA_CRC 0xb28ec40du  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 170
+#define PARAMS_SCHEMA_CRC 0x91818d7fu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -197,6 +199,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"glassRim", 'f', (uint16_t)offsetof(Params, glassRim)},
   {"glassWall", 'f', (uint16_t)offsetof(Params, glassWall)},
   {"glassWallGlow", 'f', (uint16_t)offsetof(Params, glassWallGlow)},
+  {"rimLight", 'f', (uint16_t)offsetof(Params, rimLight)},
+  {"rimTint", 'c', (uint16_t)offsetof(Params, rimTint)},
   {"glassOverLiquid", 'f', (uint16_t)offsetof(Params, glassOverLiquid)},
   {"lens", 'f', (uint16_t)offsetof(Params, lens)},
   {"lensCurve", 'f', (uint16_t)offsetof(Params, lensCurve)},
@@ -352,7 +356,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  23, // v
+  24, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -369,6 +373,8 @@ static const Params PRESET_1 = {
   0.4f, // glassRim
   4.0f, // glassWall
   0.25f, // glassWallGlow
+  0.0f, // rimLight
+  0x000000, // rimTint
   0.4f, // glassOverLiquid
   0.6f, // lens
   1.0f, // lensCurve

@@ -661,6 +661,7 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   RGB tubeBack = hexToRgb(p.tubeBack), tubeBack2 = hexToRgb(p.tubeBack2), ghi = hexToRgb(p.glassHi);
   float br = p.brightness * p.liquidBright;
   RGB liquidHiScaled = scale(hi, br), glassHiScaled = scale(ghi, p.brightness);
+  const RGB rimTint = scale(hexToRgb(p.rimTint), p.brightness);
   float bodyL = ambientBodyL(p), ambAmt = ambientAmt(p);
   float yc = (H - 1) / 2.0f, lightRad = 2 * lightDeg * (float)M_PI / 180;
   int hiTop = highlightTop(p, lightDeg);
@@ -702,6 +703,11 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     c = scale(c, br);
     RGB residue = c;
     c = mix(c, scale(back, p.brightness), p.liquidTransparency);
+    // Side-lit rim (sim rimLight/rimTint): rises as u^2 toward the walls; body only, not the residue.
+    if (p.rimLight > 0) {
+      float rk = p.rimLight * u * u;
+      c = {fmn(255, c.r + rk * rimTint.r), fmn(255, c.g + rk * rimTint.g), fmn(255, c.b + rk * rimTint.b)};
+    }
     if (y >= hiTop && y < hiTop + p.highlightH) {
       float k = powf(1 - fabsf((y - hiTop) / fmx(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
       c = mix(c, liquidHiScaled, fmn(1, (0.35f + 0.65f * k) * p.highlightBright));

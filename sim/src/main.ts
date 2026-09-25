@@ -6,6 +6,8 @@ import { renderFrame, blit, stepFizz, fb, fizz, loadSprites, tubeLayout } from '
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom } from './overlay';
 import { DEFAULT_VIEW, loadSession, saveSession } from './persist';
 import { buildPanel } from './ui';
+import { LOCKED_KEYS, buildMaterialPanel, isDesignKey } from './material/ui';
+import { MATERIAL_KEYS, validateMaterial } from './material/model';
 loadSprites(`${import.meta.env.BASE_URL}assets/`);
 import { SerialImu } from './serial';
 import { SerialTransport } from './transport/serial';
@@ -19,6 +21,7 @@ import type { TransportStatus } from './transport/types';
 const url = new URLSearchParams(location.search);
 const session = loadSession(url.get('fresh') === '1');
 const params: Params = session.params;
+const matState = session.material;              // physical-material mode: params = derive(material, design)
 const overlay = session.view.overlay;
 const manual = session.view.manual;             // sliders / drag
 const setClock = session.view.setClock;
@@ -33,7 +36,7 @@ let demoClock = Date.now();
 const app = document.getElementById('app')!;
 app.innerHTML = `
 <header>
-    <h1>Liquid Watch — sim <a href="./physical.html">physical lab</a></h1>
+  <h1>Liquid Watch — sim</h1>
   <div class="top">
     <label>scale <select id="scale"><option value="0.33">0.33 (≈ real size @96 dpi)</option><option value="0.5" selected>0.5</option><option value="0.75">0.75</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
     <label><input type="checkbox" id="ovl" checked> leather cuff</label>
@@ -101,7 +104,7 @@ applyOverlay(ovlDom, overlay, tubeLayout(params));
 // ---------- persistence ----------
 // One delegated listener covers every control on the page (top bar, time, tilt, params panel);
 // programmatic changes (presets, import, drag-tilt, reset) call save() explicitly.
-const save = (): void => saveSession({ params, view: { scale, showGrid, paused, timeMode, demoSpeed, setClock, manual, overlay } });
+const save = (): void => saveSession({ params, view: { scale, showGrid, paused, timeMode, demoSpeed, setClock, manual, overlay }, material: matState });
 app.addEventListener('input', save);
 app.addEventListener('change', save);
 
@@ -124,9 +127,9 @@ setScale();
 $('scale').oninput = (e) => { scale = +(e.target as HTMLSelectElement).value; setScale(); };
 $('ovl').oninput = (e) => { overlay.enabled = (e.target as HTMLInputElement).checked; applyOverlay(ovlDom, overlay, tubeLayout(params)); setScale(); };
 $('leather').oninput = (e) => { overlay.leather = (e.target as HTMLSelectElement).value as any; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
-$('lens').oninput = (e) => { params.lens = +(e.target as HTMLInputElement).value; pushParam('lens'); };
-$('lenscurve').oninput = (e) => { params.lensCurve = +(e.target as HTMLInputElement).value; pushParam('lensCurve'); };
-$('toplens').oninput = (e) => { params.topLens = +(e.target as HTMLInputElement).value; pushParam('topLens'); };
+$('lens').oninput = (e) => { params.lens = +(e.target as HTMLInputElement).value; paramEdited('lens'); };
+$('lenscurve').oninput = (e) => { params.lensCurve = +(e.target as HTMLInputElement).value; paramEdited('lensCurve'); };
+$('toplens').oninput = (e) => { params.topLens = +(e.target as HTMLInputElement).value; paramEdited('topLens'); };
 $('lenssmooth').oninput = (e) => { overlay.lensSmooth = (e.target as HTMLInputElement).checked; };
 $('gloss').oninput = (e) => { overlay.gloss = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
 $('inset').oninput = (e) => { overlay.slotInset = +(e.target as HTMLInputElement).value; applyOverlay(ovlDom, overlay, tubeLayout(params)); };
@@ -248,7 +251,11 @@ const pushParam = (key?: keyof Params) => {
   if (!flushTimer) flushTimer = window.setTimeout(flush, 50);
 };
 $('pull').onclick = async () => {
-  try { Object.assign(params, await transport.getParams()); panelUi.refresh(); syncView(); save(); $('serialst').textContent = 'pulled'; }
+  try {
+    Object.assign(params, await transport.getParams());
+    if (matState.mode === 'material') { materialUi.adoptDesign(); materialUi.rederive(true); } // the device's design, re-derived
+    panelUi.refresh(); syncView(); save(); $('serialst').textContent = 'pulled';
+  }
   catch (e) { $('serialst').textContent = String(e); }
 };
 $('pushall').onclick = async () => { if (!transport.connected) return; await transport.setParams(params); $('serialst').textContent = 'pushed'; };
@@ -284,23 +291,69 @@ $('settime').onclick = pushTime;
 
 // params panel
 const LAYOUT_KEYS: (keyof Params)[] = ['tubeHeight', 'hoursY', 'minutesY'];
-const panelUi = buildPanel($('panel'), params, { onChange: (key) => {
+/** Params changed outside a single edit (derive, preset, import): panel, top bar, cuff, grid. */
+function paramsReplaced(): void {
+  panelUi.refresh(); syncView();
+}
+/** One legacy key (`key`) or the whole struct (no key) was edited in the legacy panel / top bar. In
+ *  material mode a design key goes into the design and re-derives; a whole-struct change (legacy preset,
+ *  import, reset) contributes its design keys. Derived / fixed keys are locked there. */
+function paramEdited(key?: keyof Params): void {
+  if (matState.mode === 'material') {
+    if (!key) materialUi.adoptDesign();
+    else if (isDesignKey(key)) matState.design = { ...matState.design, [key]: params[key] };
+    else { console.warn(`material mode: ${key} is derived, edit ignored`); return; }
+    materialUi.rederive(!key);
+    return;
+  }
   save(); pushParam(key);
   if (!key) syncView();
   if (!key || LAYOUT_KEYS.includes(key)) { applyOverlay(ovlDom, overlay, tubeLayout(params)); drawGrid(); }
-} });
+}
+const panelUi = buildPanel($('panel'), params, { onChange: paramEdited });
+const materialUi = buildMaterialPanel($('panel'), matState, {
+  params,
+  onDerived: (changed, whole) => {
+    paramsReplaced(); save();
+    // whole-state changes resync the device; a field edit pushes only what the derive changed
+    if (whole) pushParam(); else for (const k of changed) pushParam(k);
+  },
+  onMode: (mode) => panelUi.setLocked(mode === 'material' ? LOCKED_KEYS : new Set()),
+  save,
+});
+panelUi.setLocked(matState.mode === 'material' ? LOCKED_KEYS : new Set());
 
 // URL params, applied on top of the restored session — for reproducible states / screenshots:
 //   ?fresh=1 (ignore the saved session) &preset=<id from PRESETS> &t=10:09 &demo=120 &settle=1
 //   &along=0.3 &across=0 &scale=3 &cuff=0 &lens=0.6 &lenscurve=1 &lenssmooth=1 &leather=black &grid=1
 //   &p.<paramKey>=<value>   e.g. &p.liquid=%2339ff14&p.bubble=0
+// Physical material (applied in this order): preset → &material=<id from MATERIAL_PRESETS> (enters
+// material mode) → &m.<materialKey>=<value> (enters material mode) → &p.<designKey>=<value>. In material
+// mode p.<key> of a derived / fixed key is ignored with a warning; Params are then derived once.
 {
   const u = url;
+  const typed = (key: keyof Params, v: string): unknown => {
+    const cur = (params as any)[key];
+    return typeof cur === 'boolean' ? v === '1' || v === 'true' : typeof cur === 'number' ? parseFloat(v) : v;
+  };
   const preset = PRESETS.find((e) => e.id === u.get('preset'));
-  if (preset) Object.assign(params, presetParams(preset));
+  if (preset) {
+    Object.assign(params, presetParams(preset));
+    if (matState.mode === 'material') materialUi.adoptDesign();
+  }
+  if (u.has('material') && !materialUi.selectPreset(u.get('material')!)) console.warn(`?material=${u.get('material')}: no such material preset`);
+  for (const [k, v] of u) if (k.startsWith('m.')) {
+    const key = k.slice(2);
+    if (!(MATERIAL_KEYS as readonly string[]).includes(key)) { console.warn(`?${k}: not a material property, ignored`); continue; }
+    if (matState.mode !== 'material') materialUi.enter();
+    try { matState.material = validateMaterial({ ...matState.material, [key]: parseFloat(v) }); }
+    catch (error) { console.warn(`?${k}=${v} ignored: ${(error as Error).message}`); }
+  }
   for (const [k, v] of u) if (k.startsWith('p.')) {
-    const key = k.slice(2) as keyof Params; const cur = (params as any)[key];
-    (params as any)[key] = typeof cur === 'boolean' ? v === '1' || v === 'true' : typeof cur === 'number' ? parseFloat(v) : v;
+    const key = k.slice(2) as keyof Params;
+    if (matState.mode !== 'material') { (params as any)[key] = typed(key, v); continue; }
+    if (isDesignKey(key)) matState.design = { ...matState.design, [key]: typed(key, v) };
+    else console.warn(`?${k}: ${key} is derived from the material in material mode, ignored`);
   }
   if (u.has('along')) manual.along = +u.get('along')!;
   if (u.has('across')) manual.across = +u.get('across')!;
@@ -310,6 +363,12 @@ const panelUi = buildPanel($('panel'), params, { onChange: (key) => {
   if (u.has('cuff')) overlay.enabled = u.get('cuff') === '1';
   if (u.has('lens')) params.lens = +u.get('lens')!;
   if (u.has('lenscurve')) params.lensCurve = +u.get('lenscurve')!;
+  if (matState.mode === 'material') {
+    if (u.has('lens')) matState.design = { ...matState.design, lens: params.lens };
+    if (u.has('lenscurve')) matState.design = { ...matState.design, lensCurve: params.lensCurve };
+    materialUi.refresh();
+    materialUi.rederive(true);  // also after a load: the laws may have changed since the session was saved
+  }
   if (u.has('lenssmooth')) overlay.lensSmooth = u.get('lenssmooth') === '1';
   if (u.has('leather')) overlay.leather = u.get('leather') as typeof overlay.leather;
   if (u.has('grid')) showGrid = u.get('grid') === '1';
@@ -418,4 +477,4 @@ if (url.has('settle')) for (let i = 0; i < 250; i++) physics(PHYS_DT); // spring
 requestAnimationFrame(frame);
 
 // dev hook
-(window as any).sim = { params, hours, minutes, fb, fizz, overlay };
+(window as any).sim = { params, hours, minutes, fb, fizz, overlay, material: matState, links }; // links: check-material-ui stubs a transport
