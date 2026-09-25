@@ -666,6 +666,7 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   int hiTop = highlightTop(p, lightDeg);
   const RGB rimC = hexToRgb(p.bubbleRim);
   const RGB rimLit = { fmn(255, rimC.r * br), fmn(255, rimC.g * br), fmn(255, rimC.b * br) };   // clipped lit rim (sim rimLit)
+  float rowL[TUBE_HEIGHT_MAX];   // per-row liquid luma (fixed-size local, sim rowL)
   // Wall band (sim buildPalette): rows whose ray misses the bore never reach the back (dryT 0),
   // ramping up over a few rows inside; the liquid still shows through there. A neutral grazing
   // rim rises toward the silhouette on both sides (glassRim). glassWall 0 keeps a one-row rim.
@@ -716,10 +717,11 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     pal.traceRows[y] = q(scale(to888(q(residue)), 0.85f));
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
-    // Fizz ring follows the cylinder's light: glassW's style/Lambert mix, without the highlight tent and reflections.
-    float amb = 0.5f + 0.5f * cosf((t - 0.3f) * (float)M_PI * 1.6f), wr = amb + (lam - amb) * p.lightPhys;
-    pal.bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.35f + 0.45f * wr), bodyL, ambAmt));
+    rowL[y] = luma(c);
   }
+  // Fizz ring: the lit rim shaded as the liquid is at that row (luma relative to the brightest row), cap 0.8 (sim).
+  float rowLMax = 1; for (int y = 0; y < H; y++) rowLMax = fmx(rowLMax, rowL[y]);
+  for (int y = 0; y < H; y++) pal.bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.8f * rowL[y] / rowLMax), bodyL, ambAmt));
   pal.body = q(scale(body, br));
   pal.tubeBack = q(scale(tubeBack, p.brightness));
   pal.bubbleRim = q(ambientize(scale(rimC, br), bodyL, ambAmt));
@@ -2049,11 +2051,11 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       const float r = fizzR(p, f.v) * (1 + 0.6f * (1 - pop));
       // Seen through liquid in proportion to its depth: a deeper bubble fades toward the liquid (see sim).
       const float depthK = 1 - p.fizzDepth * f.z * (1 - p.liquidTransparency);   // rim/pinpoint: colour mix toward the body (sim cRimD / cBlickD); interior tint: alpha scale
-      const float m = fizzMag(mag, H, f.y, r), ry = r / m, off = r * p.fizzShadeOff;
+      const float m = fizzMag(mag, H, f.y, r), ry = r / m, off = fmn(r * p.fizzShadeOff, r - 1);   // core shift, centre kept in the disc (sim)
       // Light direction in unsquashed disc space (liquid frame): x fixed toward screen-left, y toward the highlight row.
       const float ly = clampf((yHi - f.y) * invHalfH, -1, 1), nrm = rsqrtApprox(lxS * lxS + ly * ly);   // sim: exact 1/sqrt; <= 2.1e-7 rel.
       const float dirX = lxSign * lxS * nrm, dirY = ly * nrm;
-      const float rIn = r - 0.5f, rOut = r + 0.5f, kc = r - 1 - off;
+      const float rIn = r - 0.5f, rOut = r + 0.5f, kc = r - 1;   // ring 1 px at its thinnest; the offset only shifts the core
       DiscRow d;
       d.fx = fx; d.r = r; d.offX = -dirX * off; d.offY = -dirY * off; d.kc = kc;   // dark core shifted away from the light
       // Specular pinpoint on the lit side (r >= 2.5, fizzBlick > 0).
