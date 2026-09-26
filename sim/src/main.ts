@@ -320,6 +320,8 @@ const materialUi = buildMaterialPanel($('panel'), matState, {
   },
   onMode: (mode) => panelUi.setLocked(mode === 'material' ? LOCKED_KEYS : new Set()),
   save,
+  onFlags: (keys) => panelUi.setFlagged(keys),
+  revealLegacy: (key) => { panelUi.reveal(key); },
 });
 panelUi.setLocked(matState.mode === 'material' ? LOCKED_KEYS : new Set());
 

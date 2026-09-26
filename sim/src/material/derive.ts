@@ -6,8 +6,8 @@ import { DEFAULT_PARAMS, PARAM_META, PARAMS_VERSION, type Material as MaterialCl
 import { PANEL_H, TUBE_HEIGHT_MAX, MM_PER_PX } from '../../../spec/layout';
 import { VISC, coherenceIssues, luma as lumaHex } from './coherence';
 import {
-  DEFAULT_MATERIAL, DESIGN_KEYS, MATERIAL_META, validateDesign, validateMaterial,
-  type Design, type DesignKey, type Material,
+  DEFAULT_MATERIAL, DESIGN_KEYS, MATERIAL_KEYS, MATERIAL_META, validateDesign, validateMaterial,
+  type Design, type DesignKey, type Material, type MaterialKey,
 } from './model';
 import { U_WALL, anchored, clamp, classClamp, colourLaws, displayOffset, enc255, hexRgb, luma3, rgbHex, type Anchor, type RGB3 } from './optical';
 import { buildPalette } from '../render';
@@ -107,6 +107,8 @@ const GAS_RANGE: Record<MaterialClass['gas'], { size: [number, number]; speed: [
 };
 /** digitFont values ≥ this select the image sprite fonts (render.ts SPRITE_FONT = FONTS.length). */
 const SPRITE_FONT = 5;
+/** A backing this light (luma, 8-bit) is named by an overexposure rejection (9: "darken the backing"). */
+const LIGHT_BACK = 128;
 
 export interface DeriveCoords {
   muEff: number; x: number; Oh: number; Ca0: number; lc: number; pxPerMm: number; T: number; Tsnap: number; ELum: number;
@@ -130,12 +132,85 @@ export interface DeriveReport {
   rim: { gain: number; error: number; rimError: number; bodyOver: number };
   /** Rejections; derive() throws when non-empty. */
   issues: string[];
+  /** The same rejections, one per `issues` entry in the same order, with the inputs each points at. */
+  problems: DeriveProblem[];
+}
+
+/** One rejection and the inputs it points at (the UI flags those controls). */
+export interface DeriveProblem {
+  /** The rejection number (1–12). */
+  code: number;
+  /** The issue string, identical to the matching `issues` entry. */
+  text: string;
+  /** Material properties the rejection points at. */
+  material: MaterialKey[];
+  /** Design keys (legacy Params the user edits in material mode) it points at. */
+  design: DesignKey[];
+  /** Derived / fixed legacy keys a realism (coherence) message names: the out-of-range derived values. */
+  derived: (keyof Params)[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Problems: which inputs a rejection points at
+
+const EMISSION_KEYS: readonly MaterialKey[] = ['emissionR', 'emissionG', 'emissionB'];
+const ABSORPTION_KEYS: readonly MaterialKey[] = ['absorptionR', 'absorptionG', 'absorptionB'];
+/** The material drivers of a derived legacy key (rejection 11 names derived values; the user edits these). */
+const DRIVERS: readonly { keys: readonly (keyof Params)[]; material: readonly MaterialKey[]; design?: readonly DesignKey[] }[] = [
+  { keys: ['freeDamp', 'freeBounce', 'meniscusK', 'meniscusDamp', 'angleTiltGain', 'angleGyroGain', 'wetFilm', 'traceFollow', 'traceThin'],
+    material: ['viscosity', 'density', 'surfaceTension', 'innerRadius'] },
+  { keys: ['liquidTransparency', 'liquid', 'liquidHi', 'liquidLo', 'shadeDepth', 'liquidThin', 'markContrast'],
+    material: [...ABSORPTION_KEYS, 'scattering', 'exposure', 'ambient'], design: ['tubeBack'] },
+  { keys: ['glowStrength', 'edgeGlow', 'lightPhys', 'liquidBright', 'glassOverLiquid'], material: EMISSION_KEYS },
+  { keys: ['contactAngle', 'contactHyst'], material: ['contactAngle', 'contactHysteresis'] },
+  { keys: ['wetFilm', 'traces', 'traceAmount', 'traceDry', 'traceFollow', 'traceStain', 'traceThin', 'traceFilm'],
+    material: ['solidsFraction', 'dryingTime', 'viscosity'] },
+  { keys: ['fizz', 'fizzCount', 'fizzSize', 'fizzSpeed', 'fizzFoamLife', 'fizzFlatRise', 'fizzEdgeRise', 'fizzDriftGain'],
+    material: ['gasMode', 'gasLevel', 'bubbleRadius', 'foamStability', 'viscosity'] },
+  { keys: ['highlightBright'], material: ['lightIntensity', 'lightElevation', 'lightSize'] },
+];
+const PARAM_KEYS = Object.keys(DEFAULT_PARAMS).filter((k) => k.length > 1) as (keyof Params)[];
+/** Keys that are also plain words in the realism messages ("a liquid is a free slug"): named only in code
+ *  position — `luma(liquid)`, `liquid = …`, `liquid #…`, `liquid 0.4`. */
+const PROSE_KEYS: ReadonlySet<string> = new Set(['liquid']);
+/** Prose names of legacy keys in the realism messages. */
+const PROSE_ALIASES: readonly [RegExp, readonly (keyof Params)[]][] = [
+  [/\btube back\b/, ['tubeBack']], [/\bcontact angle\b/, ['contactAngle', 'contactHyst']],
+];
+const reEsc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Keys of `keys` named in `text` (whole-word, longest first; a match is blanked so a shorter key never
+ *  matches inside it), in order of first appearance. */
+export function namedKeys<K extends string>(text: string, keys: readonly K[]): K[] {
+  let s = text;
+  const at: [number, K][] = [];
+  for (const k of [...keys].sort((a, b) => b.length - a.length)) {
+    const re = PROSE_KEYS.has(k) ? new RegExp(`(?<=\\()${reEsc(k)}\\b|\\b${reEsc(k)}(?= [=#\\d])`, 'g') : new RegExp(`\\b${reEsc(k)}\\b`, 'g');
+    let first = -1;
+    s = s.replace(re, (hit, pos: number) => { if (first < 0) first = pos; return ' '.repeat(hit.length); });
+    if (first >= 0) at.push([first, k]);
+  }
+  return at.sort((a, b) => a[0] - b[0]).map(([, k]) => k);
+}
+const isDesign = (k: string): k is DesignKey => (DESIGN_KEYS as readonly string[]).includes(k);
+const uniq = <T>(a: readonly T[]): T[] => [...new Set(a)];
+/** A realism (coherence) message as a problem: every legacy key it names — a design key points at itself,
+ *  a derived one at its material drivers (DRIVERS; unknown drivers: none). `text` defaults to the message. */
+export function coherenceProblem(message: string, text = message): DeriveProblem {
+  const material: MaterialKey[] = [], design: DesignKey[] = [], derived: (keyof Params)[] = [];
+  const named = namedKeys(message, PARAM_KEYS);
+  for (const [re, keys] of PROSE_ALIASES) if (re.test(message)) named.push(...keys);
+  for (const k of named) {
+    if (isDesign(k)) { design.push(k); continue; }
+    derived.push(k);
+    for (const d of DRIVERS) if (d.keys.includes(k)) { material.push(...d.material); design.push(...(d.design ?? [])); }
+  }
+  return { code: 11, text, material: uniq(material), design: uniq(design), derived: uniq(derived) };
 }
 
 /** Every material field finite and in range (invalid ones replaced by the default so the report stays
  *  finite; they are listed as rejections). */
-function sanitizeMaterial(input: unknown, issues: string[]): Material {
-  try { return validateMaterial(input); } catch (error) { issues.push(`rejection 7 (invalid material): ${(error as Error).message}`); }
+function sanitizeMaterial(input: unknown, reject: (text: string) => void): Material {
+  try { return validateMaterial(input); } catch (error) { reject(`rejection 7 (invalid material): ${(error as Error).message}`); }
   const src = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
   const m = { ...DEFAULT_MATERIAL };
   for (const meta of MATERIAL_META) {
@@ -144,8 +219,8 @@ function sanitizeMaterial(input: unknown, issues: string[]): Material {
   }
   return m;
 }
-function sanitizeDesign(input: unknown, issues: string[]): Design {
-  try { return validateDesign(input); } catch (error) { issues.push(`rejection 7 (invalid design): ${(error as Error).message}`); }
+function sanitizeDesign(input: unknown, reject: (text: string) => void): Design {
+  try { return validateDesign(input); } catch (error) { reject(`rejection 7 (invalid design): ${(error as Error).message}`); }
   const src = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
   const d: Record<string, unknown> = {};
   for (const k of DESIGN_KEYS) {
@@ -192,19 +267,27 @@ function backAt(d: Pick<Params, 'tubeBack' | 'tubeBack2' | 'tubeBackGradient'>, 
 }
 
 export function deriveReport(material: Material, design: Design): DeriveReport {
-  const issues: string[] = [];
-  const m = sanitizeMaterial(material, issues);
-  const dIn = sanitizeDesign(design, issues);
+  const issues: string[] = [], problems: DeriveProblem[] = [];
+  /** One rejection: the issue string and the inputs it points at. */
+  const reject = (text: string, mat: readonly MaterialKey[] = [], des: readonly DesignKey[] = [], derived: readonly (keyof Params)[] = []): void => {
+    issues.push(text);
+    problems.push({ code: +(/^rejection (\d+)/.exec(text)?.[1] ?? 0), text, material: uniq(mat), design: uniq(des), derived: uniq(derived) });
+  };
+  /** Rejection 7: the validators and bounds name the offending key. */
+  const rejectNamed = (text: string, what: 'material' | 'design'): void =>
+    what === 'material' ? reject(text, namedKeys(text, MATERIAL_KEYS)) : reject(text, [], namedKeys(text, DESIGN_KEYS));
+  const m = sanitizeMaterial(material, (t) => rejectNamed(t, 'material'));
+  const dIn = sanitizeDesign(design, (t) => rejectNamed(t, 'design'));
   const d = {} as Pick<Params, DesignKey>;
   for (const k of DESIGN_KEYS) (d as Record<string, unknown>)[k] = hasOwn(dIn, k) ? dIn[k] : DEFAULT_PARAMS[k];
 
-  issues.push(...designBoundIssues(d));
+  for (const t of designBoundIssues(d)) rejectNamed(t, 'design');
   // layout (tubeLayout limits) and the one physical→display conversion
   const H = Math.max(4, Math.min(TUBE_HEIGHT_MAX, Math.round(d.tubeHeight)));
-  if (Math.round(d.tubeHeight) !== H) issues.push(`rejection 7 (layout): tubeHeight ${d.tubeHeight} outside [4, ${TUBE_HEIGHT_MAX}] px`);
+  if (Math.round(d.tubeHeight) !== H) reject(`rejection 7 (layout): tubeHeight ${d.tubeHeight} outside [4, ${TUBE_HEIGHT_MAX}] px`, [], ['tubeHeight']);
   for (const k of ['hoursY', 'minutesY'] as const) {
     const y = Math.round(d[k]);
-    if (y < 0 || y > PANEL_H - H) issues.push(`rejection 7 (layout): ${k} ${d[k]} puts the ${H} px tube outside the ${PANEL_H} px panel`);
+    if (y < 0 || y > PANEL_H - H) reject(`rejection 7 (layout): ${k} ${d[k]} puts the ${H} px tube outside the ${PANEL_H} px panel`, [], [k]);
   }
   const Rpx = (H - 1) / 2, r = m.innerRadius, pxPerMm = Rpx / (r + m.wallThickness);
 
@@ -232,29 +315,35 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
 
   // rejections (the design's explicit freeLiquid: an absent key is plasma-derived, not overwritten)
   if (!plasma && !wetting && !(m.contactAngle - m.contactHysteresis > 90))
-    issues.push(`rejection 1 (contact band): contact angle ${m.contactAngle} ± ${m.contactHysteresis} includes 90°`);
+    reject(`rejection 1 (contact band): contact angle ${m.contactAngle} ± ${m.contactHysteresis} includes 90°`, ['contactAngle', 'contactHysteresis']);
   if (!plasma && m.gasMode === 1 && viscosity !== 'watery')
-    issues.push(`rejection 2 (carbonation): dissolved gas implies a watery liquid, this one is ${viscosity} (μ_eff ${muEff.toPrecision(3)})`);
+    reject(`rejection 2 (carbonation): dissolved gas implies a watery liquid, this one is ${viscosity} (μ_eff ${muEff.toPrecision(3)})`,
+      ['gasMode', 'viscosity', 'density', 'innerRadius']);
   if (plasma) {
-    if (!emissive) issues.push(`rejection 3 (plasma): a plasma must emit (E_lum ${ELum.toFixed(3)} ≤ 0.02)`);
-    if (m.gasMode !== 0) issues.push(`rejection 3 (plasma): a plasma has no gas (gasMode ${m.gasMode})`);
-    if (dIn.freeLiquid === true) issues.push('rejection 3 (plasma): a plasma cannot slide — the design must set freeLiquid false');
+    if (!emissive) reject(`rejection 3 (plasma): a plasma must emit (E_lum ${ELum.toFixed(3)} ≤ 0.02)`, ['phase', ...EMISSION_KEYS]);
+    if (m.gasMode !== 0) reject(`rejection 3 (plasma): a plasma has no gas (gasMode ${m.gasMode})`, ['phase', 'gasMode']);
+    if (dIn.freeLiquid === true) reject('rejection 3 (plasma): a plasma cannot slide — the design must set freeLiquid false', ['phase'], ['freeLiquid']);
   }
+  // the backing colours the palette draws: tubeBack, and tubeBack2 with a gradient
+  const backs: [DesignKey, string][] = Math.round(d.tubeBackGradient) !== 0 ? [['tubeBack', d.tubeBack], ['tubeBack2', d.tubeBack2]] : [['tubeBack', d.tubeBack]];
   if (emissive) {
-    const backs = Math.round(d.tubeBackGradient) !== 0 ? [d.tubeBack, d.tubeBack2] : [d.tubeBack];
-    for (const b of backs) if (lumaHex(b) >= 16)
-      issues.push(`rejection 4 (emissive backing): backing ${b} luma ${lumaHex(b).toFixed(1)} ≥ 16 behind an emissive liquid`);
+    for (const [k, b] of backs) if (lumaHex(b) >= 16)
+      reject(`rejection 4 (emissive backing): backing ${b} luma ${lumaHex(b).toFixed(1)} ≥ 16 behind an emissive liquid`, EMISSION_KEYS, [k]);
   }
   if (opacity === 'clear' && emissive)
-    issues.push(`rejection 5 (clear emitter): a clear liquid (T ${colour.T.toFixed(3)}) cannot emit — a glowing liquid is translucent`);
+    reject(`rejection 5 (clear emitter): a clear liquid (T ${colour.T.toFixed(3)}) cannot emit — a glowing liquid is translucent`, [...EMISSION_KEYS, ...ABSORPTION_KEYS]);
   const El = m.exposure * (m.ambient + 0.5 * m.lightIntensity);
-  if (El < 0.01 && !emissive) issues.push(`rejection 6 (nothing to render): no illumination (E_l ${El.toFixed(4)}) and no emission`);
+  if (El < 0.01 && !emissive)
+    reject(`rejection 6 (nothing to render): no illumination (E_l ${El.toFixed(4)}) and no emission`, ['lightIntensity', 'ambient', 'exposure', ...EMISSION_KEYS]);
   if (colour.unrepresentable)
-    issues.push(`rejection 10 (unrepresentable body): ${colour.unrepresentable} — lower exposure or the backing contrast`);
+    reject(`rejection 10 (unrepresentable body): ${colour.unrepresentable} — lower exposure or the backing contrast`,
+      ['exposure', ...ABSORPTION_KEYS, 'scattering'], ['tubeBack']);
   if (colour.overexposed)
-    issues.push(`rejection 9 (overexposed): ${colour.overexposed} — lower exposure, lightIntensity, ambient or emission, or darken the backing`);
+    reject(`rejection 9 (overexposed): ${colour.overexposed} — lower exposure, lightIntensity, ambient or emission, or darken the backing`,
+      ['exposure', 'lightIntensity', 'ambient', ...EMISSION_KEYS], backs.filter(([, b]) => lumaHex(b) >= LIGHT_BACK).map(([k]) => k));
   if (d.digitFont >= SPRITE_FONT && d.digitBottom + 8 * d.digitScaleY > d.tubeHeight)
-    issues.push(`rejection 8 (sprite digits): digitBottom ${d.digitBottom} + 8·digitScaleY ${d.digitScaleY} > tubeHeight ${d.tubeHeight}`);
+    reject(`rejection 8 (sprite digits): digitBottom ${d.digitBottom} + 8·digitScaleY ${d.digitScaleY} > tubeHeight ${d.tubeHeight}`,
+      [], ['digitBottom', 'digitScaleY', 'tubeHeight']);
 
   // dynamics
   const V = VISC[viscosity];
@@ -346,18 +435,23 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
     params.rimLight = fit.gain;
     params.rimTint = tint;
     if (fit.rimError > RIM_TOLERANCE)
-      issues.push(`rejection 12 (unattainable rim (${fit.rimError} levels)): the side-light rim misses the wall sample by ${fit.rimError} > ${RIM_TOLERANCE} levels even at rimLight ${fit.gain} (rimTint ${tint}) — the wall leaves the rim term no reach; thin the wall or widen the bore`);
+      reject(`rejection 12 (unattainable rim (${fit.rimError} levels)): the side-light rim misses the wall sample by ${fit.rimError} > ${RIM_TOLERANCE} levels even at rimLight ${fit.gain} (rimTint ${tint}) — the wall leaves the rim term no reach; thin the wall or widen the bore`,
+        ['wallThickness', 'innerRadius']);
     else if (fit.bodyOver > BODY_OVER_TOLERANCE)
-      issues.push(`rejection 12 (unrepresentable wall shading (${fit.bodyOver} levels)): the body-only wall row is ${fit.bodyOver} levels above the target with the rim at 0 — the class's shadeDepth floor shades more than this flat-lit body does; lower ambient or exposure, or raise the light`);
+      reject(`rejection 12 (unrepresentable wall shading (${fit.bodyOver} levels)): the body-only wall row is ${fit.bodyOver} levels above the target with the rim at 0 — the class's shadeDepth floor shades more than this flat-lit body does; lower ambient or exposure, or raise the light`,
+        ['ambient', 'exposure', 'lightIntensity']);
   }
   // the complete result must satisfy the realism rules of its inferred classes; design fields are never
   // rewritten, a contradiction is a rejection. Skipped when the material is already rejected on its own
   // (1–6, 8–10, 12): the checker would only echo that reason.
   if (issues.every((s) => s.startsWith('rejection 7 ')))
-    for (const msg of coherenceIssues(params, classes)) issues.push(`rejection 11 (design contradicts the material's realism rules): ${msg}`);
+    for (const msg of coherenceIssues(params, classes)) {
+      const p = coherenceProblem(msg);
+      reject(`rejection 11 (design contradicts the material's realism rules): ${msg}`, p.material, p.design, p.derived);
+    }
 
   return {
-    params, classes, residual: colour.residual, rim, issues,
+    params, classes, residual: colour.residual, rim, issues, problems,
     body: { centre: colour.C0, wall: colour.Wall, wallOffset: displayOffset(U_WALL, m) },
     coords: { muEff, x, Oh, Ca0, lc, pxPerMm, T: colour.T, Tsnap, ELum, Tlum: colour.Tlum, Tmax: colour.Tmax, Tup: colour.Tup },
   };

@@ -6,11 +6,11 @@ declare const process: any; declare function require(m: string): any;
 import { PRESETS, presetParams, type Material, type Params } from '../src/params';
 import { VISC, coherenceIssues, hex, luma, sat } from '../src/material/coherence';
 import {
-  DEFAULT_MATERIAL, DESIGN_KEYS, MATERIAL_META, MATERIAL_VERSION, migrateMaterial, parseMaterialEnvelope,
+  DEFAULT_MATERIAL, DESIGN_KEYS, MATERIAL_KEYS, MATERIAL_META, MATERIAL_VERSION, migrateMaterial, parseMaterialEnvelope,
   serializeMaterialEnvelope, validateDesign, validateMaterial, type Design, type Material as MaterialProps,
 } from '../src/material/model';
 import { DEFAULT_PARAMS, PARAMS_VERSION } from '../src/params';
-import { BODY_ONLY, BODY_OVER_TOLERANCE, RIM_TOLERANCE, derive, deriveReport, ownershipIssues, q565, type DeriveReport } from '../src/material/derive';
+import { BODY_ONLY, BODY_OVER_TOLERANCE, RIM_TOLERANCE, coherenceProblem, derive, deriveReport, ownershipIssues, q565, type DeriveProblem, type DeriveReport } from '../src/material/derive';
 import { PARAM_META } from '../src/params';
 import { buildPalette } from '../src/render';
 import { newTube, stepTube } from '../src/physics';
@@ -790,7 +790,9 @@ for (const [label, extra] of [['water fixture', {}], ['water + trapped gas + sol
 }
 
 // ---------------------------------------------------------------------------------------------
-// 12. Rejections: derive throws, naming the reason; deriveReport lists it.
+// 12. Rejections: derive throws, naming the reason; deriveReport lists it, and its `problems` mirror the
+//     issues one to one with the inputs each points at (material keys / DESIGN_KEYS / legacy keys only).
+const PROBLEMS: Record<string, DeriveProblem[]> = {};
 function rejected(name: string, m: MaterialProps, d: Design, code: number): void {
   const tag = `rejection ${code} (`;
   let got: string[];
@@ -799,6 +801,28 @@ function rejected(name: string, m: MaterialProps, d: Design, code: number): void
     got = msg.includes(tag) ? [] : [msg];
   }
   report(`rejects ${name} (${tag.trim()})`, got, []);
+  const r = deriveReport(m, d), bad: string[] = [];
+  if (!r.problems.length) bad.push('no problems');
+  if (r.problems.length !== r.issues.length) bad.push(`${r.problems.length} problems for ${r.issues.length} issues`);
+  r.problems.forEach((p, i) => {
+    if (p.text !== r.issues[i]) bad.push(`problem ${i} text ≠ issue: ${p.text}`);
+    if (!r.issues[i]?.startsWith(`rejection ${p.code} (`)) bad.push(`problem ${i} code ${p.code}: ${p.text}`);
+    for (const k of p.material) if (!(MATERIAL_KEYS as readonly string[]).includes(k)) bad.push(`problem ${i}: ${k} is not a material key`);
+    for (const k of p.design) if (!(DESIGN_KEYS as readonly string[]).includes(k)) bad.push(`problem ${i}: ${k} is not a design key`);
+    for (const k of p.derived) if (!(k in DEFAULT_PARAMS) || (DESIGN_KEYS as readonly string[]).includes(k)) bad.push(`problem ${i}: ${k} is not a derived / fixed key`);
+  });
+  report(`  problems of ${name}: one per issue, keys in their sets`, bad, []);
+  PROBLEMS[name] = r.problems;
+}
+/** The problem with `code` of a case above lists `want` (material / design / derived keys). */
+function points(name: string, code: number, want: { material?: string[]; design?: string[]; derived?: string[]; noMaterial?: boolean }): void {
+  const ps = (PROBLEMS[name] ?? []).filter((p) => p.code === code), bad: string[] = [];
+  if (!ps.length) bad.push(`no rejection ${code} among ${(PROBLEMS[name] ?? []).map((p) => p.code).join(', ')}`);
+  const has = (field: 'material' | 'design' | 'derived', k: string): boolean => ps.some((p) => (p[field] as string[]).includes(k));
+  for (const field of ['material', 'design', 'derived'] as const) for (const k of want[field] ?? []) if (!has(field, k)) bad.push(`${field} lacks ${k}: ${JSON.stringify(ps)}`);
+  if (want.noMaterial && ps.some((p) => p.material.length)) bad.push(`material keys listed: ${JSON.stringify(ps)}`);
+  const all = (f: 'material' | 'design' | 'derived') => ps.flatMap((p) => p[f] as string[]).join(' ');
+  report(`problem ${name} (rejection ${code}) → material [${all('material')}] design [${all('design')}] derived [${all('derived')}]`, bad, []);
 }
 const EMISSIVE_COLA: MaterialProps = { ...COLA.m, emissionR: 0.4, emissionG: 0.2, emissionB: 0.1 };
 report('emissive cola base derives (the rejection 4 base)', (() => { try { derive(EMISSIVE_COLA, COLA.d); return []; } catch (e) { return [(e as Error).message]; } })(), []);
@@ -839,6 +863,42 @@ rejected('freeLiquid false for a liquid', WATER.m, { ...WATER.d, freeLiquid: fal
 rejected('sprite digitScaleX 2 / digitScaleY 3', WATER.m, { ...WATER.d, digitScaleX: 2, digitScaleY: 3 }, 11);
 rejected('front tickColorH #000000 on a black backing', FIXTURES[5].m, { ...FIXTURES[5].d, tubeBack: '#000000', tubeBack2: '#000000', tickColorH: '#000000' }, 11);
 rejected('digitBright 10', WATER.m, { ...WATER.d, digitBright: 10 }, 11);
+rejected('tickBright 1.5 (in bounds, outside the realism range)', WATER.m, { ...WATER.d, tickBright: 1.5 }, 11);
+points('contact band 80 ± 15 (wetting side touches 90°)', 1, { material: ['contactAngle', 'contactHysteresis'] });
+points('plasma without emission', 3, { material: ['phase', 'emissionG'] });
+points('plasma with gas', 3, { material: ['phase', 'gasMode'] });
+points('plasma with design freeLiquid true', 3, { material: ['phase'], design: ['freeLiquid'] });
+points('emissive liquid, gradient on, light tubeBack2', 4, { material: ['emissionR'], design: ['tubeBack2'] });
+points('hoursY 200 with a 54 px tube (off the panel)', 7, { design: ['hoursY'] });
+points('viscosity 1e6 (out of range)', 7, { material: ['viscosity'] });
+points('design readTiltStart 60 ≥ readTiltEnd 50', 7, { design: ['readTiltStart', 'readTiltEnd'] });
+points('sprite digits taller than the tube', 8, { design: ['digitBottom', 'digitScaleY', 'tubeHeight'] });
+points('tickBright 1.5 (in bounds, outside the realism range)', 11, { design: ['tickBright'], noMaterial: true });
+points('freeLiquid false for a liquid', 11, { design: ['freeLiquid'], noMaterial: true });
+points('front tickColorH #000000 on a black backing', 11, { design: ['tickColorH', 'tubeBack'] });
+points('digitBright 10', 11, { design: ['digitBright'] });
+{
+  // a realism message naming a derived value points at its material drivers; unknown keys point at nothing
+  const cases: [string, string[], string[], string[]][] = [
+    ['freeDamp = 20 not in [6, 14] for viscous', ['viscosity', 'density', 'surfaceTension', 'innerRadius'], [], ['freeDamp']],
+    ['luma(liquid) < luma(liquidHi)', ['absorptionR', 'scattering', 'exposure'], ['tubeBack'], ['liquid', 'liquidHi']],
+    ['traceFollow 0.5 > 0.15 for viscous', ['viscosity', 'solidsFraction', 'dryingTime'], [], ['traceFollow']],
+    ['carbonated: fizz must be on', ['gasMode', 'gasLevel', 'bubbleRadius'], [], ['fizz']],
+    ['emissive: glowStrength 0.2 not in [0.4, 0.8]', ['emissionR', 'emissionG', 'emissionB'], [], ['glowStrength']],
+    ['emissive: tube back luma 40 ≥ 16', [], ['tubeBack'], []],
+    ['a liquid is a free slug: freeLiquid must be on', [], ['freeLiquid'], []],
+    ['carbonated implies watery', [], [], []],
+  ];
+  for (const [msg, mat, des, der] of cases) {
+    const p = coherenceProblem(msg), bad: string[] = [];
+    for (const k of mat) if (!p.material.includes(k as never)) bad.push(`material lacks ${k}`);
+    for (const k of des) if (!p.design.includes(k as never)) bad.push(`design lacks ${k}`);
+    for (const k of der) if (!p.derived.includes(k as never)) bad.push(`derived lacks ${k}`);
+    if (!mat.length && p.material.length) bad.push(`material ${p.material.join(' ')} (want none)`);
+    if (!der.length && p.derived.length) bad.push(`derived ${p.derived.join(' ')} (want none)`);
+    report(`coherenceProblem "${msg}" → [${p.material.join(' ')}] [${p.design.join(' ')}] [${p.derived.join(' ')}]`, bad, []);
+  }
+}
 {
   const p = derive(WATER.m, WATER.d);
   report('rejection 11 never rewrites design: an accepted design passes through unchanged', p.freeLiquid === true && p.digitBright === DEFAULT_PARAMS.digitBright ? [] : ['rewritten'], []);
@@ -857,6 +917,8 @@ rejected('milk on a white backing at exposure 2.5, ambient 0.6 (overexposed)', {
   const OLIVE = MATERIAL_PRESETS.find((e) => e.id === 'olive-oil')!;
   rejected('olive oil in a 0.5 mm bore with a 1 mm wall (unattainable rim)', { ...OLIVE.material, innerRadius: 0.5, wallThickness: 1.0 } as MaterialProps, OLIVE.design, 12);
 }
+points('milk on a white backing at exposure 2.5, ambient 0.6 (overexposed)', 9, { material: ['exposure', 'lightIntensity', 'ambient'], design: ['tubeBack'] });
+points('olive oil in a 0.5 mm bore with a 1 mm wall (unattainable rim)', 12, { material: ['wallThickness', 'innerRadius'] });
 accepts('opaque liquid with rear marks is allowed (markContrast 0)', () => {
   const p = derive(FIXTURES[5].m, fdesign('#050203'));
   if (p.markContrast !== 0) throw new Error(`markContrast ${p.markContrast}`);

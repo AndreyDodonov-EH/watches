@@ -8,6 +8,10 @@ export interface Panel {
   refresh: () => void;
   /** Disable the inputs (range + numeric twin, colour, checkbox, select) of `keys`; every other key is enabled. */
   setLocked: (keys: ReadonlySet<string>) => void;
+  /** Mark the rows of `keys` `flag-err` (a material problem points at them); every other row is cleared. */
+  setFlagged: (keys: ReadonlySet<keyof Params>) => void;
+  /** Open the row's group, scroll it into view and focus its first enabled input; false without a row. */
+  reveal: (key: keyof Params) => boolean;
 }
 
 export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): Panel {
@@ -96,5 +100,16 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): Panel 
       inp.closest('.row')?.classList.toggle('locked', locked);
     }
   };
-  return { refresh, setLocked };
+  const setFlagged = (keys: ReadonlySet<keyof Params>) => {
+    for (const [k, inp] of inputs) inp.closest('.row')?.classList.toggle('flag-err', keys.has(k as keyof Params));
+  };
+  const reveal = (key: keyof Params): boolean => {
+    const row = inputs.get(key)?.closest<HTMLElement>('.row');
+    if (!row) return false;
+    for (let e = row.parentElement; e; e = e.parentElement) if (e instanceof HTMLDetailsElement) e.open = true;
+    row.scrollIntoView({ block: 'center' });
+    row.querySelector<HTMLInputElement | HTMLSelectElement>('input:not(:disabled), select:not(:disabled)')?.focus({ preventScroll: true });
+    return true;
+  };
+  return { refresh, setLocked, setFlagged, reveal };
 }

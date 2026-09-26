@@ -1,14 +1,16 @@
 // "Material" group of the params panel: physical-material mode. The liquid is authored from the physical
 // properties (MATERIAL_META) plus the allowlisted design keys; the legacy Params are derive(material,
 // design), applied in place (the physics loop, the device push and the legacy panel hold that object).
-// A rejected material leaves the last valid Params untouched and says why.
+// A rejected material leaves the last valid Params untouched and says why: an editor-style status bar at
+// the bottom of the page (#mat-status) with a problems panel above it, and the controls each problem
+// points at flagged (`flag-err`) in this group and, through the hooks, in the legacy panel.
 import type { Params } from '../params';
 import type { MaterialState } from '../persist';
 import { coherenceIssues } from './coherence';
-import { deriveReport, DERIVED_KEYS, FIXED_KEYS, type DeriveReport } from './derive';
+import { coherenceProblem, deriveReport, DERIVED_KEYS, FIXED_KEYS, type DeriveProblem, type DeriveReport } from './derive';
 import {
   DESIGN_KEYS, MATERIAL_META, parseMaterialEnvelope, serializeMaterialEnvelope, validateMaterial,
-  type Design, type DesignKey, type Material, type MaterialFieldMeta, type MaterialProvenance,
+  type Design, type DesignKey, type Material, type MaterialFieldMeta, type MaterialKey, type MaterialProvenance,
 } from './model';
 import { MATERIAL_PRESETS, type MaterialPreset } from './presets';
 
@@ -26,6 +28,10 @@ export interface MaterialHooks {
   onMode: (mode: MaterialState['mode']) => void;
   /** State changed without a successful derive (persist it). */
   save: () => void;
+  /** Legacy rows the current problems point at (design keys and named derived values); empty clears. */
+  onFlags: (keys: ReadonlySet<keyof Params>) => void;
+  /** Bring a legacy panel row into view (its group opened) and focus it. */
+  revealLegacy: (key: keyof Params) => void;
 }
 
 export interface MaterialPanel {
@@ -73,6 +79,9 @@ function sameMaterial(a: Material, b: Material): boolean {
 // fixed-width number formats for the readout (never reflow the panel)
 const fx = (v: number, d: number, w: number): string => (Number.isFinite(v) ? v.toFixed(d) : '—').padStart(w);
 const fe = (v: number): string => (Number.isFinite(v) ? v.toExponential(2) : '—').padStart(8);
+/** Two significant digits, exponent form outside [0.01, 1000): 21, 0.44, 7.0e3, 1.2e-3. */
+const g2 = (v: number): string => (!Number.isFinite(v) ? '—'
+  : v !== 0 && (Math.abs(v) < 0.01 || Math.abs(v) >= 1000) ? v.toExponential(1).replace('e+', 'e') : String(+v.toPrecision(2)));
 
 export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hooks: MaterialHooks): MaterialPanel {
   const { params } = hooks;
@@ -97,12 +106,28 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
   head.append(modeLabel, presetSel, presetDesignBtn);
   box.appendChild(head);
 
-  // status + derived readout
-  const status = el('div', 'mstatus'); status.id = 'mat-status';
+  // derived readout (the full class / coordinate set; the status bar carries a one-line digest)
   const readout = el('pre', 'mono mreadout'); readout.id = 'mat-derived';
 
+  // status bar, fixed at the bottom of the page: dot + summary, the problems chip, the coordinate digest;
+  // the problems panel opens above it. #mat-status keeps its `mstatus <kind>` class and its text carries
+  // every problem (check-material-ui reads both).
+  const statusBar = el('div', 'mstatus idle'); statusBar.id = 'mat-status';
+  const dot = el('span', 'mdot');
+  const summary = el('span', 'msummary'); summary.setAttribute('role', 'status');
+  const chip = el('button', 'mchip'); chip.id = 'mat-problems-chip'; chip.type = 'button'; chip.hidden = true;
+  chip.title = 'Show / hide the problems';
+  const coordsOut = el('span', 'mcoords'); coordsOut.id = 'mat-coords';
+  const problemsBox = el('div', 'mproblems'); problemsBox.id = 'mat-problems'; problemsBox.hidden = true;
+  statusBar.append(problemsBox, dot, summary, chip, coordsOut);
+  statusBar.title = 'Click: show / hide the problems';
+  statusBar.onclick = () => { problemsBox.hidden = !problemsBox.hidden; statusBar.classList.toggle('open', !problemsBox.hidden); };
+  problemsBox.onclick = (e) => e.stopPropagation();   // a click inside the panel never toggles it
+  document.body.appendChild(statusBar);
+  document.body.classList.add('has-mstatus');
+
   // physical fields, grouped by MATERIAL_META.group in first-appearance order
-  interface Field { meta: MaterialFieldMeta; ctl: HTMLInputElement | HTMLSelectElement; num?: HTMLInputElement }
+  interface Field { meta: MaterialFieldMeta; row: HTMLElement; ctl: HTMLInputElement | HTMLSelectElement; num?: HTMLInputElement }
   const fields: Field[] = [];
   const groups = new Map<string, HTMLDetailsElement>();
   const fieldsBox = el('div', 'mfields');
@@ -118,7 +143,7 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
       meta.options.forEach((text, i) => sel.add(new Option(`${meta.min + i} · ${text}`, String(meta.min + i))));
       sel.oninput = () => edit(meta, parseInt(sel.value, 10));
       row.append(name, sel, unit);
-      fields.push({ meta, ctl: sel });
+      fields.push({ meta, row, ctl: sel });
     } else {
       const range = el('input'); range.type = 'range'; range.id = `mat-${meta.key}`;
       if (meta.log) { range.min = '0'; range.max = String(N); range.step = '1'; }
@@ -140,7 +165,7 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
         edit(meta, v);
       };
       row.append(name, range, num, unit);
-      fields.push({ meta, ctl: range, num });
+      fields.push({ meta, row, ctl: range, num });
     }
     g.appendChild(row);
   }
@@ -185,15 +210,64 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
   });
   bar.appendChild(file);
 
-  box.append(status, readout, bar, fieldsBox);
+  box.append(readout, bar, fieldsBox);
   root.prepend(box);
 
   // ---- behaviour ----
   let lastGood: Params = structuredClone(params);
   let report: DeriveReport | null = null;
 
+  /** The bar's kind (`mstatus <kind>`) and one-line summary; the problems list is left as it is. */
   function setStatus(kind: 'ok' | 'warn' | 'err' | 'idle', text: string): void {
-    status.className = `mstatus ${kind}`; status.textContent = text; status.title = text;
+    statusBar.classList.remove('ok', 'warn', 'err', 'idle'); statusBar.classList.add(kind);
+    summary.textContent = text; summary.title = text;
+  }
+  /** Replace the problems: the panel rows, the chip, and the flags on the controls they point at
+   *  (rejections only; `warn` lists coherence warnings without flagging). [] clears everything. */
+  function setProblems(list: DeriveProblem[], kind: 'err' | 'warn' = 'err'): void {
+    const flag = kind === 'err' ? list : [];
+    const mat = new Set<MaterialKey>(flag.flatMap((p) => p.material));
+    for (const f of fields) f.row.classList.toggle('flag-err', mat.has(f.meta.key));
+    hooks.onFlags(new Set<keyof Params>(flag.flatMap((p) => [...p.design, ...p.derived])));
+    chip.hidden = !list.length;
+    chip.className = `mchip ${kind}`;
+    chip.replaceChildren(el('span', `micon ${kind}`), `${list.length} ${list.length === 1 ? 'problem' : 'problems'}`);
+    const head = el('div', 'mphead', list.length ? `Problems (${list.length})` : 'No problems');
+    const rows = list.map((p) => {
+      const row = el('div', `mprob ${kind}`); row.tabIndex = 0; row.dataset.code = String(p.code);
+      // the ⛔ / ⚠ marker is drawn (.micon), not an emoji: no emoji font on every machine
+      row.append(el('span', `micon ${kind}`), el('span', 'mptext', p.text));
+      const keys = el('span', 'mpkeys');
+      const key = (k: string, cls: string, title: string, go: () => void): void => {
+        const b = el('button', `mkey ${cls}`, k); b.type = 'button'; b.title = title;
+        b.onclick = (e) => { e.stopPropagation(); go(); };
+        keys.appendChild(b);
+      };
+      for (const k of p.material) key(k, 'm', `material: ${MATERIAL_META.find((m) => m.key === k)?.label ?? k}`, () => revealMaterial(k));
+      for (const k of p.design) key(k, 'd', 'design key (legacy panel)', () => hooks.revealLegacy(k));
+      for (const k of p.derived) key(k, 'x', 'derived value out of its class range (legacy panel, read-only)', () => hooks.revealLegacy(k));
+      row.append(keys);
+      const go = (): void => revealFirst(p);
+      row.onclick = go;
+      row.onkeydown = (e) => { if (e.key === 'Enter') go(); };
+      return row;
+    });
+    problemsBox.replaceChildren(head, ...rows);
+  }
+  /** Open the material control's groups, scroll it into view and focus it. */
+  function revealMaterial(k: MaterialKey): void {
+    const f = fields.find((x) => x.meta.key === k);
+    if (!f) return;
+    box.open = true;
+    const g = f.row.closest('details'); if (g) g.open = true;
+    f.row.scrollIntoView({ block: 'center' });
+    f.ctl.focus({ preventScroll: true });
+  }
+  /** The first control a problem points at: a material property, else a design key, else a derived value. */
+  function revealFirst(p: DeriveProblem): void {
+    if (p.material.length) revealMaterial(p.material[0]);
+    else if (p.design.length) hooks.revealLegacy(p.design[0]);
+    else if (p.derived.length) hooks.revealLegacy(p.derived[0]);
   }
   /** The envelope metadata of the material now in the state (absent fields removed, not left undefined). */
   function setMeta(name: string | undefined, provenance: MaterialProvenance | undefined): void {
@@ -207,10 +281,12 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
   }
   function showReadout(): void {
     if (state.mode !== 'material' || !report) {
+      coordsOut.textContent = '';
       readout.textContent = ['viscosity —        opacity —', 'emissive  —        wetting —      gas —', 'T      —  Tlum     —  Tmax     —  lc     —', 'μ_eff        —  Oh        —  Ca₀        —'].join('\n');
       return;
     }
     const { classes: c, coords: k } = report;
+    coordsOut.textContent = `T ${fx(k.T, 3, 0)} · μ_eff ${g2(k.muEff)} · Oh ${g2(k.Oh)} · Ca₀ ${g2(k.Ca0)} · lc ${fx(k.lc, 2, 0)}`;
     readout.textContent = [
       `viscosity ${c.viscosity.padEnd(8)} opacity ${c.opacity}`,
       `emissive  ${(c.emissive ? 'yes' : 'no').padEnd(8)} wetting ${(c.wetting ? 'yes' : 'no').padEnd(6)} gas ${c.gas}`,
@@ -230,7 +306,7 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
       if (f.num) { f.num.disabled = !on; f.num.value = String(v); f.num.classList.remove('bad'); }
     }
     box.classList.toggle('on', on);
-    if (!on) setStatus('idle', 'legacy mode: the Params below are edited directly');
+    if (!on) { setStatus('idle', 'legacy mode'); setProblems([]); }
     showReadout();
   }
 
@@ -251,7 +327,8 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
     if (r.issues.length) {
       // no partial apply: the last accepted Params stay (a design edit already wrote its key: undo it)
       Object.assign(params, lastGood);
-      setStatus('err', `rejected — Params unchanged:\n- ${r.issues.join('\n- ')}`);
+      setProblems(r.problems);
+      setStatus('err', `${r.problems.length} ${r.problems.length === 1 ? 'problem' : 'problems'} — Params unchanged`);
       hooks.save();
       return false;
     }
@@ -259,9 +336,11 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
     const changed = (Object.keys(r.params) as (keyof Params)[]).filter((k) => lastGood[k] !== r.params[k]);
     Object.assign(params, r.params);
     lastGood = structuredClone(params);
+    // deriveReport already rejects an incoherent result (11): a guard, listed as warnings, nothing flagged
     const coh = coherenceIssues(params, r.classes);
-    if (coh.length) setStatus('warn', `derived, but incoherent for its class:\n- ${coh.join('\n- ')}`);
-    else setStatus('ok', `derived ${r.classes.viscosity} / ${r.classes.opacity}${r.classes.emissive ? ' / emissive' : ''} · coherent`);
+    setProblems(coh.map((msg) => coherenceProblem(msg)), 'warn');
+    if (coh.length) setStatus('warn', `${coh.length} ${coh.length === 1 ? 'warning' : 'warnings'} — derived, but incoherent for its class`);
+    else setStatus('ok', `material: ${r.classes.viscosity} / ${r.classes.opacity}${r.classes.emissive ? ' / emissive' : ''} · coherent`);
     hooks.onDerived(changed, whole);
     return true;
   }

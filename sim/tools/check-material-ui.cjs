@@ -43,6 +43,10 @@ const DESIGN = new Set(list(modelSrc, 'DESIGN_KEYS'));
   }, [sel, v]);
   const status = () => page.locator('#mat-status').textContent();
   const statusKind = () => sim(() => document.querySelector('#mat-status').className);
+  const summary = () => page.locator('#mat-status .msummary').textContent();
+  /** Class of the panel row (.mrow material / .row legacy) holding `sel`. */
+  const rowClass = (sel) => sim((sel) => document.querySelector(sel).closest('.mrow, .row').className, sel);
+  const flagCount = () => sim(() => document.querySelectorAll('.flag-err').length);
 
   try {
     // ---- 1. entering material mode locks derived / fixed legacy inputs, design inputs stay editable
@@ -98,18 +102,62 @@ const DESIGN = new Set(list(modelSrc, 'DESIGN_KEYS'));
     assert.match(await statusKind(), /\berr\b/);
     assert.match(await status(), /rejection 3 \(plasma\): a plasma must emit/);
     assert.equal(await paramsJson(), before, 'plasma without emission: params unchanged');
+    // the status bar: fixed to the viewport bottom, a problem count; the rows the rejection points at are flagged
+    assert.match(await rowClass('#mat-phase'), /\bflag-err\b/, 'phase row flagged');
+    assert.match(await rowClass('#mat-emissionG'), /\bflag-err\b/, 'emissionG row flagged');
+    assert.doesNotMatch(await rowClass('#mat-viscosity'), /\bflag-err\b/, 'an unrelated row is not flagged');
+    assert.equal(await page.locator('#mat-status.mstatus.err').count(), 1, 'the bar is .mstatus.err');
+    assert.match(await summary(), /^\d+ problems? — Params unchanged$/);
+    assert.match(await status(), /\bproblems\b/);
+    const bar = await page.locator('#mat-status').boundingBox(), vp = page.viewportSize();
+    assert(bar && Math.abs(bar.y + bar.height - vp.height) < 1 && bar.x === 0 && Math.abs(bar.width - vp.width) < 1, `bar fixed at the viewport bottom: ${JSON.stringify(bar)}`);
+    assert.equal(await page.isVisible('#mat-problems'), false, 'problems panel starts closed');
+    await page.click('#mat-status');
+    assert.equal(await page.isVisible('#mat-problems'), true, 'clicking the bar opens the problems panel');
+    const problemRows = page.locator('#mat-problems .mprob');
+    const nProblems = await problemRows.count();
+    assert(nProblems >= 1, 'at least one problem row');
+    assert.match(await problemRows.first().textContent(), /^rejection 3 \(plasma\): a plasma must emit.*phase.*emissionG/);
+    await problemRows.first().click();
+    assert.equal(await sim(() => document.activeElement && document.activeElement.id), 'mat-phase', 'a problem row focuses the first control it points at');
+    assert.equal(await page.isVisible('#mat-problems'), true, 'a click inside the panel keeps it open');
     await page.selectOption('#mat-phase', '0');
     assert.match(await statusKind(), /\bok\b/);
+    assert.equal(await flagCount(), 0, 'a valid edit clears every flag-err');
+    assert.match(await summary(), /^material: \w+ \/ \w+.* · coherent$/);
+    assert.equal(await problemRows.count(), 0, 'no problem rows after a valid edit');
+    await page.click('#mat-status');
+    assert.equal(await page.isVisible('#mat-problems'), false, 'clicking the bar again closes the panel');
+    console.log(`status bar: plasma without emission → ${nProblems} problems, phase / emissionG flagged, panel toggles, row focuses #mat-phase; a valid edit clears the flags: ok`);
     before = await paramsJson();
     await setNumber('#panel .row[data-key=hoursY] input[type=number]', 500);
     assert.match(await status(), /rejection 7 \(layout\): hoursY 500/);
     assert.equal(await paramsJson(), before, 'design edit rejected: params unchanged');
+    assert.match(await rowClass('#panel .row[data-key=hoursY] input'), /\bflag-err\b/, 'the legacy hoursY row is flagged');
+    // a design problem's row reveals the legacy row: its (collapsed) group opens and its input takes the focus
+    await sim(() => { document.querySelector('#panel .row[data-key=hoursY]').closest('details').open = false; });
+    await page.click('#mat-status');
+    await page.locator('#mat-problems .mprob', { hasText: 'hoursY 500' }).click();
+    assert.equal(await sim(() => document.querySelector('#panel .row[data-key=hoursY]').closest('details').open), true, 'the Layout group opened');
+    assert.equal(await sim(() => document.activeElement && document.activeElement.closest('.row') && document.activeElement.closest('.row').dataset.key), 'hoursY', 'hoursY focused');
+    await page.click('#mat-status');
     await setNumber('#panel .row[data-key=hoursY] input[type=number]', 3);
     assert.match(await statusKind(), /\bok\b/);
     assert.equal(await sim(() => window.sim.params.hoursY), 3);
+    assert.equal(await flagCount(), 0);
+    // a design value the material's realism rules reject (11) flags its legacy row
+    before = await paramsJson();
+    await setNumber('#panel .row[data-key=tickBright] input[type=number]', 5);
+    assert.match(await statusKind(), /\berr\b/);
+    assert.match(await status(), /rejection 11 \(design contradicts the material's realism rules\): tickBright 5 not in \[0\.8, 1\.3\]/);
+    assert.match(await rowClass('#panel .row[data-key=tickBright] input'), /\bflag-err\b/, 'the legacy tickBright row is flagged');
+    assert.equal(await paramsJson(), before, 'tickBright 5 rejected: params unchanged');
     await setNumber('#panel .row[data-key=tickBright] input[type=number]', 1.2);
+    assert.match(await statusKind(), /\bok\b/);
+    assert.equal(await flagCount(), 0, 'tickBright 1.2 clears the flag');
     assert.equal(await sim(() => window.sim.material.design.tickBright), 1.2);
     assert.equal(await sim(() => window.sim.params.tickBright), 1.2);
+    console.log('design rejections flag their legacy rows (hoursY 500 layout, tickBright 5 realism): ok');
     // a design-only edit is live-pushed: a stub transport (connected, recording setParam) must receive
     // tickBright after the accepted re-derive (its key is in onDerived's changed list)
     await sim(() => {

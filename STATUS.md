@@ -19,6 +19,10 @@ so realism is by construction: `npm run check:materials` (≈1000 fixtures: doc 
 viscosity sweep, 800 seeded random materials × designs, real `buildPalette` centre and wall rows at 0 levels).
 - **Sim**: "physical material" mode on the main page (`sim/src/material/ui.ts`): physical controls, derived legacy rows
   locked and shown live, design rows editable; the material dropdown changes the liquid only and keeps the user's design (a "preset's design" button takes the preset's), `?material=<id>&m.<key>=` takes both, envelope import/export, `check:material-ui`.
+  Editor-style feedback (2026-09-26): a fixed bottom status bar (dot + summary + class/coords line; an "N problems" chip
+  opens a problems panel listing every rejection with key chips — material / design / derived), and the rows a problem
+  names are flagged red in the material group and the legacy panel (`DeriveReport.problems` carries the keys; clicking a
+  problem reveals and focuses its first control).
 - **Collection**: 22 material presets (`sim/src/material/presets.ts`, `presets/materials/*.json`, derived
   `presets/physical/*.json` for `gen_params.py` / `e2e.sh`), provenance per property; `images/presets/physical/`.
 - **Renderer/firmware**: Params **v24** adds `rimLight`/`rimTint` (side-lit rim of a tinted liquid on a dark ground,
