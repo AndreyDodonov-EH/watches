@@ -4,9 +4,9 @@
   "name": "Aperol spritz",
   "material": {
     "ior": 1.35,
-    "absorptionR": 0.04,
-    "absorptionG": 0.5,
-    "absorptionB": 1.2,
+    "absorptionR": 0.01,
+    "absorptionG": 0.22,
+    "absorptionB": 0.3,
     "scattering": 0,
     "emissionR": 0,
     "emissionG": 0,
@@ -106,7 +106,13 @@
     "playHold": 5,
     "brightness": 1,
     "tickBright": 1.3,
-    "digitBright": 1.8
+    "digitBright": 1.8,
+    "fizzSizeVar": 0.5,
+    "fizzShadeOff": 0.3,
+    "fizzDepth": 0.7,
+    "fizzBlick": 0.6,
+    "fizzSquash": 1.25,
+    "fizzAcrossGain": 1.05
   },
   "provenance": {
     "ior": "estimated",

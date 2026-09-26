@@ -225,7 +225,7 @@
       "max": 3,
       "step": 1,
       "group": "Gas",
-      "help": "0 none; 1 dissolved gas (carbonation: a steady rising bead, watery liquids only); 2 boiling (dense fast bubbles, cryogenic liquids); 3 trapped air (a few slow bubbles in a viscous liquid).",
+      "help": "0 none; 1 dissolved gas (carbonation: a steady rising bead, watery liquids only); 2 boiling (dense fast bubbles, cryogenic liquids); 3 trapped air (slow bubbles held in a medium or viscous liquid: a few to a dense suspension).",
       "integer": true,
       "options": [
         "none",
@@ -430,7 +430,13 @@
       "playHold",
       "brightness",
       "tickBright",
-      "digitBright"
+      "digitBright",
+      "fizzSizeVar",
+      "fizzShadeOff",
+      "fizzDepth",
+      "fizzBlick",
+      "fizzSquash",
+      "fizzAcrossGain"
     ]
   }
 }

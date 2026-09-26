@@ -372,7 +372,7 @@ export interface Material {
  *  thin tubes spread to the panel edges, lens −0.5 + topLens 0.35 for the physical rod, physical light
  *  with a broad soft highlight, rear sprite digits every hour / 5 min, dark rear ticks on both edges,
  *  a hysteretic wetting meniscus (contact lag, film, hard edge, faint caustic) and the free slug. */
-const MODERN_BASE: Partial<Params> = {
+export const MODERN_BASE: Partial<Params> = {
   tubeHeight: 46, hoursY: 12, minutesY: 185,
   tubeBack: '#000000', tubeBack2: '#000000', tubeBackGradient: 1,
   glassHi: '#859093', glassBody: 0.04, glassHiBright: 0.34, glassReflect: 0.2, glassRim: 0.52, glassOverLiquid: 0.4,

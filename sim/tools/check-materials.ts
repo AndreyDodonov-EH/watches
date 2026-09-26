@@ -206,18 +206,20 @@ expect('no gas, fizz on', 'blood', { fizz: true }, ['no gas: fizz must be off'])
 expect('carbonated, fizz off', 'frizzante', { fizz: false }, ['carbonated: fizz must be on']);
 expect('boiling, fizz off', 'cryo', { fizz: false }, ['boiling: fizz must be on']);
 expect('trapped, fizz off', 'honey', { fizz: false }, ['trapped: fizz must be on']);
-const GAS: Array<[string, string, R, R, R]> = [
-  ['carbonated', 'frizzante', [1, 2], [30, 55], [30, 60]],
-  ['carbonated', 'cola', [1, 2], [30, 55], [30, 60]],
-  ['boiling', 'cryo', [1, 1.5], [45, 60], [45, 60]],
-  ['trapped', 'honey', [2, 4], [0, 8], [0, 12]],
-  ['trapped', 'molten', [2, 4], [0, 8], [0, 12]],
+const GAS: Array<[string, string, R, R]> = [
+  ['carbonated', 'frizzante', [30, 55], [30, 60]],
+  ['carbonated', 'cola', [30, 55], [30, 60]],
+  ['boiling', 'cryo', [45, 60], [45, 60]],
+  ['trapped', 'honey', [0, 8], [0, 120]],
+  ['trapped', 'molten', [0, 8], [0, 120]],
 ];
-for (const [gas, id, size, speed, count] of GAS) {
+for (const [gas, id, speed, count] of GAS) {
   const v = entry(id).mat!.viscosity;
-  const probe = (key: 'fizzSize' | 'fizzSpeed' | 'fizzCount', [lo, hi]: R, step: number): void =>
+  const probe = (key: 'fizzSpeed' | 'fizzCount', [lo, hi]: R, step: number): void =>
     range(`${gas} ${id}`, id, key, lo, hi, step, (x) => `${key} = ${x} not in [${lo}, ${hi}] for ${v}`);
-  probe('fizzSize', size, 0.01); probe('fizzSpeed', speed, 1); probe('fizzCount', count, 1);
+  probe('fizzSpeed', speed, 1); probe('fizzCount', count, 1);
+  // the size is the look's (bubble radius), not the class's: the whole drawable range is coherent
+  for (const fizzSize of [1, 8, 16]) expect(`${gas} ${id} fizzSize ${fizzSize}`, id, { fizzSize }, []);
 }
 const CARB: Partial<Params> = { fizz: true, fizzSize: 1.5, fizzSpeed: 40, fizzCount: 40 };
 expect('carbonated medium', 'malt', CARB, ['carbonated implies watery'], { gas: 'carbonated' });
@@ -400,7 +402,7 @@ const FIXTURES: Fixture[] = [
       ['capLength', '1.85', 'd'], ['angleTiltGain', '3.64', 'd'], ['angleGyroGain', '0.20', 'd'],
       ['wetFilm', '18.8', 'd'], ['traces', true, 'x'], ['traceAmount', '0.57', 'd'], ['traceStain', '0.24', 'd'], ['traceFollow', '0.20', 'd'], ['glowStrength', '0.04', 'd'],
     ] },
-  { name: 'honey', m: mat({ viscosity: 10000, density: 1420, surfaceTension: 70, ior: 1.49, absorptionR: 0.06, absorptionG: 0.18, absorptionB: 0.7, contactAngle: 25, contactHysteresis: 20, solidsFraction: 0.8, dryingTime: 2, gasMode: 3, gasLevel: 0.4, bubbleRadius: 0.12, foamStability: 20 }),
+  { name: 'honey', m: mat({ viscosity: 10000, density: 1420, surfaceTension: 70, ior: 1.49, absorptionR: 0.06, absorptionG: 0.18, absorptionB: 0.7, contactAngle: 25, contactHysteresis: 20, solidsFraction: 0.8, dryingTime: 2, gasMode: 3, gasLevel: 0.04, bubbleRadius: 0.12, foamStability: 20 }),
     d: fdesign('#0c0703'), want: [
       ['viscosity', 'viscous', 'x'], ['opacity', 'translucent', 'x'], ['T', '0.27', 'T'],
       ['liquid', [44, 21, 0], 'c'], ['liquidLo', [9, 2, 0], 'c'], ['liquidHi', [199, 184, 161], 'c'], ['residual', '0.6', 'c'],
@@ -730,6 +732,26 @@ for (const e of [0.02, 0.021]) {
     report(`bubbleRim frizzante on ${back}: luma ${lr.toFixed(1)} ${below ? '<' : '>'} backing ${lb.toFixed(1)} (${rim})`, (below ? lr < lb : lr > lb) ? [] : [`luma ${lr.toFixed(1)}`], []);
   }
 }
+// A bubble totally reflects the light inside the liquid and its centre is a window: on a dark backing every see-through
+// (clear / translucent) gas preset's fizz ring (the real palette's ring rows) is brighter than the liquid on at least 2/3 of the bore rows (the
+// surface highlight in front may stay above it), and the core tint is the Fresnel loss of two surfaces (< 0.1).
+// The ring colour carries the liquid's filter: a tinted liquid's rim is not grey.
+{
+  const L565 = (v: number): number => { const [r, g, b] = rgb565to888(v); return 0.299 * r + 0.587 * g + 0.114 * b; };
+  for (const e of MATERIAL_PRESETS) {
+    const r = deriveReport(e.material, e.design);
+    if (!r.params.fizz) continue;
+    report(`bubbleDark ${e.id}: ${r.params.bubbleDark.toFixed(3)} < 0.1 (window core)`, r.params.bubbleDark < 0.1 ? [] : [`${r.params.bubbleDark}`], []);
+    if (luma(r.params.tubeBack) >= 32 || r.classes.opacity === 'opaque') continue;
+    const pal = buildPalette(r.params);
+    let n = 0, up = 0;
+    for (let y = 0; y < pal.rows.length; y++) if (pal.dryT[y] >= 0.99) { n++; if (L565(pal.bubbleRimRows[y]) > L565(pal.rows[y])) up++; }
+    report(`fizz ring ${e.id} on a dark backing: brighter than the liquid on ${up}/${n} bore rows (≥ 2/3)`, up * 3 >= n * 2 ? [] : [`${up}/${n}`], []);
+  }
+  const OILP = MATERIAL_PRESETS.find((e) => e.id === 'aerated-oil')!;
+  const [rr, , rb] = hexRgb(deriveReport(OILP.material, OILP.design).params.bubbleRim);
+  report(`bubbleRim aerated-oil carries the oil's filter: blue ${rb} < red ${rr} − 40`, rb < rr - 40 ? [] : [`${rr} ${rb}`], []);
+}
 {
   const MILK = FIXTURES[6];
   const r = boundary('milk at exposure 1.1 (bright body, highlight floored above it)', { ...MILK.m, exposure: 1.1 }, MILK.d);
@@ -761,6 +783,20 @@ for (const e of [0.02, 0.021]) {
     const ok = r.issues.length ? codes.includes('rejection 10 ') : r.residual <= 5;
     report(`bright scattering body S ${S}, K (0, 0.3, 0.3), exposure 4, black: ${r.issues.length ? `rejected ${codes.join(' ')}` : `derives, T ${r.coords.Tsnap.toFixed(3)} (T_up ${r.coords.Tup.toFixed(3)}), residual ${r.residual.toFixed(2)}`}`,
       ok ? [] : [r.issues.length ? r.issues.join(' | ') : `residual ${r.residual.toFixed(2)}`], []);
+  }
+}
+
+{
+  // bubble radius → drawn size: the law 2·r_b·pxPerMm in every gas class, bounded only by the drawable 1–16 px
+  for (const [gas, gasMode] of [['carbonated', 1], ['boiling', 2], ['trapped', 3]] as const) {
+    const bad: string[] = [];
+    for (const rb of [0.02, 0.05, 0.1, 0.2, 0.3, 0.4]) {
+      const r = deriveReport({ ...WATER.m, gasMode, bubbleRadius: rb }, WATER.d);
+      const want = Math.min(16, Math.max(1, 2 * rb * r.coords.pxPerMm));
+      bad.push(...r.issues.map((s) => `r_b ${rb}: ${s}`), ...coherenceIssues(r.params, r.classes).map((s) => `r_b ${rb}: ${s}`));
+      if (Math.abs(r.params.fizzSize - want) > 1e-9) bad.push(`r_b ${rb}: fizzSize ${r.params.fizzSize} ≠ ${want}`);
+    }
+    report(`bubble radius 0.02–0.4 mm (${gas}): fizzSize = 2·r_b·pxPerMm within [1, 16], derives, coherent`, bad, []);
   }
 }
 
@@ -1022,7 +1058,7 @@ const SAMPLE_DESIGNS: Array<[string, Design]> = [
 //     design inside the allowlist and complete provenance, and presets/materials/<id>.json and
 //     presets/physical/<id>.json equal a fresh serialize / derive (npm run dump:presets rewrites them).
 {
-  const COLLECTION = ['frizzante', 'alpine', 'olive-oil', 'honey', 'blood', 'milk', 'mercury', 'cola', 'champagne', 'cuvee',
+  const COLLECTION = ['frizzante', 'alpine', 'olive-oil', 'aerated-oil', 'honey', 'glycerine', 'blood', 'milk', 'mercury', 'cola', 'champagne', 'cuvee',
     'ink', 'nocturne', 'glow', 'xenon', 'molten', 'urine', 'malt', 'cryo', 'pinot', 'spritz', 'tide', 'phosphor'];
   const got = MATERIAL_PRESETS.map((e) => e.id);
   report('material presets: ids are exactly the collection, in order', got.join(' ') === COLLECTION.join(' ') ? [] : [`got ${got.join(' ')}`], []);

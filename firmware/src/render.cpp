@@ -667,7 +667,7 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   int hiTop = highlightTop(p, lightDeg);
   const RGB rimC = hexToRgb(p.bubbleRim);
   const RGB rimLit = { fmn(255, rimC.r * br), fmn(255, rimC.g * br), fmn(255, rimC.b * br) };   // clipped lit rim (sim rimLit)
-  float rowL[TUBE_HEIGHT_MAX];   // per-row liquid luma (fixed-size local, sim rowL)
+  float rowL[TUBE_HEIGHT_MAX];   // per-row body-shading luma (fixed-size local, sim rowL)
   // Wall band (sim buildPalette): rows whose ray misses the bore never reach the back (dryT 0),
   // ramping up over a few rows inside; the liquid still shows through there. A neutral grazing
   // rim rises toward the silhouette on both sides (glassRim). glassWall 0 keeps a one-row rim.
@@ -698,6 +698,7 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
       float chord = sqrtf(fmx(0, 1 - u * u)), m = fmx(c.r, fmx(c.g, c.b));
       c = mix(c, {m, m, m}, p.liquidThin * (1 - chord) * (1 - chord));
     }
+    rowL[y] = luma(c);   // the light inside the liquid at this row (before backing, highlight, glass: they do not light a bubble)
     // Transparent liquid shows the per-row tube-back gradient. The highlight remains a surface
     // reflection and goes on after it.
     c = scale(c, br);
@@ -723,9 +724,8 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     pal.traceRows[y] = q(scale(to888(q(residue)), 0.85f));
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
-    rowL[y] = luma(c);
   }
-  // Fizz ring: the lit rim shaded as the liquid is at that row (luma relative to the brightest row), cap 0.8 (sim).
+  // Fizz ring: the lit rim shaded as the liquid is lit at that row (body shading relative to its brightest row), cap 0.8 (sim).
   float rowLMax = 1; for (int y = 0; y < H; y++) rowLMax = fmx(rowLMax, rowL[y]);
   for (int y = 0; y < H; y++) pal.bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.8f * rowL[y] / rowLMax), bodyL, ambAmt));
   pal.body = q(scale(body, br));

@@ -22,7 +22,7 @@
     "solidsFraction": 0,
     "dryingTime": 1,
     "gasMode": 3,
-    "gasLevel": 0.5,
+    "gasLevel": 0.05,
     "bubbleRadius": 0.1,
     "foamStability": 15,
     "innerRadius": 2.25,
@@ -100,7 +100,13 @@
     "freeHomeK": 150,
     "brightness": 1,
     "tickBright": 1,
-    "digitBright": 1.1
+    "digitBright": 1.1,
+    "fizzSizeVar": 0.5,
+    "fizzShadeOff": 0.3,
+    "fizzDepth": 0.7,
+    "fizzBlick": 0.6,
+    "fizzSquash": 1.25,
+    "fizzAcrossGain": 1.05
   },
   "provenance": {
     "ior": "estimated",
