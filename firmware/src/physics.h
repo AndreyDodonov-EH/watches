@@ -11,6 +11,7 @@
 #define ANGLE_HARD_MAX_DEG 20.0f
 #define LIGHT_MAX_DEG 85.0f
 #define CAP_DYN_MAX_PX 12.0f      // |cap| cap: dynamic meniscus bulge / hollow
+#define PIN_RELAX_S 3.0f          // a held contact line creeps back to the static shape (wrist micro-motion), s
 #define FILM_FULL_PX_S 25.0f      // edge speed at which the trailing wet film is fully drawn
 #define TRACE_DEPOSIT_MAX_PX 32.0f // max px of newly exposed glass per tick that gets a fresh deposit
 #define TRACE_FULL 0xff00         // fresh deposit (8.8 fixed point; the high byte is what renders)
@@ -26,6 +27,10 @@ struct TubeState {
   float fillTarget = 0, fillPos = 0, fillVel = 0, angle = 0, angleVel = 0, light = 0, lightVel = 0, agitation = 0, edgeLight = 0, acrossTilt = 0;
   // meniscus dynamics: surface centre leading the pinned contact lines (px, panel +x); trailing wet films 0..1
   float cap = 0, capVel = 0, filmFree = 0, filmHome = 0;
+  // pinned contact lines per meniscus end (free = time edge, home = free slug's home edge), each in its
+  // end's outward sense: pin = px of surface-centre travel against the held wall ring (hysteresis band),
+  // lineV = px/s the line is dragged at past the band, over ~0.5 s (0 while held). See sim TubeState.
+  float pinFree = 0, pinHome = 0, lineVFree = 0, lineVHome = 0;
   // dried traces: residue 0..TRACE_FULL (8.8 fixed point) per panel-frame column where an edge
   // receded (blood smear), draining back / drying; one of the static traceBuf()s, assigned at boot
   uint16_t *trace = nullptr;
@@ -45,6 +50,11 @@ float columnLen(float fillTarget, const Params &p);   // liquid column length, p
 uint16_t *traceBuf(int i);                            // static residue buffer of tube i
 
 float lightRest(float along, float across, const Params &p);
+// One meniscus end's wall-ring leads (px the ring leads the surface centre): adv / rec = at θA / θR
+// (adv <= rec), rest = from the hydrostatic head (len = column px, tilt = along follower into this end)
+// held within [adv, rec]. See sim contactLeads.
+struct ContactLeads { float R, rest, adv, rec; };
+ContactLeads contactLeads(const Params &p, float len, float tilt);
 void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt = PHYS_DT);
 
 // Slow EMA of |a| used as the gravity divisor (sensor reads ~0.94 g; never divide by instantaneous |a|).

@@ -421,3 +421,11 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Internal RAM is ~2.7 KB from full once BLE is up (`s` heap 2684, 1940 after a compare-device session): any new static
   in render.cpp/Tube hangs BLE init (black screen, no `ready.`). A boot-time check that fails visibly when the internal
   heap after ble_init drops under a margin would turn the hang into a message.
+- IMU runs at 500 Hz ODR with the QMI8658 LPF off (imu.cpp CTRL5 = 0) and is read at 50 Hz: everything above 25 Hz
+  aliases into the physics band, and `accelLpHz` 15.2 at 50 Hz barely filters (85 % per pole per tick). Enabling the chip
+  LPF (or a lower ODR) is a free anti-alias before any accelLpHz trade-off.
+- `check_render_frames.py --reference` must point at a copy outside `firmware/src` (e.g. a scratch file): a render.cpp
+  inside a worktree's `firmware/src` includes that tree's own headers, so a header change on one side yields thousands of
+  bogus diffs (TubeState layout mismatch). The tool could copy the reference into its tempdir itself.
+- `npm run check:imu` fails on HEAD b97305c: "reading did not settle (160.8)" for alpine / pinot / spritz / cuvee / tide
+  (readTiltStart 0 / readTiltEnd 1 presets).

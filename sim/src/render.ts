@@ -6,7 +6,7 @@ import {
   rgb565, rgb565to888, MM_PER_PX,
 } from '@spec/layout';
 import type { Params } from './params';
-import { columnLen, FILM_FULL_PX_S, TRACE_FULL, type TubeState } from './physics';
+import { columnLen, contactLeads, FILM_FULL_PX_S, TRACE_FULL, type TubeState } from './physics';
 
 export const fb = new Uint16Array(PANEL_W * PANEL_H);
 const lensScratch = new Uint16Array(PANEL_W * TUBE_HEIGHT_MAX);
@@ -967,12 +967,14 @@ function lensRow(d: number, p: Params): number {
 // ~2–3 mm, the capillary length ~2–3 mm). θ comes from the liquid's static angle and
 //  · the hydrostatic head along the slug (along-tilt): the lower end carries more pressure, so its
 //    curvature drops (θ up), the upper end's rises — held within the hysteresis band [θR, θA];
-//  · the contact line's speed: a moving line sits at θA / θR and Cox–Voinov moves it further,
-//    θ³ = θ₀³ ± G·v (a fast receding line reaches θ = 0 and leaves its film behind).
+//  · the contact line's history: the line is pinned, so the column's own travel moves the surface
+//    centre against the held wall ring and θ with it, until θ reaches θA / θR and the line is dragged
+//    (TubeState.pin* / lineV*, stepped in physics) — tremor-sized back-and-forth never moves the ring;
+//  · the dragged line's speed: Cox–Voinov moves it past θA / θR, θ³ = θ₀³ ± G·v (a fast receding
+//    line reaches θ = 0 and leaves its film behind).
 // Across-tilt sags the cap onto the low wall in proportion to the Bond number (R / capillary
 // length)²; the flick/slide wobble (TubeState.cap) is the surface's pinned-line mode on top.
 // ---------------------------------------------------------------------------
-const MENISCUS_HYST_PX_S = 2;  // contact-line speed at which a moving line has settled onto θA / θR
 const MENISCUS_SAG_K = 1;      // across sag per unit Bond number and g
 
 /** One end's meniscus for this frame. `cosT` = cos θ (> 0 concave), `h` = px its contact ring
@@ -980,20 +982,17 @@ const MENISCUS_SAG_K = 1;      // across sag per unit Bond number and g
  *  across sag, `cap` = wobble (px the centre leads the ring, the edge's own +x sense). */
 export interface CapShape { cosT: number; h: number; asym: number; cap: number }
 /** `len` = column length px, `tilt` = along follower into this end (TubeState.edgeLight, edge's
- *  own sense), `side` = across follower, `vOut` = contact-line speed outward (advancing > 0), px/s. */
-export function capShape(p: Params, len = 0, tilt = 0, side = 0, cap = 0, vOut = 0): CapShape {
-  const R = (tubeLayout(p).H - 1) / 2, rad = Math.PI / 180;
-  const t0 = Math.max(0, Math.min(180, p.contactAngle)) * rad, hy = Math.max(0, p.contactHyst) * rad;
-  const tA = Math.min(Math.PI, t0 + hy), tR = Math.max(0, t0 - hy);
-  // hydrostatic head, split between the two ends: Δcos θ = R·L·sin α / (4 lc²), all in mm
-  const lc = Math.max(0.1, p.capLength), Rmm = R * MM_PER_PX;
-  const cs = Math.max(Math.cos(tA), Math.min(Math.cos(tR), Math.cos(t0) - Rmm * Math.max(0, len) * MM_PER_PX * tilt / (4 * lc * lc)));
-  let th = Math.acos(cs);
-  th += ((vOut > 0 ? tA : tR) - th) * Math.min(1, Math.abs(vOut) / MENISCUS_HYST_PX_S);
+ *  own sense), `side` = across follower, `pin` = px of surface-centre travel against the held ring and
+ *  `lineV` = dragged line speed outward (advancing > 0), px/s (TubeState.pin* / lineV*). */
+export function capShape(p: Params, len = 0, tilt = 0, side = 0, cap = 0, pin = 0, lineV = 0): CapShape {
+  const c = contactLeads(p, len, tilt), R = c.R, rad = Math.PI / 180;
+  // the held ring's lead inside the hysteresis band, back to its angle (lead = R·tan(π/4 − θ/2))
+  let th = Math.PI / 2 - 2 * Math.atan(Math.max(c.adv, Math.min(c.rec, c.rest - pin)) / R);
   const dyn = Math.max(0, p.contactDyn) * rad, g = dyn * dyn * dyn / FILM_FULL_PX_S;   // Cox–Voinov
-  th = Math.cbrt(Math.max(0, Math.min(Math.PI ** 3, th * th * th + g * vOut)));
+  th = Math.cbrt(Math.max(0, Math.min(Math.PI ** 3, th * th * th + g * lineV)));
   const cosT = Math.cos(th), sinT = Math.sin(th);
   // Sag: side > 0 (top up) moves the bottom (d = +1) contact line out, whether the cap is concave or convex
+  const lc = Math.max(0.1, p.capLength), Rmm = R * MM_PER_PX;
   const asym = MENISCUS_SAG_K * (Rmm / lc) ** 2 * side * Math.sign(cosT);
   return { cosT, h: R * cosT / (1 + sinT), asym, cap };
 }
@@ -1084,11 +1083,10 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const lightK = Math.max(0.25, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   const lightKL = Math.max(0.25, 1 - p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   const xsI = Math.round(xs);
-  // Per-end meniscus: the home end takes the mirrored forcing; contact-line speeds outward (advancing
-  // > 0) from the panel-frame velocities, which drawTube does not mirror.
-  const recedeV = p.remaining ? 1 : -1;
-  const capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, -recedeV * (s.fillVel + s.slugVel));
-  const capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, recedeV * s.slugVel);
+  // Per-end meniscus: the home end takes the mirrored forcing; the pinned-line state is already in each
+  // end's own outward sense (physics), so the mirror leaves it alone.
+  const capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, s.pinFree, s.lineVFree);
+  const capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, s.pinHome, s.lineVHome);
   const capK = capScale(len, capR), capKL = capScale(len, capL);
   const hasLiquid = xe - xs >= 0.5;   // an empty column draws nothing, not even an anti-aliased sliver
   ensureFizz(idx, p, Math.max(0, Math.min(L, xe - xs - 6)), s.agitation);

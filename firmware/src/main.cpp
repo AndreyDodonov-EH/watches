@@ -362,9 +362,10 @@ static void handleLine(char *line) {
       display_wait_all();
       renderTube(0, tubeH, params, paramsGen, strip[0]); renderTube(1, tubeM, params, paramsGen, strip[1]);
       auto dumpState = [&](const TubeState &t) {
-        out.printf(" %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f",
+        out.printf(" %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f",
                    t.fillTarget, t.fillPos, t.angle, t.light, t.edgeLight, t.agitation,
-                   t.acrossTilt, t.cap, t.filmFree, t.filmHome, t.slugPos, t.reading);
+                   t.acrossTilt, t.cap, t.filmFree, t.filmHome, t.slugPos, t.reading, t.pinFree, t.pinHome,
+                   t.lineVFree, t.lineVHome);
       };
       out.print("STATE"); dumpState(tubeH); dumpState(tubeM); out.println();
       static char thex[TUBE_LENGTH_PX * 4 + 1];   // dried-trace residue, hex per tube (see compare-device.py)

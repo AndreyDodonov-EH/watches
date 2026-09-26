@@ -10,8 +10,8 @@
 //       && node /tmp/replay-check/tools/replay-check.js
 // (compiled outside sim/ so package.json "type":"module" doesn't bite the CJS output)
 import {
-  ANGLE_HARD_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, GravityNorm, ImuFilter, PHYS_DT,
-  columnLen, newTube, stepTube, type TiltInput,
+  ANGLE_HARD_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, FILM_FULL_PX_S, GravityNorm, ImuFilter, PHYS_DT,
+  columnLen, contactLeads, newTube, stepTube, type TiltInput,
 } from '../src/physics';
 import { DEFAULT_PARAMS, PRESETS, migrateParams, presetParams } from '../src/params';
 
@@ -100,7 +100,8 @@ for (const [name, samples] of scenarios) {
     for (const tube of tubes) {
       stepTube(tube, inp, p);
       if (!(isFinite(tube.fillPos) && isFinite(tube.angle) && isFinite(tube.light) && isFinite(tube.edgeLight)
-        && isFinite(tube.cap) && isFinite(tube.filmFree) && isFinite(tube.slugPos) && isFinite(tube.reading)))
+        && isFinite(tube.cap) && isFinite(tube.filmFree) && isFinite(tube.slugPos) && isFinite(tube.reading)
+        && isFinite(tube.pinFree) && isFinite(tube.pinHome) && isFinite(tube.lineVFree) && isFinite(tube.lineVHome)))
         { fail(`${name}: non-finite state`); break; }
       for (const ry of [0, TUBE_HEIGHT_PX >> 1, TUBE_HEIGHT_PX - 1]) {
         const dev = Math.abs(edgeX(ry, tube.fillTarget * TUBE_LENGTH_PX + tube.fillPos, tube.angle, tube.edgeLight, tube.acrossTilt, tube.cap, columnLen(tube.fillTarget, p)) - tube.fillTarget * TUBE_LENGTH_PX);
@@ -118,6 +119,49 @@ for (const [name, samples] of scenarios) {
   if (maxDev > EDGE_BUDGET) fail(`${name}: edge deviation ${maxDev.toFixed(1)} px exceeds budget ${EDGE_BUDGET.toFixed(1)}`);
   if (maxIn > 1.2 * p.inputGain + 1e-9) fail(`${name}: filtered tilt ${maxIn.toFixed(2)} g exceeds clip`);
   console.log(`${failures ? '' : 'ok  '}${name}: edge dev ${maxDev.toFixed(1)} px (budget ${EDGE_BUDGET.toFixed(1)}), angle ${maxAngle.toFixed(1)}°, slosh ${maxFill.toFixed(1)} px, cap ${maxCap.toFixed(1)} px, tilt in ${maxIn.toFixed(2)} g`);
+}
+
+// Pinned contact lines: 9 Hz hand tremor (0.02 g, 2 dps) over a slow drift, the liquid pinned or parked
+// for reading, must never drag a meniscus line — the wall ring holds still. The old model switched the
+// contact angle between θA and θR on the sign of the edge velocity, i.e. on every tremor half-cycle.
+// A deliberate wrist wave must still drag it.
+{
+  const tremor = (t: number): number[] => {
+    const along = Math.sin((3 + Math.sin(0.7 * t)) * Math.PI / 180) + 0.02 * Math.sin(2 * Math.PI * 9 * t);
+    const across = Math.sin((8 + Math.sin(0.5 * t)) * Math.PI / 180) + 0.012 * Math.sin(2 * Math.PI * 9 * t + 1);
+    return noisy([-0.94 * across, -0.94 * along, 0.94 * Math.sqrt(1 - along * along - across * across)],
+      [GBIAS[0] + 2 * Math.cos(2 * Math.PI * 9 * t), 0, 0.4]);
+  };
+  const cases: [string, number[][], boolean][] = [
+    ['tremor', scenario('', 10, tremor)[1], false], ['wrist wave', scenarios[1][1], true]];
+  for (const [name, samples, drags] of cases) for (const freeLiquid of [false, true]) for (const contactDyn of [8, 90]) {
+    const pl = { ...DEFAULT_PARAMS, freeLiquid, contactDyn };
+    const norm = new GravityNorm(), filt = new ImuFilter(), tube = newTube();
+    tube.fillTarget = 0.5;
+    // the time end's wall-ring lead as drawTube sees it (render.ts capShape, no sag / wobble) less its
+    // static tilt shape — the pinned line's own part — and its tick-to-tick change: the old per-tick
+    // velocity switch flipped it across the band (~9 px here) within two ticks; a line creeping at its
+    // θA edge under tremor (Cox–Voinov, honey-grade contactDyn 90) moves it < 0.1 px per tick
+    const lead = (): number => {
+      const c = contactLeads(pl, columnLen(tube.fillTarget, pl), tube.edgeLight), R = c.R;
+      const g = (contactDyn * Math.PI / 180) ** 3 / FILM_FULL_PX_S;
+      const th0 = Math.PI / 2 - 2 * Math.atan(Math.max(c.adv, Math.min(c.rec, c.rest - tube.pinFree)) / R);
+      const th = Math.cbrt(Math.max(0, Math.min(Math.PI ** 3, th0 ** 3 + g * tube.lineVFree)));
+      return R * Math.cos(th) / (1 + Math.sin(th)) - c.rest;
+    };
+    let maxV = 0, maxStep = 0, prev = NaN;
+    samples.forEach((s, i) => {
+      stepTube(tube, filt.step(mapSample(s, norm.update(Math.hypot(s[0], s[1], s[2]))), pl), pl);
+      maxV = Math.max(maxV, Math.abs(tube.lineVFree), Math.abs(tube.lineVHome));
+      const h = lead();
+      if (i > 50) maxStep = Math.max(maxStep, Math.abs(h - prev));
+      prev = h;
+    });
+    const tag = `contact lines, ${name}, ${freeLiquid ? 'free' : 'pinned'}, contactDyn ${contactDyn}`;
+    const bad = drags ? maxV <= 1 : maxV > 0.5 || maxStep > 0.25;
+    if (bad) fail(`${tag}: line speed ${maxV.toFixed(2)} px/s, ring step ${maxStep.toFixed(3)} px (${drags ? 'must be dragged' : 'must stay held'})`);
+    else console.log(`ok  ${tag}: max line speed ${maxV.toFixed(2)} px/s, ring step ${maxStep.toFixed(3)} px/tick`);
+  }
 }
 
 // Automatic liquid: remain bounded during motion, read indefinitely at gentle tilt, release

@@ -29,6 +29,18 @@ float lightRest(float along, float across, const Params &p) {
 
 float columnLen(float fillTarget, const Params &p) { return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX; }
 
+ContactLeads contactLeads(const Params &p, float len, float tilt) {
+  int H = (int)jroundf(p.tubeHeight); H = H < 4 ? 4 : H > TUBE_HEIGHT_MAX ? TUBE_HEIGHT_MAX : H;
+  const float R = (H - 1) / 2.0f, rad = (float)M_PI / 180, PI = (float)M_PI;
+  const float t0 = clampf(p.contactAngle, 0, 180) * rad, hy = fmaxf(0, p.contactHyst) * rad;
+  auto lead = [R](float th) { return R * cosf(th) / (1 + sinf(th)); };
+  // hydrostatic head, split between the two ends: dcos = R·L·sin(alpha) / (4 lc^2), all in mm
+  const float lc = fmaxf(0.1f, p.capLength), Rmm = R * MM_PER_PX;
+  const float cs = clampf(cosf(t0) - Rmm * fmaxf(0, len) * MM_PER_PX * tilt / (4 * lc * lc), -1, 1);
+  const float adv = lead(fminf(PI, t0 + hy)), rec = lead(fmaxf(0, t0 - hy));
+  return { R, clampf(R * cs / (1 + sqrtf(1 - cs * cs)), adv, rec), adv, rec };
+}
+
 void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   const float along = dz(in.along, p.deadzone);
   const float across = dz(in.across, p.deadzone);
@@ -66,6 +78,7 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   const float fillRest = clampf(along * p.fillSloshGain * flow, -FILL_SLOSH_MAX_PX, FILL_SLOSH_MAX_PX);
   const float fillKick = in.gyroAcross * p.angleGyroGain * 4 * flow;
   const float fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
+  const float fill0 = s.fillPos;
   s.fillVel += fillAcc * dt;
   s.fillPos += s.fillVel * dt;
   if (s.fillPos > FILL_SLOSH_MAX_PX) { s.fillPos = FILL_SLOSH_MAX_PX; s.fillVel = fminf(0, s.fillVel); }
@@ -74,12 +87,12 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   // Free liquid: slug slides under along-gravity with drag, bounces at the ends, parked home while reading.
   const float travel = fmaxf(0, TUBE_LENGTH_PX - columnLen(s.fillTarget, p));
   const float home = p.remaining ? travel : 0;
-  float slugAcc = 0;
+  float slugAcc = 0, slugStep = 0;   // px the slug really moved this tick (a wall stops it, whatever slugVel says)
   if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
   else {
     slugAcc = flow * along * p.freeGain - p.freeDamp * s.slugVel
       + s.reading * (-p.freeHomeK * (s.slugPos - home) - 2 * sqrtf(p.freeHomeK) * s.slugVel);
-    const float v0 = s.slugVel;
+    const float v0 = s.slugVel, x0 = s.slugPos;
     s.slugVel += slugAcc * dt;
     s.slugPos += s.slugVel * dt;
     if (s.slugPos <= 0 || s.slugPos >= travel) {   // wall carries the load; the hit is an impulse
@@ -88,6 +101,7 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
       if (hit) s.slugVel = -s.slugVel * p.freeBounce;
       slugAcc = hit ? (s.slugVel - v0) / dt * 0.25f : 0;
     }
+    slugStep = s.slugPos - x0;
   }
 
   // Meniscus wobble: centre pushed ahead of the contact lines by edge acceleration (inertia), springing
@@ -178,6 +192,22 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   s.agitation += (shake - s.agitation) * fminf(1, (shake > s.agitation ? 20 : 2) * dt);
   s.edgeLight += (clampf(along, -1, 1) - s.edgeLight) * fminf(1, 5 * dt);
   s.acrossTilt += (clampf(across, -1, 1) - s.acrossTilt) * fminf(1, 5 * dt);
+
+  // Pinned contact lines: the tilt pressure moves each end's static lead (a held line that would end up
+  // past θA / θR is re-seated on the band's edge — no line speed, the ring doesn't move on screen), then
+  // the edge's travel this tick is taken up by the held ring until the lead reaches θA / θR; only the rest
+  // drags the line; travel = the slosh and the slug's real, wall-clamped move. A held line creeps back to
+  // the static shape over PIN_RELAX_S. See sim.
+  const float lenNow = columnLen(s.fillTarget, p), tiltFree = -recede * s.edgeLight;
+  const float relax = 1 - fminf(1, dt / PIN_RELAX_S);
+  auto seat = [&](float &held, float &lineV, float tilt, float out) {
+    const ContactLeads c = contactLeads(p, lenNow, tilt);
+    const float lo = c.rest - c.rec, hi = c.rest - c.adv;
+    const float moved = clampf(held * relax, lo, hi) + out, pinned = clampf(moved, lo, hi);
+    lineV += ((moved - pinned) / dt - lineV) * fminf(1, 2 * dt); held = pinned;
+  };
+  seat(s.pinFree, s.lineVFree, tiltFree, -recede * (s.fillPos - fill0 + slugStep));
+  seat(s.pinHome, s.lineVHome, -tiltFree, recede * slugStep);
 }
 
 float GravityNorm::update(float n) {
