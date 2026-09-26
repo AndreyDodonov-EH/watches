@@ -44,7 +44,7 @@
     "meniscusLens": 0,
     "topLens": 0.35,
     "topParallax": -10,
-    "tickDryLens": 1,
+    "tickDryLens": 0.1,
     "digitDryLens": 0.1,
     "tickParallax": 0,
     "digitParallax": 4.75,

@@ -440,7 +440,7 @@ static const Params PRESET_1 = {
   1.0f, // tickStepH
   3.0f, // tickMajorEveryH
   27.0f, // tickMinorHeightH
-  16.0f, // tickMajorHeightH
+  13.0f, // tickMajorHeightH
   1.0f, // tickMinorWidthH
   2.0f, // tickMajorWidthH
   0x303030, // tickColorH

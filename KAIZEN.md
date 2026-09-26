@@ -429,3 +429,10 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   bogus diffs (TubeState layout mismatch). The tool could copy the reference into its tempdir itself.
 - `npm run check:imu` fails on HEAD b97305c: "reading did not settle (160.8)" for alpine / pinot / spritz / cuvee / tide
   (readTiltStart 0 / readTiltEnd 1 presets).
+- Rear ticks and rear digits share one wall, yet their lenses are separate keys (tickLens/bottomLens,
+  tickDryLens/digitDryLens). Presets were aligned by hand (2026-09-26); nothing keeps them aligned — a
+  coherenceIssues rule (or one dry-lens key derived from the vessel) would. Same for tickParallax vs digitParallax
+  (6 vs 4.75 / 5.5 in olive-oil, pinot, spritz, cuvee, tide): ticks slide against the digits under tilt.
+- Tick heights at digit positions were clamped by a throwaway script (2026-09-26): ≥2 source rows and ≥1 screen
+  row clear of the digit (incl. shadow) under both lenses. check-presets could assert the same so new presets
+  and design edits can't reintroduce ticks running into digits.
