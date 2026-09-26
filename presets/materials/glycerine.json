@@ -102,6 +102,7 @@
     "brightness": 1,
     "tickBright": 1.1,
     "digitBright": 1.2,
+    "markContrast": 24,
     "fizzSizeVar": 0.5,
     "fizzShadeOff": 0.3,
     "fizzDepth": 0.7,

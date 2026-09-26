@@ -586,6 +586,30 @@ else `display_init` fails at boot before `ble_init`.
   (2-tap horizontal, quantised weights + tile cache) — not taken; see KAIZEN for the surface band (~3.3 ms
   per tube on its own).
 
+## Rear marks through the liquid (2026-09-26, sim + firmware + material layer)
+- `markContrast` is a design key in material mode (was derived: opaque 0, else 24 with rear marks). Realism rule:
+  rear marks' floor ≤ 120 × liquidTransparency in every class (≤ 14 behind an opaque liquid, which used to force 0);
+  clear still needs ≥ 16. The material presets pin the former derived values: presets/physical unchanged.
+- Contrast floor on shadow-baked sprite digits: the plane's alpha already carries T, so the floor used to see the
+  raw texel and never fired — raising markContrast brightened ticks but not digits. Now floored at full glyph
+  coverage (a = max(T, cov), then blended by cov / a): sim markFn, firmware `Mark::wetColourT` + sprite-run MODE 3.
+- Gradual warp across the meniscus: a per-column wet share (rows that are liquid there, 1/256, `wetShare`) blends
+  the dry → wet source rows and scales the parallax, for ticks and digits (firmware: runs for share 0 / 256, a
+  per-pixel `drawRampColumn` under the meniscus). Before, the whole mark flipped at the centre row's edge.
+  The firmware table is per Tube (`Tube::wetShare`, PSRAM, allocated in render_init): a first build kept one
+  static table, and the two cores (hours on core 0, minutes on core 1) overwrote each other's shares — full tubes
+  flickered, end digits vanished; a second put 2 × 2.1 KB into the static Tubes and BLE init hung (black screen):
+  internal RAM has ~2.7 KB free once BLE is up. Board after the fix: 36.6 fps (HEAD 37.0, same scene), internal
+  heap 2684 B (as HEAD), parity at 11:59:40 (both tubes full) 0 px > 12/255.
+- check:meniscus gained sprite sheets (decoded with PIL) and 14 mark scenes (marks-across-*, marks-floor-*):
+  165 scenes, max 9/255.
+- Board A/B (`e2e.sh --ref HEAD`, cola preset pinned, one run each): HEAD 50.4 fps / 12.79 ms, new 54.6 fps /
+  11.32 ms — within run-to-run noise (the free slug moves under the pinned tilt; stage deltas swung ±4 ms). Host
+  timing of the same scene, warm caches: +8–10 % render with digits under both menisci (~30 ramp columns each),
+  +2–5 % otherwise. Device parity 218 px > 12/255, but host = sim exactly (0 px) on the dumped state: the rest is
+  frame/state skew of the moving slug, which the gradual warp makes ~2× more visible to the count (0.25 px skew:
+  43 → 97 px).
+
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.
 - **fps (full frame 536×240×16bpp):** 32.3 fps render+push, **41.7 fps push-only**, **71.4 fps pushing only

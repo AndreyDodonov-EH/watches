@@ -369,7 +369,7 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Emissive bodies now shade only their reflected share (liquidLo ≈ liquid for glow/tide/xenon): with lightPhys 0 they read flat;
   a small emission-side falloff toward the walls (limb darkening of a glowing column) would restore depth.
 - Glow derives opaque now (T_up holds a bright emitter near opaque), so its rear digits vanish (markContrast 0); its design
-  may want digits on top.
+  may want digits on top (or, since markContrast is a design key, a floor up to 120·T).
 - check:meniscus has no rimLight > 0 scene; an ad-hoc run (6 physical presets × 3 scenes) gave the same parity as rimLight 0
   (2106 vs 2228 differing px, max 9/255). Add one when the parity baseline is next re-counted.
 - Glow's wall row overshoots the target in blue by one RGB565 step (8 levels) at rim tint 0: a ~1.8-level real miss of the
@@ -404,3 +404,20 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `check:materials` derives each material only on its own design, but the dropdown keeps the user's design: cola
   (absorptionR 0.01) passed its check yet was rejected (12, wall 9 levels over) on spritz's white design. A material ×
   every-preset-design sweep in the checker would catch that (xenon's design rejects every liquid by rule 11, exempt it).
+- Contrast-floor direction at a near-tie luma (mark ≈ liquid behind it): sim (float luma) and firmware (1/1000 integer)
+  can pick opposite directions → 66/255 parity misses (bitmap digits, markContrast 40, T 0.4). A shared integer luma or a
+  small dead band would fix it; check:meniscus's marks-across scenes run with markContrast 0 because of it.
+- Rear marks under the surface-band dish differ sim↔firmware by 16–17/255 (two 565 steps; remaining mode even with
+  markContrast 0). check:meniscus's marks-across scenes run with surfaceBand 0 because of it.
+- markContrast ceiling 120·T (coherence MARK_CONTRAST_PER_T) is a first guess at "to some degree"; retune on the panel.
+- Wet share weighs every tube row alike, so across a concave meniscus it falls as 1 − √((x − xe)/cap): half the warp
+  change happens in the first quarter of the meniscus. Weighting rows by their lens depth might read smoother.
+- check_render_frames.py only proves pure refactors; a "neutralise feature X" flag (like --no-fizz) would show that only
+  the intended scenes changed after a behaviour change (the wet share changed 3523 / 9136 strips).
+- Meniscus-ramp columns use the per-pixel generic mark path (drawRampColumn): host +8–10 % render with digits under both
+  menisci. Rows are constant per column there, so a column-run variant of the sprite runs would cut it if the board shows it.
+- Device parity with a moving free slug is dominated by frame/state skew; the wet share doubles its >12/255 count per
+  sub-pixel skew. Dumping the state at the frame's physics step (or pausing physics for the dump) would make it a gate again.
+- Internal RAM is ~2.7 KB from full once BLE is up (`s` heap 2684, 1940 after a compare-device session): any new static
+  in render.cpp/Tube hangs BLE init (black screen, no `ready.`). A boot-time check that fails visibly when the internal
+  heap after ble_init drops under a margin would turn the hang into a message.

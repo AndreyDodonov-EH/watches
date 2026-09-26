@@ -23,6 +23,11 @@ def run_check(tmp):
     alias = cache / 'node_modules/@spec'
     alias.mkdir(parents=True, exist_ok=True)
     shutil.copy(cache / 'spec/layout.js', alias / 'layout.js')
+    # The sprite digit sheets as raw RGBA for the sim side (the firmware has them compiled in).
+    from PIL import Image
+    (tmp / 'sprites').mkdir(exist_ok=True)
+    for png in sorted((ROOT / 'sim/public/assets').glob('digits-*.png')):
+        (tmp / 'sprites' / (png.stem + '.rgba')).write_bytes(Image.open(png).convert('RGBA').tobytes())
     subprocess.run(['node', str(ROOT / 'sim/tools/check-meniscus.cjs'), str(cache), str(tmp), str(ROOT)], check=True)
     jobs = json.loads((tmp / 'jobs.json').read_text())
     cpp = ['#include <cstdio>\n#include "render.h"\nstatic uint16_t strip[536*80], trace[536];',

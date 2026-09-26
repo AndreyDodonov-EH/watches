@@ -9,6 +9,15 @@ const { DEFAULT_PARAMS, migrateParams } = require(path.join(cache, 'sim/src/para
 const ang = (depth) => 90 - 2 * Math.atan(depth / 30) * 180 / Math.PI;
 const { newTube } = require(path.join(cache, 'sim/src/physics.js'));
 const jobs = [];
+// Sprite sheets decoded by check_meniscus.py (sprites/<name>.rgba), metadata from the sim's assets.
+R.SPRITE_SHEETS.forEach((name, i) => {
+  const rgba = path.join(out, 'sprites', name + '.rgba');
+  if (!fs.existsSync(rgba)) return;
+  const meta = JSON.parse(fs.readFileSync(path.join(root, 'sim/public/assets', name + '.png.json'), 'utf8'));
+  const data = new Uint8ClampedArray(fs.readFileSync(rgba));
+  const w = meta.cellW * 10, h = data.length / 4 / w;
+  R.setSprite(i, { cellW: meta.cellW, cellH: meta.cellH, widths: meta.widths, data, w, h });
+});
 const base = { ...DEFAULT_PARAMS, tubeHeight: 61, hoursY: 0, minutesY: 100,
   freeLiquid: true, remaining: false, contactAngle: ang(12), contactHyst: 0, contactDyn: 0,
   meniscusLens: 0, surfaceBand: 0.8, surfaceRim: 0.8,
@@ -188,5 +197,21 @@ for (const remaining of [false, true]) for (const edgeGlow of [0, 5]) {
   for (let y = 0; y < 61; y++) for (let x = 263; x < 268; x++)
     assert.equal(bead[y * 536 + x], bead[y * 536 + 535 - x], 'overlapping AA ramps must composite a bead symmetrically');
 }
+// Rear marks across the meniscus (wetShare): ticks and labels the surface is passing over take part of the
+// liquid's refraction (rows blended dry -> wet, parallax scaled). Both slug edges at several offsets over the
+// labels, both frames, bitmap digits with a shadow pass and sprite digits with a baked one. No contrast floor
+// and no surface band here: the floor's direction at a near-tie luma (mark ~ liquid) is decided by rounding,
+// differently on each side, and a mark under the band's dish differs by two 565 steps (16-17/255) — both
+// already so before the wet share (see KAIZEN), neither to do with the warp.
+const across = { ...base, liquidTransparency: 0.4, markContrast: 0, surfaceBand: 0,
+  ticksH: true, tickStepH: 1, ticksOnTop: false, tickLens: 0.6, tickDryLens: -0.4, tickParallax: 5,
+  digits: true, digitsOnTop: false, digitHourStep: 1, bottomLens: 0.6, digitDryLens: -0.4, digitParallax: 5 };
+for (const digitFont of [0, 6]) for (const slugPos of [120, 127, 134]) for (const remaining of [false, true])
+  render(`marks-across-${digitFont}-${slugPos}-${remaining}`, { digitFont, remaining }, { slugPos, edgeLight: 0.4, acrossTilt: 0.3, angle: 2 }, across);
+// The contrast floor on sprite digits with a baked shadow (Mark::wetColourT): light numerals over a dark liquid,
+// no surface band, the slug over whole labels and across two.
+const floorScene = { ...across, liquid: '#102030', liquidHi: '#406080', liquidLo: '#081018', markContrast: 60, surfaceBand: 0,
+  ticksH: false, digitFont: 6, digitShadowColor: '#000000', digitColor: '#e0e0e0' };
+for (const slugPos of [120, 134]) render(`marks-floor-${slugPos}`, {}, { slugPos, edgeLight: 0.4, acrossTilt: 0.3 }, floorScene);
 fs.writeFileSync(path.join(out, 'jobs.json'), JSON.stringify(jobs));
 console.log(`Meniscus: symmetry, subpixel motion, flattening, residue, receding edge, gradient passed; ${jobs.length} parity scenes.`);

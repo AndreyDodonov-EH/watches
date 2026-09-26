@@ -4,7 +4,7 @@
 // step outside (fail); every signature preset with a Material yields no issue. Run: npm run check:materials
 declare const process: any; declare function require(m: string): any;
 import { PRESETS, presetParams, type Material, type Params } from '../src/params';
-import { VISC, coherenceIssues, hex, luma, sat } from '../src/material/coherence';
+import { MARK_CONTRAST_PER_T, VISC, coherenceIssues, hex, luma, sat } from '../src/material/coherence';
 import {
   DEFAULT_MATERIAL, DESIGN_KEYS, MATERIAL_KEYS, MATERIAL_META, MATERIAL_VERSION, migrateMaterial, parseMaterialEnvelope,
   serializeMaterialEnvelope, validateDesign, validateMaterial, type Design, type Material as MaterialProps,
@@ -131,14 +131,20 @@ range('plasma', 'xenon', 'angleMax', null, 3, 0.01, () => 'plasma: angleMax ≤ 
 // 2. Opacity
 range('opaque', 'blood', 'liquidTransparency', null, 0.12, 0.01, (x) => `opaque: liquidTransparency ${x} > 0.12`);
 range('opaque', 'blood', 'shadeDepth', 0.5, 0.95, 0.01, (x) => `opaque: shadeDepth ${x} not in [0.5, 0.95]`);
-const OPAQUE_REAR = 'opaque: rear marks would be faked by markContrast — print them on top or set markContrast 0';
-expect('opaque rear ticks + markContrast', 'blood', { ticksOnTop: false, markContrast: 1 }, [OPAQUE_REAR]);
-expect('opaque rear digits + markContrast', 'blood', { digitsOnTop: false, markContrast: 1 }, [OPAQUE_REAR]);
+// rear marks: markContrast within [0, 120·T] in every class (a floor may fake at most what the liquid lets through)
+const markCap = (id: string): number => +(MARK_CONTRAST_PER_T * presetParams(entry(id)).liquidTransparency).toFixed(2);
+const markMsg = (id: string) => (x: number): string => {
+  const t = presetParams(entry(id)).liquidTransparency;
+  return `rear marks: markContrast ${x} > ${markCap(id)} (${MARK_CONTRAST_PER_T} × liquidTransparency ${+t.toFixed(3)}) fakes more than the liquid lets through`;
+};
+range('opaque rear ticks', 'blood', 'markContrast', null, markCap('blood'), 0.01, markMsg('blood'), { ticksOnTop: false });
+range('opaque rear digits', 'blood', 'markContrast', null, markCap('blood'), 0.01, markMsg('blood'), { digitsOnTop: false });
 expect('opaque rear marks, markContrast 0', 'blood', { ticksOnTop: false, digitsOnTop: false, markContrast: 0 }, []);
 expect('opaque on-top marks ignore markContrast', 'blood', { markContrast: 30 }, []);
 range('translucent', 'urine', 'liquidTransparency', 0.25, 0.55, 0.01, (x) => `translucent: liquidTransparency ${x} not in [0.25, 0.55]`);
 range('translucent', 'urine', 'shadeDepth', 0.4, 0.85, 0.01, (x) => `translucent: shadeDepth ${x} not in [0.4, 0.85]`);
 expect('translucent rear marks need no markContrast', 'urine', { ticksOnTop: false, digitsOnTop: false, markContrast: 0 }, []);
+range('translucent rear marks', 'urine', 'markContrast', null, markCap('urine'), 0.01, markMsg('urine'), { ticksOnTop: false, digitsOnTop: false });
 range('clear', 'frizzante', 'liquidTransparency', 0.7, null, 0.01, (x) => `clear: liquidTransparency ${x} < 0.7`);
 expect('clear liquidTransparency=1', 'frizzante', { liquidTransparency: 1 }, []);
 range('clear', 'frizzante', 'shadeDepth', 0.3, 0.55, 0.01, (x) => `clear: shadeDepth ${x} not in [0.3, 0.55]`);
@@ -150,6 +156,7 @@ expect('clear liquidHi #ffffcc (sat 0.20)', 'frizzante', { liquidHi: '#ffffcc' }
 expect('clear liquidHi #c8f0ff (tinted)', 'frizzante', { liquidHi: '#c8f0ff' }, ['clear: liquidHi #c8f0ff is a white surface reflection (saturation 0.22 ≥ 0.2)']);
 range('clear rear ticks', 'frizzante', 'markContrast', 16, null, 1, (x) => `clear rear marks: markContrast ${x} < 16`, { ticksOnTop: false });
 range('clear rear digits', 'frizzante', 'markContrast', 16, null, 1, (x) => `clear rear marks: markContrast ${x} < 16`, { digitsOnTop: false });
+range('clear rear marks', 'frizzante', 'markContrast', null, markCap('frizzante'), 0.01, markMsg('frizzante'), { digitsOnTop: false });
 expect('clear on-top marks, markContrast 0', 'frizzante', { markContrast: 0 }, []);
 
 // ---------------------------------------------------------------------------------------------
@@ -377,6 +384,8 @@ const MAT0 = { innerRadius: 2.25, wallThickness: 0.5, wallIor: 1.49, lightElevat
 const mat = (m: Partial<MaterialProps>): MaterialProps => ({ ...DEFAULT_MATERIAL, ...MAT0, ...m });
 /** Fixture design: the listed backing (plain), 54 px tube, a sprite font that fits it, rear marks. */
 const FRONT: Design = { ticksOnTop: true, digitsOnTop: true, tickColorH: '#9aa4ac', tickMajorColorH: '#e8eef2', tickColorM: '#9aa4ac', tickMajorColorM: '#e8eef2' };
+/** markContrast of the rear-mark fixtures behind a non-opaque liquid (the policy value before it became a design key). */
+const REAR24: Design = { markContrast: 24 };
 const fdesign = (back: string, extra: Design = {}): Design => ({
   tubeHeight: 54, hoursY: 0, minutesY: 185, tubeBack: back, tubeBack2: back, tubeBackGradient: 0,
   digitFont: 9, digitScaleX: 3.25, digitScaleY: 3.25, digitBottom: 5, ...extra,
@@ -384,7 +393,7 @@ const fdesign = (back: string, extra: Design = {}): Design => ({
 interface Fixture { name: string; m: MaterialProps; d: Design; want: Want[] }
 const FIXTURES: Fixture[] = [
   { name: 'water', m: mat({ viscosity: 1, density: 1000, surfaceTension: 72, ior: 1.333, contactAngle: 20, contactHysteresis: 10, solidsFraction: 0, gasMode: 1, gasLevel: 0.6, bubbleRadius: 0.06, foamStability: 4 }),
-    d: fdesign('#0a0e10'), want: [
+    d: fdesign('#0a0e10', REAR24), want: [
       ['viscosity', 'watery', 'x'], ['opacity', 'clear', 'x'], ['T', '0.92', 'T'], ['pxPerMm', '9.64', 'd'],
       ['liquid', [48, 48, 48], 'c'], ['liquidLo', [15, 15, 15], 'c'], ['liquidHi', [189, 190, 190], 'c'], ['liquidThin', '0', 'w'], ['shadeDepth', '0.3', 'w'],
       ['highlightBright', '0.60', 'w'], ['glassWallGlow', '0.27', 'w'], ['glassOverLiquid', '0.54', 'w'],
@@ -393,7 +402,7 @@ const FIXTURES: Fixture[] = [
       ['wetFilm', '10.5', 'd'], ['traces', false, 'x'], ['fizz', true, 'x'], ['fizzSize', '1.16', 'd'], ['fizzSpeed', '35', 'd'], ['fizzCount', 48, 'x'], ['glowStrength', '0.07', 'd'],
     ] },
   { name: 'olive oil', m: mat({ viscosity: 84, density: 915, surfaceTension: 32, ior: 1.47, absorptionR: 0.05, absorptionG: 0.07, absorptionB: 0.45, contactAngle: 15, contactHysteresis: 8, solidsFraction: 0.3, dryingTime: 2 }),
-    d: fdesign('#110b03'), want: [
+    d: fdesign('#110b03', REAR24), want: [
       ['viscosity', 'medium', 'x'], ['opacity', 'translucent', 'x'], ['T', '0.47', 'T'],
       ['liquid', [57, 53, 0], 'c'], ['liquidLo', [5, 7, 0], 'c'], ['liquidHi', [192, 189, 164], 'c'], ['residual', '0', 'c'],
       ['liquidThin', '1.0', 'w'], ['shadeDepth', '0.4', 'w'], ['highlightBright', '0.55', 'w'], ['glassWallGlow', '0.20', 'w'],
@@ -403,7 +412,7 @@ const FIXTURES: Fixture[] = [
       ['wetFilm', '18.8', 'd'], ['traces', true, 'x'], ['traceAmount', '0.57', 'd'], ['traceStain', '0.24', 'd'], ['traceFollow', '0.20', 'd'], ['glowStrength', '0.04', 'd'],
     ] },
   { name: 'honey', m: mat({ viscosity: 10000, density: 1420, surfaceTension: 70, ior: 1.49, absorptionR: 0.06, absorptionG: 0.18, absorptionB: 0.7, contactAngle: 25, contactHysteresis: 20, solidsFraction: 0.8, dryingTime: 2, gasMode: 3, gasLevel: 0.04, bubbleRadius: 0.12, foamStability: 20 }),
-    d: fdesign('#0c0703'), want: [
+    d: fdesign('#0c0703', REAR24), want: [
       ['viscosity', 'viscous', 'x'], ['opacity', 'translucent', 'x'], ['T', '0.27', 'T'],
       ['liquid', [44, 21, 0], 'c'], ['liquidLo', [9, 2, 0], 'c'], ['liquidHi', [199, 184, 161], 'c'], ['residual', '0.6', 'c'],
       ['liquidThin', '1.0', 'w'], ['shadeDepth', '0.4', 'w'], ['highlightBright', '0.53', 'w'], ['glassWallGlow', '0.15', 'w'],
@@ -422,7 +431,7 @@ const FIXTURES: Fixture[] = [
       ['wetFilm', 0, 'x'], ['traces', false, 'x'], ['fizz', false, 'x'], ['glowStrength', 0, 'x'],
     ] },
   { name: 'xenon', m: mat({ phase: 1, emissionR: 0.35, emissionG: 0.2, emissionB: 0.9, ior: 1 }),
-    d: fdesign('#05020c', { freeLiquid: false }), want: [
+    d: fdesign('#05020c', { freeLiquid: false, ...REAR24 }), want: [
       ['viscosity', 'plasma', 'x'], ['opacity', 'translucent', 'x'], ['emissive', true, 'x'], ['liquidTransparency', 0.5, 'x'],
       ['liquid', [123, 95, 187], 'c'], ['liquidLo', [123, 95, 187], 'c'], ['liquidHi', [196, 176, 196], 'c'], ['shadeDepth', 0.85, 'x'], ['glassOverLiquid', 0.4, 'x'],
       ['freeLiquid', false, 'x'], ['fillK', 260, 'x'], ['fillDamp', 22, 'x'], ['fillSloshGain', 0.5, 'x'], ['angleK', 300, 'x'], ['angleDamp', 26, 'x'],
@@ -446,14 +455,14 @@ const FIXTURES: Fixture[] = [
       ['wetFilm', '15.2', 'd'], ['traces', false, 'x'],
     ] },
   { name: 'liquid oxygen', m: mat({ viscosity: 0.19, density: 1141, surfaceTension: 13, ior: 1.22, absorptionR: 0.005, absorptionG: 0.002, absorptionB: 0, contactAngle: 5, contactHysteresis: 3, gasMode: 2, gasLevel: 0.7, bubbleRadius: 0.05, foamStability: 0 }),
-    d: fdesign('#000000'), want: [
+    d: fdesign('#000000', REAR24), want: [
       ['viscosity', 'watery', 'x'], ['opacity', 'clear', 'x'], ['T', '0.88', 'T'],
       ['liquid', [50, 51, 52], 'c'], ['liquidLo', [16, 17, 17], 'c'], ['liquidHi', [190, 190, 190], 'c'], ['shadeDepth', '0.3', 'w'], ['glassWallGlow', '0.27', 'w'], ['glassOverLiquid', '0.63', 'w'],
       ['freeDamp', '0.57', 'd'], ['freeBounce', '0.35', 'd'], ['meniscusK', 400, 'x'], ['meniscusDamp', '4.9', 'd'], ['contactDyn', '8.4', 'd'], ['capLength', '1.05', 'd'],
       ['wetFilm', '10.7', 'd'], ['fizz', true, 'x'], ['fizzSize', 1, 'x'], ['fizzSpeed', '55', 'd'], ['fizzCount', 56, 'x'],
     ] },
   { name: 'cola', m: mat({ viscosity: 1.2, density: 1040, surfaceTension: 60, ior: 1.35, absorptionR: 0.05, absorptionG: 0.15, absorptionB: 0.35, contactAngle: 20, contactHysteresis: 10, gasMode: 1, gasLevel: 0.4, bubbleRadius: 0.07 }),
-    d: fdesign('#070403'), want: [
+    d: fdesign('#070403', REAR24), want: [
       ['viscosity', 'watery', 'x'], ['opacity', 'translucent', 'x'], ['T', '0.32', 'T'],
       ['liquid', [52, 29, 5], 'c'], ['liquidLo', [12, 4, 0], 'c'], ['liquidHi', [196, 184, 170], 'c'], ['residual', '0', 'c'],
       ['liquidThin', '1', 'w'], ['shadeDepth', '0.4', 'w'], ['glassWallGlow', '0.17', 'w'],
@@ -648,13 +657,13 @@ function boundary(name: string, m: MaterialProps, d: Design): DeriveReport | nul
 }
 const WATER = FIXTURES[0], COLA = FIXTURES[8], OIL = FIXTURES[1];
 boundary('K = S = 0', { ...WATER.m, absorptionR: 0, absorptionG: 0, absorptionB: 0, scattering: 0 }, WATER.d);
-boundary('K = 0, S = 3', { ...WATER.m, absorptionR: 0, absorptionG: 0, absorptionB: 0, scattering: 3, gasMode: 0 }, WATER.d);
+boundary('K = 0, S = 3', { ...WATER.m, absorptionR: 0, absorptionG: 0, absorptionB: 0, scattering: 3, gasMode: 0 }, { ...WATER.d, markContrast: 0 });   // opaque
 {
   const r = boundary('S = 0, K = 50 on a black backing (black body, guarded normalisation)', { ...WATER.m, absorptionR: 50, absorptionG: 50, absorptionB: 50, scattering: 0, gasMode: 0 }, fdesign('#000000', FRONT));
   if (r) report('boundary K = 50: liquid #000000, liquidThin 0', r.params.liquid === '#000000' && r.params.liquidThin === 0 ? [] : [`${r.params.liquid} ${r.params.liquidThin}`], []);
 }
 {
-  const r = boundary('colourless liquid on a black backing', { ...WATER.m, gasMode: 0 }, fdesign('#000000'));
+  const r = boundary('colourless liquid on a black backing', { ...WATER.m, gasMode: 0 }, fdesign('#000000', REAR24));
   if (r) report('boundary colourless on black: liquidThin 0, neutral liquidHi', r.params.liquidThin === 0 && sat(r.params.liquidHi) < 0.2 ? [] : [`${r.params.liquidThin} ${r.params.liquidHi}`], []);
 }
 {
@@ -717,7 +726,7 @@ for (const e of [0.02, 0.021]) {
     Math.abs(pre[0] - 248) <= 1 && Math.abs(comp - 124) <= 1 && compositeResidual([shown, shown, shown], back, 0.5, target) <= 1 ? [] : [`${pre[0]} ${comp}`], []);
 }
 {
-  const r = boundary('gradient backing (2: dark tubeBack, light tubeBack2)', OIL.m, { ...OIL.d, tubeBack: '#050403', tubeBack2: '#b0a898', tubeBackGradient: 2 });
+  const r = boundary('gradient backing (2: dark tubeBack, light tubeBack2)', OIL.m, { ...OIL.d, tubeBack: '#050403', tubeBack2: '#b0a898', tubeBackGradient: 2, markContrast: 0 });   // opaque on this backing
   if (r) report(`boundary gradient backing: centre residual ${r.residual.toFixed(2)} ≤ 5 levels (T ${r.coords.T.toFixed(3)} via T_max)`, r.residual <= 5 ? [] : [`residual ${r.residual.toFixed(2)}`], []);
   const u = boundary('light uniform backing (parchment) behind oil', OIL.m, fdesign('#f1e6cf'));
   if (u) report(`boundary parchment: centre residual ${u.residual.toFixed(2)} ≤ 5 levels (T ${u.coords.T.toFixed(3)} via T_max)`, u.residual <= 5 ? [] : [`residual ${u.residual.toFixed(2)}`], []);
@@ -959,6 +968,16 @@ accepts('opaque liquid with rear marks is allowed (markContrast 0)', () => {
   const p = derive(FIXTURES[5].m, fdesign('#050203'));
   if (p.markContrast !== 0) throw new Error(`markContrast ${p.markContrast}`);
 });
+{
+  // a design markContrast passes through up to 120·T and is rejected above it, pointing at itself and the optics
+  const T = derive(FIXTURES[5].m, fdesign('#050203')).liquidTransparency, cap = Math.floor(MARK_CONTRAST_PER_T * T);
+  accepts(`opaque liquid, rear marks, markContrast ${cap} (≤ 120·T ${T.toFixed(3)}) passes through`, () => {
+    const p = derive(FIXTURES[5].m, fdesign('#050203', { markContrast: cap }));
+    if (p.markContrast !== cap) throw new Error(`markContrast ${p.markContrast}`);
+  });
+  rejected('opaque liquid, rear marks, markContrast 24 (> 120·T)', FIXTURES[5].m, fdesign('#050203', REAR24), 11);
+  points('opaque liquid, rear marks, markContrast 24 (> 120·T)', 11, { design: ['markContrast'], derived: ['liquidTransparency'], material: ['scattering'] });
+}
 
 // ---------------------------------------------------------------------------------------------
 // 13. Sampled inputs: 200 seeded pseudo-random valid materials × (3 fixed designs + 1 sampled design). derive succeeds or throws

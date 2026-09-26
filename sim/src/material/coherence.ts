@@ -13,6 +13,11 @@ export const VISC: Record<Material['viscosity'], Record<string, Range>> = {
   plasma:  { fillSloshGain: [0, 1], angleTiltGain: [0, 1], angleGyroGain: [0, 0.06], wetFilm: [0, 0] },
 };
 
+/** Ceiling of a rear mark's legibility floor per unit of liquidTransparency: `markContrast` fakes what the
+ *  liquid lets through, so it may claim at most this × T (the slider's whole range, 120, at T = 1; ≤ 14 for
+ *  an opaque liquid, where rear marks show only dimly). */
+export const MARK_CONTRAST_PER_T = 120;
+
 export const hex = (s: string): [number, number, number] => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
 export const luma = (s: string): number => { const [r, g, b] = hex(s); return 0.299 * r + 0.587 * g + 0.114 * b; };
 export const sat = (s: string): number => { const c = hex(s), mx = Math.max(...c), mn = Math.min(...c); return mx === 0 ? 0 : (mx - mn) / mx; };
@@ -41,9 +46,11 @@ export function coherenceIssues(p: Params, m: Material): string[] {
 
   // opacity
   const t = p.liquidTransparency, rear = !p.ticksOnTop || !p.digitsOnTop;
+  const markCap = +(MARK_CONTRAST_PER_T * t).toFixed(2);
+  want(!rear || p.markContrast <= markCap,
+    `rear marks: markContrast ${p.markContrast} > ${markCap} (${MARK_CONTRAST_PER_T} × liquidTransparency ${+t.toFixed(3)}) fakes more than the liquid lets through`);
   if (m.opacity === 'opaque') {
     want(t <= 0.12, `opaque: liquidTransparency ${t} > 0.12`);
-    want(!rear || p.markContrast === 0, 'opaque: rear marks would be faked by markContrast — print them on top or set markContrast 0');
     want(p.shadeDepth >= 0.5 && p.shadeDepth <= 0.95, `opaque: shadeDepth ${p.shadeDepth} not in [0.5, 0.95]`);
   } else if (m.opacity === 'translucent') {
     want(t >= 0.25 && t <= 0.55, `translucent: liquidTransparency ${t} not in [0.25, 0.55]`);

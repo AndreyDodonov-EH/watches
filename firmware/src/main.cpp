@@ -404,7 +404,7 @@ void setup() {
                 rr >= 0 && rr < 16 ? RST[rr] : "?");
   if (!fb.buf) { out.println("FATAL: framebuffer alloc failed"); }
   if (!display_init()) out.println("display init FAILED");
-  if (!render_init()) out.println("render init FAILED (glyph pools)");
+  if (!render_init()) out.println("render init FAILED (glyph pools / mark tables, PSRAM)");
   tubeH.trace = traceBuf(0); tubeM.trace = traceBuf(1);   // static dried-trace buffers (see physics.h)
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   workerStart();
