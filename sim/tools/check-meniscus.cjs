@@ -26,8 +26,17 @@ const base = { ...DEFAULT_PARAMS, tubeHeight: 61, hoursY: 0, minutesY: 100,
   lens: 0, highlightInset: 0, digits: false, ticksH: false, ticksM: false,
   liquid: '#226688', liquidHi: '#eeffff', liquidLo: '#113344',
   tubeBack: '#ffffff', tubeBack2: '#ffffff' };
+// A state that moves an edge (fillVel / slugVel) stands for steady motion: its contact lines are dragged
+// at that speed, seated on the advancing / receding edge of their band — the pinned-line state stepTube
+// leaves behind (a large pin saturates the band whatever the tilt).
+function steady(p, state) {
+  if (!('fillVel' in state || 'slugVel' in state) || 'pinFree' in state) return state;
+  const recede = p.remaining ? 1 : -1, vF = -recede * ((state.fillVel ?? 0) + (state.slugVel ?? 0)), vH = recede * (state.slugVel ?? 0);
+  return { ...state, pinFree: Math.sign(vF) * 1000, lineVFree: vF, pinHome: Math.sign(vH) * 1000, lineVHome: vH };
+}
 function render(name, changes = {}, state = {}, preset = base, residue = false) {
   const p = { ...preset, ...changes };
+  state = steady(p, state);
   const s = { ...newTube(), fillTarget: 0.5, slugPos: 134, ...state };
   if (residue) { s.trace.fill(0xff00); s.traceLo = 0; s.traceHi = 536; }
   R.fb.fill(0);

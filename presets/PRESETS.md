@@ -128,7 +128,8 @@ Light:
 
 Wetting:
 - The meniscus is a contact-angle model (`contactAngle`, `contactHyst`, `contactDyn`, `capLength`): both ends are spherical caps set by
-  their angle; tilt pressure moves it within the hysteresis band, a moving line sits at the advancing / receding angle (Cox–Voinov on top).
+  their angle; tilt pressure moves it within the hysteresis band; the contact line is pinned, so the column's travel moves the angle
+  across the band (tremor stays inside it) and only travel past θA / θR drags the line (Cox–Voinov on its speed).
 - wetting: `contactAngle + contactHyst` < 90° (concave at both ends), wetFilm per class.
 - non-wetting: `contactAngle − contactHyst` > 90° (convex bead), wetFilm 0.
 - plasma: no meniscus dynamics (`meniscusInertia`, `contactHyst`, `contactDyn` all 0).

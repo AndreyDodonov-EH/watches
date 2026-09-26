@@ -1,7 +1,7 @@
 // Fixed-timestep (50 Hz) liquid dynamics — two spring-dampers per tube.
 // Mirrors what the firmware will run. No rendering here.
 import type { Params } from './params';
-import { TUBE_LENGTH_PX } from '../../spec/layout';
+import { MM_PER_PX, TUBE_HEIGHT_MAX, TUBE_LENGTH_PX } from '../../spec/layout';
 
 export const PHYS_HZ = 50;
 export const PHYS_DT = 1 / PHYS_HZ;
@@ -24,6 +24,7 @@ export const FILL_SLOSH_MAX_PX = 30;  // |fillPos| cap
 export const ANGLE_HARD_MAX_DEG = 20; // |angle| cap (params.angleMax tightens it, never widens)
 export const LIGHT_MAX_DEG = 85;      // |light| cap
 export const CAP_DYN_MAX_PX = 12;     // |cap| cap: dynamic meniscus bulge / hollow
+export const PIN_RELAX_S = 3;         // a held contact line creeps back to the static shape (wrist micro-motion), s
 export const FILM_FULL_PX_S = 25;     // edge speed (px/s) at which the trailing wet film is fully drawn
 export const TRACE_DEPOSIT_MAX_PX = 32; // max px of newly exposed glass per tick that gets a fresh deposit
 export const TRACE_FULL = 0xff00;      // fresh deposit (8.8 fixed point; the high byte is what renders)
@@ -48,6 +49,16 @@ export interface TubeState {
   // impulse bulges it ahead (inertia) and it rings at the surface spring.
   cap: number;
   capVel: number;
+  // Pinned contact lines, one per meniscus end (free = the time edge, home = a free slug's home edge),
+  // each in its end's own outward sense. `pin*` = px the surface centre has travelled against its held
+  // wall ring (+ = outward): hysteresis lets the ring's lead drift inside [lead(θA), lead(θR)] while the
+  // line stays put; travel past that drags the line along. `lineV*` = its speed, px/s, over ~0.5 s: the
+  // dynamic angle is a steady-motion law (a viscous surface takes ~μR/γ to reshape, honey ~0.5 s), so a
+  // stick-slip creep of a line held at θA / θR under tremor sets its mean, not a flicker.
+  pinFree: number;
+  pinHome: number;
+  lineVFree: number;
+  lineVHome: number;
   // Trailing wet film 0..1 left on the glass by a receding edge (drains away in ~0.5 s).
   filmFree: number;    // the time edge receding toward its home end
   filmHome: number;    // the home edge (free-liquid only) receding toward the time edge
@@ -76,7 +87,7 @@ export interface TubeState {
 
 export function newTube(): TubeState {
   return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, light: 0, lightVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0,
-    cap: 0, capVel: 0, filmFree: 0, filmHome: 0,
+    cap: 0, capVel: 0, pinFree: 0, pinHome: 0, lineVFree: 0, lineVHome: 0, filmFree: 0, filmHome: 0,
     trace: new Uint16Array(TUBE_LENGTH_PX), traceLo: TUBE_LENGTH_PX, traceHi: 0, xtPrev: 0, xhPrev: 0, traceInit: false,
     slugPos: 0, slugVel: 0, reading: 1, playTimer: 0, playWindow: 0,
     playAnchorAlong: 0, playAnchorAcross: 0, playDirAlong: 0, playDirAcross: 0, playInit: false };
@@ -94,6 +105,22 @@ function traceUneven(n: number): number {
 /** Length of the liquid column, px. */
 export function columnLen(fillTarget: number, p: Params): number {
   return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX;
+}
+
+/** One meniscus end's wall-ring leads, px the contact ring leads the surface centre (R(1 − sin θ)/cos θ,
+ *  see render.ts capShape): `adv` / `rec` = at the advancing / receding contact angle (adv <= rec),
+ *  `rest` = where the hydrostatic head along the slug puts it (`len` = column px, `tilt` = along follower
+ *  into this end), held within [adv, rec] — the pressure's static shape, no history. A line with `pin` px
+ *  of centre travel against it shows clamp(rest − pin, adv, rec). */
+export function contactLeads(p: Params, len: number, tilt: number): { R: number; rest: number; adv: number; rec: number } {
+  const R = (Math.max(4, Math.min(TUBE_HEIGHT_MAX, Math.round(p.tubeHeight))) - 1) / 2, rad = Math.PI / 180;
+  const t0 = Math.max(0, Math.min(180, p.contactAngle)) * rad, hy = Math.max(0, p.contactHyst) * rad;
+  const lead = (th: number): number => R * Math.cos(th) / (1 + Math.sin(th));
+  // hydrostatic head, split between the two ends: Δcos θ = R·L·sin α / (4 lc²), all in mm
+  const lc = Math.max(0.1, p.capLength), Rmm = R * MM_PER_PX;
+  const cs = Math.max(-1, Math.min(1, Math.cos(t0) - Rmm * Math.max(0, len) * MM_PER_PX * tilt / (4 * lc * lc)));
+  const adv = lead(Math.min(Math.PI, t0 + hy)), rec = lead(Math.max(0, t0 - hy));
+  return { R, rest: Math.max(adv, Math.min(rec, R * cs / (1 + Math.sqrt(1 - cs * cs)))), adv, rec };
 }
 
 /** Highlight angle the light settles at. Physical: the light is world-up; its direction in the
@@ -150,6 +177,7 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   const fillRest = Math.max(-FILL_SLOSH_MAX_PX, Math.min(FILL_SLOSH_MAX_PX, along * p.fillSloshGain * flow));
   const fillKick = inp.gyroAcross * p.angleGyroGain * 4 * flow; // quick flicks kick the edge
   const fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
+  const fill0 = s.fillPos;
   s.fillVel += fillAcc * dt;
   s.fillPos += s.fillVel * dt;
   if (s.fillPos > FILL_SLOSH_MAX_PX) { s.fillPos = FILL_SLOSH_MAX_PX; s.fillVel = Math.min(0, s.fillVel); }
@@ -159,12 +187,12 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   // bounces off the tube ends; while reading, a critically damped pull parks it at its home end.
   const travel = Math.max(0, TUBE_LENGTH_PX - columnLen(s.fillTarget, p));
   const home = p.remaining ? travel : 0;
-  let slugAcc = 0;
+  let slugAcc = 0, slugStep = 0;   // px the slug really moved this tick (a wall stops it, whatever slugVel says)
   if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
   else {
     slugAcc = flow * along * p.freeGain - p.freeDamp * s.slugVel
       + s.reading * (-p.freeHomeK * (s.slugPos - home) - 2 * Math.sqrt(p.freeHomeK) * s.slugVel);
-    const v0 = s.slugVel;
+    const v0 = s.slugVel, x0 = s.slugPos;
     s.slugVel += slugAcc * dt;
     s.slugPos += s.slugVel * dt;
     // At an end the wall carries the load (no forcing on the surface); the hit itself is an impulse.
@@ -174,6 +202,7 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
       if (hit) s.slugVel = -s.slugVel * p.freeBounce;
       slugAcc = hit ? (s.slugVel - v0) / dt * 0.25 : 0;
     }
+    slugStep = s.slugPos - x0;
   }
 
   // Meniscus wobble (panel frame, +x): the surface centre is pushed ahead of the pinned contact
@@ -276,6 +305,23 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   // end (edge glows brighter), -1 = drains away from it (edge dims). Consumed by the renderer.
   s.edgeLight += (Math.max(-1, Math.min(1, along)) - s.edgeLight) * Math.min(1, 5 * dt);
   s.acrossTilt += (Math.max(-1, Math.min(1, across)) - s.acrossTilt) * Math.min(1, 5 * dt);
+
+  // Pinned contact lines (contact-angle hysteresis): the tilt pressure moves each end's static lead — a
+  // held line that would end up past θA / θR is re-seated on the band's edge, which moves nothing on
+  // screen, so no line speed — then the edge's travel this tick (the slosh and the slug's real, wall-
+  // clamped move) is taken up by the held ring until the lead reaches θA / θR, and only the rest drags the
+  // line. Tremor-sized back-and-forth stays inside the band: the wall ring holds still instead of flipping
+  // between the advancing and receding shapes. A held line creeps back to the static shape over
+  // PIN_RELAX_S, which also keeps a parked slug's creep after its home (remaining mode) under 0.5 px.
+  const lenNow = columnLen(s.fillTarget, p), tiltFree = -recede * s.edgeLight;
+  const relax = 1 - Math.min(1, dt / PIN_RELAX_S);
+  const seat = (held: number, lineV: number, tilt: number, out: number): [number, number] => {
+    const c = contactLeads(p, lenNow, tilt), lo = c.rest - c.rec, hi = c.rest - c.adv;
+    const moved = Math.max(lo, Math.min(hi, held * relax)) + out, pinned = Math.max(lo, Math.min(hi, moved));
+    return [pinned, lineV + ((moved - pinned) / dt - lineV) * Math.min(1, 2 * dt)];
+  };
+  [s.pinFree, s.lineVFree] = seat(s.pinFree, s.lineVFree, tiltFree, -recede * (s.fillPos - fill0 + slugStep));
+  [s.pinHome, s.lineVHome] = seat(s.pinHome, s.lineVHome, -tiltFree, recede * slugStep);
 }
 
 /** Continuous fill levels per the layout spec. */

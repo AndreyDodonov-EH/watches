@@ -592,7 +592,7 @@ struct Tube {
   void ensureFizz(const Params &p, float len, float agitation);
   inline float fizzSquashRow(const Params &p, int y) const;
   void lensMagRows(const Params &p, float *rows) const;
-  CapShape capShape(const Params &p, float len, float tilt, float side, float cap, float vOut) const;
+  CapShape capShape(const Params &p, float len, float tilt, float side, float cap, float pin, float lineV) const;
   inline float edgeCap(int ry, const CapShape &c) const;
   inline float wallCap(int ry, const CapShape &c) const;
   inline float wallX(int ry, float xe, float tanA, const CapShape &c) const;
@@ -1598,22 +1598,20 @@ static float lensRow(float d, const Params &p) {
   return (d < 0 ? -1 : 1) * ((1 - strength) * u + strength * powf(u, exponent));
 }
 // Contact-angle meniscus, the same for both ends of a slug (sim capShape): a spherical cap set by the
-// end's contact angle — the static angle moved within the hysteresis band by the hydrostatic head along
-// the slug (tilt = along follower into this end), pinned to the advancing / receding angle while the
-// line moves and pushed further by Cox–Voinov (vOut = outward speed, px/s). side = across follower
-// (sag ∝ Bond number), cap = wobble, k = per-end short-column limit (sim capScale).
-#define MENISCUS_HYST_PX_S 2.0f
+// end's contact angle — the static angle moved by the hydrostatic head along the slug (tilt = along
+// follower into this end) and by the column's travel against the pinned wall ring (pin, px), held within
+// the hysteresis band; a dragged line (lineV = outward px/s, 0 while held) is pushed further by
+// Cox–Voinov. side = across follower (sag ∝ Bond number), cap = wobble, k = per-end short-column limit
+// (sim capScale).
 #define MENISCUS_SAG_K 1.0f
-CapShape Tube::capShape(const Params &p, float len, float tilt, float side, float cap, float vOut) const {
-  const float R = (H - 1) / 2.0f, rad = (float)M_PI / 180, PI = (float)M_PI;
-  float t0 = clampf(p.contactAngle, 0, 180) * rad, hy = fmx(0, p.contactHyst) * rad;
-  float tA = fmn(PI, t0 + hy), tR = fmx(0, t0 - hy);
-  float lc = fmx(0.1f, p.capLength), Rmm = R * MM_PER_PX;
-  float cs = clampf(cosf(t0) - Rmm * fmx(0, len) * MM_PER_PX * tilt / (4 * lc * lc), cosf(tA), cosf(tR));
-  float th = acosf(cs);
-  th += ((vOut > 0 ? tA : tR) - th) * fmn(1, fabsf(vOut) / MENISCUS_HYST_PX_S);
+CapShape Tube::capShape(const Params &p, float len, float tilt, float side, float cap, float pin, float lineV) const {
+  const ContactLeads cl = contactLeads(p, len, tilt);
+  const float R = cl.R, rad = (float)M_PI / 180, PI = (float)M_PI;
+  // the held ring's lead inside the band, back to its angle (lead = R·tan(pi/4 - theta/2))
+  float th = PI / 2 - 2 * atanf(clampf(cl.rest - pin, cl.adv, cl.rec) / R);
   float dyn = fmx(0, p.contactDyn) * rad, g = dyn * dyn * dyn / FILM_FULL_PX_S;
-  th = cbrtf(clampf(th * th * th + g * vOut, 0, PI * PI * PI));
+  th = cbrtf(clampf(th * th * th + g * lineV, 0, PI * PI * PI));
+  float lc = fmx(0.1f, p.capLength), Rmm = R * MM_PER_PX;
   CapShape c;
   c.cosT = cosf(th);
   float sinT = sinf(th);
@@ -1739,11 +1737,10 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   float lightK = fmx(0.25f, 1 + p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   float lightKL = fmx(0.25f, 1 - p.edgeLightGain * s.edgeLight) * (1 + s.agitation);
   int xsI = (int)jround(xs);
-  // Per-end meniscus: the home end takes the mirrored forcing; contact-line speeds outward (advancing
-  // > 0) from the panel-frame velocities, which drawTube does not mirror. See sim drawTube.
-  const float recedeV = p.remaining ? 1 : -1;
-  const CapShape capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, -recedeV * (s.fillVel + s.slugVel));
-  const CapShape capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, recedeV * s.slugVel);
+  // Per-end meniscus: the home end takes the mirrored forcing; the pinned-line state is already in each
+  // end's own outward sense (physics). See sim drawTube.
+  const CapShape capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, s.pinFree, s.lineVFree);
+  const CapShape capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, s.pinHome, s.lineVHome);
   float tanA = tanf(angle * (float)M_PI / 180);
   const bool hasLiquid = xe - xs >= 0.5f;   // an empty column draws nothing, not even an AA sliver
   ensureFizz(p, clampf(xe - xs - 6, 0, L), s.agitation);
