@@ -68,8 +68,13 @@ const DESIGN = new Set(list(modelSrc, 'DESIGN_KEYS'));
     console.log(`enter material mode: ${locked} derived/fixed rows locked, ${open} design rows editable: ok`);
 
     // ---- 2. viscosity drives freeDamp monotonically (olive oil: no gas, so every viscosity is allowed)
+    const designBefore = await sim(() => JSON.stringify(window.sim.material.design));
     await page.selectOption('#mat-preset', 'olive-oil');
     assert.equal(await sim(() => window.sim.material.material.viscosity), 84);
+    assert.equal(await sim(() => JSON.stringify(window.sim.material.design)), designBefore, 'the material dropdown changes the liquid only; the design stays');
+    await page.click('#mat-preset-design');
+    assert.notEqual(await sim(() => JSON.stringify(window.sim.material.design)), designBefore, "the preset's-design button takes the preset's design");
+    console.log('material dropdown keeps the design; the button takes the preset\'s: ok');
     const damps = [];
     for (const v of [0.3, 1, 3, 10, 84, 400, 2000, 20000, 100000]) {
       await setNumber('#mat-viscosity-n', v);

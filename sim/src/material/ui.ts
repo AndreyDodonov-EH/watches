@@ -35,8 +35,10 @@ export interface MaterialPanel {
   enter: () => void;
   /** Leave material mode: Params stay as they are. */
   leave: () => void;
-  /** Load a material preset (material AND design) and enter material mode. No derive. */
-  selectPreset: (id: string) => boolean;
+  /** Load a material preset and enter material mode. The dropdown brings the LIQUID only (the design —
+   *  backing, marks, layout, slug — stays the user's, adopted from the current Params when entering);
+   *  `withDesign` also takes the preset's own design (the `?material=` URL: a complete look). No derive. */
+  selectPreset: (id: string, withDesign?: boolean) => boolean;
   /** Take the design from the current Params (a legacy whole-struct change in material mode). No derive. */
   adoptDesign: () => void;
   /** derive(state) → Params. Returns false (Params untouched) on rejection. */
@@ -64,10 +66,6 @@ function fromPos(m: MaterialFieldMeta, pos: number): number {
   return Math.min(m.max, Math.max(m.min, +v.toPrecision(3)));
 }
 
-function sameDesign(a: Design, b: Design): boolean {
-  const ka = Object.keys(a), kb = Object.keys(b);
-  return ka.length === kb.length && ka.every((k) => (a as Record<string, unknown>)[k] === (b as Record<string, unknown>)[k]);
-}
 function sameMaterial(a: Material, b: Material): boolean {
   return MATERIAL_META.every((m) => a[m.key] === b[m.key]);
 }
@@ -93,7 +91,10 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
   const presetSel = el('select', 'presets'); presetSel.id = 'mat-preset';
   presetSel.add(new Option('custom material', ''));
   for (const e of MATERIAL_PRESETS) { const o = new Option(e.name, e.id); o.title = e.note; presetSel.add(o); }
-  head.append(modeLabel, presetSel);
+  const presetDesignBtn = el('button', '', "preset's design"); presetDesignBtn.id = 'mat-preset-design';
+  presetDesignBtn.title = "Also take this preset's backing, marks, layout and slug settings (the dropdown alone changes the liquid only)";
+  presetDesignBtn.onclick = () => presetDesign();
+  head.append(modeLabel, presetSel, presetDesignBtn);
   box.appendChild(head);
 
   // status + derived readout
@@ -154,7 +155,7 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
     try {
       // the state's own metadata (a preset's or an imported file's); a stored state from before it was
       // kept falls back to the matching built-in preset's
-      const p = matchedPreset(), name = state.name ?? p?.name, provenance = state.provenance ?? p?.provenance;
+      const p = matchedMaterial(), name = state.name ?? p?.name, provenance = state.provenance ?? p?.provenance;
       const text = serializeMaterialEnvelope({
         material: state.material, design: state.design, ...(name !== undefined ? { name } : {}), ...(provenance ? { provenance } : {}),
       });
@@ -199,8 +200,10 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
     if (name !== undefined) state.name = name; else delete state.name;
     if (provenance) state.provenance = { ...provenance }; else delete state.provenance;
   }
-  function matchedPreset(): MaterialPreset | undefined {
-    return MATERIAL_PRESETS.find((e) => sameMaterial(e.material, state.material) && sameDesign(e.design, state.design));
+  /** The preset whose liquid the state holds, whatever the design: the dropdown, the export filename and the
+   *  metadata fallback (provenance is per material property, so it holds on any design). */
+  function matchedMaterial(): MaterialPreset | undefined {
+    return MATERIAL_PRESETS.find((e) => sameMaterial(e.material, state.material));
   }
   function showReadout(): void {
     if (state.mode !== 'material' || !report) {
@@ -218,7 +221,7 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
   function refresh(): void {
     const on = state.mode === 'material';
     mode.checked = on;
-    presetSel.value = matchedPreset()?.id ?? '';
+    presetSel.value = matchedMaterial()?.id ?? '';
     for (const f of fields) {
       const v = state.material[f.meta.key];
       f.ctl.disabled = !on;
@@ -235,7 +238,7 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
     const next = { ...state.material, [meta.key]: v };
     try { validateMaterial(next); } catch (error) { setStatus('err', (error as Error).message); return; }
     state.material = next;
-    presetSel.value = matchedPreset()?.id ?? '';
+    presetSel.value = matchedMaterial()?.id ?? '';
     rederive(false);
   }
 
@@ -288,14 +291,22 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
     state.mode = 'material';
     hooks.onMode('material');
   }
-  function selectPreset(id: string): boolean {
+  function selectPreset(id: string, withDesign = false): boolean {
     const e = MATERIAL_PRESETS.find((x) => x.id === id);
     if (!e) return false;
-    toMaterialMode();
-    state.material = { ...e.material }; state.design = { ...e.design };
+    if (state.mode !== 'material') { lastGood = structuredClone(params); adoptDesign(); state.mode = 'material'; hooks.onMode('material'); }
+    state.material = { ...e.material };
+    if (withDesign) state.design = { ...e.design };
     setMeta(e.name, e.provenance);
     refresh();
     return true;
+  }
+  /** Take the selected preset's own design (backing, marks, layout, slug) on top of its liquid. */
+  function presetDesign(): void {
+    const e = MATERIAL_PRESETS.find((x) => x.id === presetSel.value);
+    if (!e || state.mode !== 'material') return;
+    state.design = { ...e.design };
+    refresh(); rederive(true);
   }
 
   mode.oninput = () => {
