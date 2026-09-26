@@ -341,7 +341,7 @@ panelUi.setLocked(matState.mode === 'material' ? LOCKED_KEYS : new Set());
     Object.assign(params, presetParams(preset));
     if (matState.mode === 'material') materialUi.adoptDesign();
   }
-  if (u.has('material') && !materialUi.selectPreset(u.get('material')!)) console.warn(`?material=${u.get('material')}: no such material preset`);
+  if (u.has('material') && !materialUi.selectPreset(u.get('material')!, true)) console.warn(`?material=${u.get('material')}: no such material preset`);
   for (const [k, v] of u) if (k.startsWith('m.')) {
     const key = k.slice(2);
     if (!(MATERIAL_KEYS as readonly string[]).includes(key)) { console.warn(`?${k}: not a material property, ignored`); continue; }
