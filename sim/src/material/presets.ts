@@ -109,8 +109,8 @@ function own(id: string, name: string, note: string, source: string, m: Partial<
 const REAR_ROD: Partial<Params> = {
   ...MODERN_BASE, ...FIZZ_LOOK,
   tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, lens: -0.2, lensCurve: 0.2,
-  tickStepH: 1, tickMajorEveryH: 2, tickMinorHeightH: 11, tickMajorHeightH: 17, tickMinorWidthH: 1, tickMajorWidthH: 2,
-  tickStepM: 5, tickMajorEveryM: 10, tickMinorHeightM: 10, tickMajorHeightM: 16, tickMinorWidthM: 1, tickMajorWidthM: 2,
+  tickStepH: 1, tickMajorEveryH: 2, tickMinorHeightH: 5, tickMajorHeightH: 7, tickMinorWidthH: 1, tickMajorWidthH: 2,
+  tickStepM: 5, tickMajorEveryM: 10, tickMinorHeightM: 5, tickMajorHeightM: 8, tickMinorWidthM: 1, tickMajorWidthM: 2,
   digitScaleX: 3.3, digitScaleY: 3.1, digitBottom: 10, digitScaleXMin: 2.35, digitScaleYMin: 2.35, digitBottomMin: 11,
   digitHourStep: 2, digitMinuteStep: 10,
 };
