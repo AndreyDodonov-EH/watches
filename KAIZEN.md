@@ -383,3 +383,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   step (or pass it to compare-device.py) so `--preset` runs log their own parity (found on the honey run, 2026-09-25).
 - groundReflectance caps Rg at 1, so for lin(back) > E_l (parchment #f1e6cf at the defaults: 0.88 > 0.70) E_l·Rg falls short of lin(back) and the "displayed colour is ground truth" law silently breaks for light backings; decide whether to let Rg exceed 1 or reject.
 - bubbleRim on a white backing: 0.35·C0 carries the backing through a clear body, so frizzante's ring is luma 219 on #ffffff (faint), not the ≈0.45 grey the E_s term alone suggests; consider C⁰ (backing-free body) instead of C0.
+- Material UI: a rejected design edit leaves the legacy input showing the refused value (params restored, panel not refreshed); refresh the row on rejection.
+- material/ui.ts `warn` branch is unreachable: deriveReport already turns every coherence failure into rejection 11. Drop it or make coherence advisory.
+- coherence.ts messages name some keys only in prose ("tube back", "contact angle", "a liquid"); derive.ts maps them with aliases. Returning `{ keys, text }` from coherenceIssues would remove the parsing.
+- WSL headless Chromium has no emoji font (⛔ renders as tofu), so the status bar draws its markers in CSS; installing fonts-noto-color-emoji would make emoji shots honest.
+- Material head row: the preset select is squeezed to "custo▾" at the 340 px panel width; give it its own line or shorten the checkbox label.

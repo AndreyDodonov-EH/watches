@@ -47,12 +47,9 @@ button:hover { background: #2c2c2c; }
 /* ---- Material group (material/ui.ts): fixed-size readouts so changing text never reflows the panel ---- */
 aside details.material { border-color: #34463c; }
 aside details.material.on { border-color: #4f7a60; }
-.mhead { display: flex; gap: 8px; align-items: center; margin: 4px 0; min-width: 0; }
+.mhead { display: flex; gap: 8px; align-items: center; margin: 4px 0; min-width: 0; flex-wrap: wrap; }
 .mmode { display: inline-flex; gap: 4px; align-items: center; flex: none; }
-.mhead select { flex: 1; min-width: 0; }
-.mstatus { font-family: monospace; font-size: 11px; height: 4.4em; overflow-y: auto; overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere;
-  color: var(--muted); border: 1px solid #222; border-radius: 3px; padding: 1px 4px; }
-.mstatus.ok { color: #7fc79a; } .mstatus.warn { color: #e0b050; } .mstatus.err { color: #ff8a80; }
+.mhead select { flex: 1; min-width: 9em; }
 .mono.mreadout { height: 5.8em; margin: 4px 0; line-height: 1.4; }
 .mbar { margin: 4px 0; }
 aside details.msub { border: 0; padding: 0 0 0 2px; margin: 0; min-inline-size: 0; }
@@ -69,6 +66,48 @@ aside details.msub summary { font-weight: 500; color: var(--muted); }
 /* legacy rows owned by the material (derived / fixed) in material mode */
 .row.locked span { opacity: 0.5; }
 .row.locked :disabled { opacity: 0.55; }
+/* rows a material problem points at: a bar in the group's left padding (absolute: no reflow), red label,
+   outlined inputs; a locked (derived) row the same, dimmer */
+.row, .mrow { position: relative; }
+.row.flag-err::before, .mrow.flag-err::before { content: ''; position: absolute; left: -6px; top: 1px; bottom: 1px; width: 3px; border-radius: 1px; background: #ff5252; }
+.row.flag-err > span, .mrow.flag-err > span { color: #ff8a80; }
+.row.flag-err :is(input[type=range], input[type=number], input[type=color], select),
+.mrow.flag-err :is(input[type=range], input[type=number], select) { outline: 1px solid #ff8a80; outline-offset: 0; }
+.row.locked.flag-err::before { opacity: 0.45; }
+
+/* ---- material status bar (material/ui.ts): fixed to the bottom of the viewport, editor-style ---- */
+body.has-mstatus { padding-bottom: 26px; }
+.mstatus { position: fixed; left: 0; right: 0; bottom: 0; height: 26px; z-index: 20; display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  background: #0c0d0d; border-top: 1px solid #2a2a2a; font: 12px/16px monospace; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+.mstatus:hover { background: #121414; }
+.mstatus.err { background: #1a0f0f; border-top-color: #4a2626; }
+.mdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #555; }
+.mstatus.ok .mdot { background: #7fc79a; } .mstatus.warn .mdot { background: #e0b050; } .mstatus.err .mdot { background: #ff5252; box-shadow: 0 0 4px #ff5252; }
+.msummary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mstatus.ok .msummary { color: #7fc79a; } .mstatus.warn .msummary { color: #e0b050; } .mstatus.err .msummary { color: #ff8a80; }
+.mchip { flex: none; display: inline-flex; align-items: center; gap: 5px; font: 11px/1 monospace; padding: 3px 8px 3px 5px; border-radius: 10px; }
+.mchip[hidden] { display: none; }
+.mchip.err { background: #3a1818; border-color: #6a2e2e; color: #ffb4ab; } .mchip.warn { background: #33280f; border-color: #6a5220; color: #f0c870; }
+.mstatus.open .mchip { box-shadow: inset 0 0 0 1px currentColor; }
+.mcoords { flex: none; width: 56ch; overflow: hidden; text-align: right; white-space: pre; color: #9a9a9a; font-variant-numeric: tabular-nums; } /* fixed box: the chip never twitches */
+.mproblems { position: absolute; left: 0; right: 0; bottom: 100%; max-height: 40vh; overflow-y: auto; cursor: default; user-select: text; white-space: normal;
+  background: #121413; border-top: 1px solid #3a3a3a; box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.55); font-size: 12px; line-height: 1.45; }
+.mphead { position: sticky; top: 0; padding: 5px 12px; background: #121413; border-bottom: 1px solid #242424; color: #bbb; font: 600 11px/1.4 system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase; }
+.mprob { display: flex; gap: 8px; align-items: flex-start; padding: 3px 12px; cursor: pointer; }
+/* ⛔ / ⚠ markers drawn in CSS (no emoji font needed) */
+.micon { flex: none; position: relative; width: 11px; height: 11px; border-radius: 50%; background: #e5484d; }
+.mprob .micon { margin-top: 3px; }
+.micon::after { content: ''; position: absolute; left: 2px; right: 2px; top: 4.5px; height: 2px; border-radius: 1px; background: #fff; }
+.micon.warn { background: #e0b050; }
+.mprob:hover, .mprob:focus { background: #1c2320; outline: none; }
+.mptext { flex: 1; min-width: 0; color: #ff8a80; overflow-wrap: anywhere; }
+.mprob.warn .mptext { color: #e0b050; }
+.mpkeys { flex: 0 1 auto; max-width: 45%; display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.mkey { font: 11px/1.3 monospace; padding: 0 5px; border-radius: 3px; background: transparent; border: 1px solid; cursor: pointer; }
+.mkey:hover { background: #222; }
+.mkey.m { color: #8fd3a8; border-color: #35594a; }                         /* material property */
+.mkey.d { color: #9ec3ff; border-color: #34496a; }                         /* design key */
+.mkey.x { color: #a0a0a0; border-color: #444; border-style: dashed; }      /* derived value (read-only) */
 
 /* ---- leather cuff overlay (presentation only) ---- */
 .leather { position: absolute; inset: -60px -40px; pointer-events: none;
