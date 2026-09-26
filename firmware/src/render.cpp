@@ -416,6 +416,17 @@ struct Mark {
   bool bandMark(int x, int y, int ry, uint16_t c, int covT, int rel, bool inside) const;
   // Whether the mark at (x, tube row ry) is composited through the liquid — the same test operator() applies.
   inline bool inLiquid(int x, int ry) const { return !onTop && x >= edges.lo[ry] && x < edges.hi[ry]; }
+  // A mark pixel over the liquid: its colour through the liquid (contrast floor included); covT is updated.
+  inline uint16_t wetColour(uint16_t bg, uint16_t c, int &covT) const { return wetColourT(bg, c, covT, T, C, bakedT); }
+  // bakedT: the texel as is without a floor; with one, the colour the glyph shows at full glyph coverage —
+  // the texel over the liquid at a = max(T, cov) — is floored and blended by the rest, cov / a (sim markFn).
+  static inline uint16_t wetColourT(uint16_t bg, uint16_t c, int &covT, int T, int C, bool bakedT) {
+    if (!bakedT) return throughLiquid(bg, c, T, C);
+    if (C <= 0) return c;
+    const int a = covT > T ? covT : T;
+    covT = (covT * 256 + (a >> 1)) / a;
+    return throughLiquid(bg, c, a, C);
+  }
 };
 
 struct Label { int x0; char text[3]; int len; int adv[2]; };
@@ -451,10 +462,27 @@ static void digitRowColors(const Params &p, int bh, uint16_t *out) {
 }
 
 // Which column is behind liquid; edges null (digits on top) = all wet.
-struct Wet {
-  bool all; float lo, hi;
-  Wet(const Edges *e, int H) : all(!e), lo(e ? e->lo[H >> 1] : 0), hi(e ? e->hi[H >> 1] : 0) {}
-  bool operator()(int x) const { return all || (x >= lo && x < hi); }
+// Wet share of each panel column in 1/256 (sim wetShare): how many tube rows are liquid there (lo <= x < hi,
+// Mark's own test) — 256 where every row is, 0 where none is, the meniscus in between. A rear mark takes that
+// share of the liquid's refraction (source rows blended from the behind-air warp toward the behind-liquid one,
+// parallax scaled), so the warp grows as the surface passes over it. Built by drawTube into its own Tube's
+// table (Tube::wetShare, PSRAM from render_init): the two tubes render at the same time, one per core.
+static void buildWetShare(const Edges &e, int H, uint16_t *share, int16_t *run) {
+  memset(run, 0, (PANEL_W + 1) * sizeof(int16_t));
+  for (int ry = 0; ry < H; ry++) {
+    const int a = (int)fceil(clampf(e.lo[ry], 0, PANEL_W)), b = (int)fceil(clampf(e.hi[ry], 0, PANEL_W));
+    if (b > a) { run[a]++; run[b]--; }
+  }
+  for (int x = 0, n = 0; x < PANEL_W; x++) { n += run[x]; share[x] = (uint16_t)((n * 256 + (H >> 1)) / H); }
+}
+// Source row for wet share k (1/256): the behind-air row moved toward the behind-liquid one.
+static inline int blendRow(int dry, int wet, int k) { return dry + (((wet - dry) * k + 128) >> 8); }
+// A column's wet share from its tube's table; null = 256 everywhere (digits on top).
+struct Warp {
+  const uint16_t *share;
+  explicit Warp(const uint16_t *share_) : share(share_) {}
+  bool all() const { return !share; }
+  int operator()(int x) const { return !share ? 256 : x < 0 || x >= PANEL_W ? 0 : share[x]; }
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -512,6 +540,9 @@ struct Tube {
 #endif
   EffectTable glowT[2];                                       // 0 = time edge, 1 = home edge
   float edges[TUBE_HEIGHT_MAX], edgesL[TUBE_HEIGHT_MAX];      // render-frame liquid edges per row
+  // rear-mark wet share per panel column (buildWetShare) + its scratch: PANEL_W / PANEL_W + 1 entries, PSRAM,
+  // allocated once by render_init (internal RAM is ~2.7 KB from full once BLE is up; 4.3 KB here hung its init)
+  uint16_t *wetShare = nullptr; int16_t *wetRun = nullptr;
   float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds for the mark compositor (edges + surface stroke)
   float strokeR[TUBE_HEIGHT_MAX], strokeL[TUBE_HEIGHT_MAX];   // outward extent of the concave surface stroke per edge (sim strokeR/L)
   float bandFill[2][TUBE_HEIGHT_MAX], bandBlick[2][TUBE_HEIGHT_MAX], bandRim[2][TUBE_HEIGHT_MAX];   // its layer weights per row, 0 = time edge, 1 = home: rear-mark compositor (sim BandInfo)
@@ -553,9 +584,9 @@ struct Tube {
   void buildPalette(const Params &p, float lightDeg, Palette &pal) const;
   ScaledGlyph *scaledGlyphs(int sheetIdx, int bw, int bh, float brightness, uint32_t tintHex, float tintAmt, float tone, int shadow, float shadowA, int shadowOff, float transK);
   bool layoutLabels(int y0, const Params &p, uint32_t gen, int ticksN, float acrossTilt, float edgeLight, float fill, Labels &lb);
-  void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
-  void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
-  void drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) const;
+  void drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Warp &warp, const Mark &mark) const;
+  void drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Warp &warp, const Mark &mark) const;
+  void drawLabels(int y0, const Labels &lb, const Warp &warp, const Mark &mark) const;
   void drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
                  const Edges *edges, const Mark &mark, float dxFull = 0, float dyFull = 0) const;
   void ensureFizz(const Params &p, float len, float agitation);
@@ -581,7 +612,7 @@ inline void Mark::operator()(int x, int y, uint16_t c, int covT, int rel) const 
   const bool inside = !onTop && x >= edges.lo[ry] && x < edges.hi[ry];
   if (!onTop && edges.band && bandMark(x, y, ry, c, covT, rel, inside)) return;
   if (inside) {
-    c = throughLiquid(t.rd(x, y), c, bakedT ? 256 : T, C);   // bakedT: transparency already in the coverage, only the contrast floor applies
+    c = wetColour(t.rd(x, y), c, covT);
     if (rel) { covT = covT * T >> 8; if (covT <= 0) return; }   // rear relief fades with the liquid's opacity (sim markFn)
   } else if (!onTop) { covT = covT * t.pal.dryT[ry] >> 8; if (covT <= 0) return; }   // rear marks vanish behind the wall band
   if (rel > 0) c = embossHi(c);
@@ -613,7 +644,7 @@ bool __attribute__((noinline)) Mark::bandMark(int x, int y, int ry, uint16_t c, 
   const float through = (1 - ab) * (1 - ar);
   if (inside) {
     if (through >= 1) return false;   // nothing on top here: the plain body path, byte-identical
-    c = throughLiquid(t.rd(x, y), c, bakedT ? 256 : T, C);
+    c = wetColour(t.rd(x, y), c, covT);
     if (rel) covT = covT * T >> 8;
     covT = (int)(covT * through + 0.5f); if (covT <= 0) return true;
     if (rel > 0) c = embossHi(c); else if (rel < 0) c = embossLo(c);
@@ -917,14 +948,49 @@ struct BitmapSampler {
   int aw(int cx, int cy) const { return a(cx, cy); }                  // no baked shadow: one plane
   uint16_t cw(int cx, int cy) const { return c(cx, cy); }
 };
-// Draw one glyph (see sim drawGlyph). A panel column shows the wet image where it is behind liquid and the dry
-// one where it is behind air, so a source column may feed both and every panel column gets exactly one; a
-// label straddling the fill edge breaks there like a refracted image. The dry copy is unshifted. The wet copy
-// sits at the fractional refraction shift (wetDx, wetDy) and is bilinearly resampled (weights in 1/256) so it
-// glides with tilt instead of stepping a whole pixel; its colour comes from the tap contributing the most
-// coverage. Rows outer (glyph memory is row-major); every pixel is written at most once.
+struct SpriteSampler {
+  const ScaledGlyph &g; int w, h;
+  explicit SpriteSampler(const ScaledGlyph &gg) : g(gg), w(gg.w), h(gg.h) {}
+  int a(int cx, int cy) const { return g.a[cy * g.w + cx]; }
+  uint16_t c(int cx, int cy) const { return g.c[cy * g.w + cx]; }
+  int aw(int cx, int cy) const { return g.aw[cy * g.w + cx]; }
+  uint16_t cw(int cx, int cy) const { return g.cw[cy * g.w + cx]; }
+};
+// One destination column xd across the meniscus (0 < wet share k < 256; sim drawGlyph): every tube row, its
+// source row blended from the dry warp toward the wet one by k, the refraction shift scaled by k, bilinear
+// taps (weights 1/65536) of the plane the Mark picks per pixel, the colour of the heaviest tap. xg: the copy's
+// panel x (glyph x plus the shadow offset). Only the columns under a meniscus take this per-pixel path.
 template <class S>
-static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark, bool shadowPass) {
+static void __attribute__((noinline)) drawRampColumn(const S &s, int xg, int xd, int k, int y0, const Labels &lb, const Mark &mark, bool shadowPass) {
+  const int off = shadowPass ? lb.shadowOff : 0, sourceTop = lb.yTop - y0 + off;
+  const float kf = k * (1 / 256.0f), sx = lb.wetDx * kf, sy = lb.wetDy * kf;
+  const int ix = (int)ffloor(sx), iy = (int)ffloor(sy), cx = xd - xg - ix;
+  if (cx < 0 || cx > s.w) return;
+  const int wx1 = (int)((sx - ix) * 256 + 0.5f), wx0 = 256 - wx1, wy1 = (int)((sy - iy) * 256 + 0.5f), wy0 = 256 - wy1;
+  const int w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
+  for (int ry = 0; ry < lb.H; ry++) {
+    const int cy = blendRow(lb.drySourceRows[ry], lb.sourceRows[ry], k) - sourceTop - iy; if (cy < 0 || cy > s.h) continue;
+    const bool L = mark.inLiquid(xd, ry);
+    auto tap = [&](int tx, int ty) -> int { return tx < 0 || ty < 0 || tx >= s.w || ty >= s.h ? 0 : L ? s.aw(tx, ty) : s.a(tx, ty); };
+    const int a00 = tap(cx, cy) * w00, a10 = tap(cx - 1, cy) * w10, a01 = tap(cx, cy - 1) * w01, a11 = tap(cx - 1, cy - 1) * w11;
+    const int a = (a00 + a10 + a01 + a11 + 32768) >> 16; if (!a) continue;
+    uint16_t c;
+    if (shadowPass) c = (uint16_t)lb.shadow;
+    else {
+      int m = a00; if (a10 > m) m = a10; if (a01 > m) m = a01; if (a11 > m) m = a11;
+      const int tx = m == a00 || m == a01 ? cx : cx - 1, ty = m == a00 || m == a10 ? cy : cy - 1;
+      c = L ? s.cw(tx, ty) : s.c(tx, ty);
+    }
+    mark(xd, y0 + ry, c, shadowPass ? LUT_alphaT16[a] * lb.shadowT >> 8 : LUT_alphaT16[a]);
+  }
+}
+// Draw one glyph (see sim drawGlyph). A panel column shows one image, chosen by its wet share: behind air (0)
+// the dry copy, unshifted; behind liquid (256) the wet copy at the fractional refraction shift (wetDx, wetDy),
+// bilinearly resampled (weights in 1/256) so it glides with tilt instead of stepping a whole pixel; across the
+// meniscus drawRampColumn. A resampled pixel's colour comes from the tap contributing the most coverage. Rows
+// outer (glyph memory is row-major); every pixel is written at most once.
+template <class S>
+static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Warp &warp, const Mark &mark, bool shadowPass) {
   int off = shadowPass ? lb.shadowOff : 0, xg = x + off, sourceTop = lb.yTop - y0 + off;
   auto covT = [&](int a) { return shadowPass ? LUT_alphaT16[a] * lb.shadowT >> 8 : LUT_alphaT16[a]; };   // shadow copy at its own opacity
   bool dcol[129], wcol[129]; int gw = s.w > 128 ? 128 : s.w;
@@ -933,13 +999,12 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
   int wx1 = (int)((lb.wetDx - ix) * 256 + 0.5f), wx0 = 256 - wx1, wy1 = (int)((lb.wetDy - iy) * 256 + 0.5f), wy0 = 256 - wy1;
   const int w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
   for (int cx = 0; cx <= gw; cx++) {
-    dcol[cx] = cx < gw && !wet(xg + cx); if (dcol[cx]) anyDry = true;
-    wcol[cx] = wet(xg + ix + cx); if (wcol[cx]) anyWet = true;
+    dcol[cx] = cx < gw && warp(xg + cx) == 0; if (dcol[cx]) anyDry = true;
+    wcol[cx] = warp(xg + ix + cx) == 256; if (wcol[cx]) anyWet = true;
   }
   // Plane per PIXEL: the behind-liquid plane (aw/cw) exactly where the Mark composites through the liquid,
-  // the behind-air plane elsewhere. The wet/dry column split above decides which copy (shifted or not) a
-  // column shows and is taken at the middle row; the meniscus makes the rows near the walls differ from it,
-  // and there the compositor's per-row test wins — as it did when the shadow was a second pass.
+  // the behind-air plane elsewhere. The column's wet share above decides which image (warp and shift) it
+  // shows; the meniscus makes rows of one column differ, and there the Mark's per-row test picks the plane.
   auto A = [&](bool L, int cx, int cy) -> int { return L ? s.aw(cx, cy) : s.a(cx, cy); };
   auto Cc = [&](bool L, int cx, int cy) -> uint16_t { return L ? s.cw(cx, cy) : s.c(cx, cy); };
   auto tap = [&](bool L, int cx, int cy) -> int { return cx < 0 || cy < 0 || cx >= s.w || cy >= s.h ? 0 : A(L, cx, cy); };
@@ -983,6 +1048,12 @@ static void drawGlyph(const S &s, int x, int y0, const Labels &lb, const Wet &we
       }
     }
   }
+  if (warp.all()) return;
+  const int xr1 = xg + gw + (lb.wetDx > 0 ? (int)fceil(lb.wetDx) : 0);
+  for (int xd = xg + (ix < 0 ? ix : 0); xd <= xr1; xd++) {
+    const int k = warp(xd);
+    if (k > 0 && k < 256) drawRampColumn(s, xg, xd, k, y0, lb, mark, shadowPass);
+  }
 }
 // ---------------------------------------------------------------------------------------------
 // sprite glyphs: row-run compositor (pixel-exact rewrite of drawGlyph<SpriteSampler>)
@@ -998,6 +1069,7 @@ static inline int clampI(int v, int lo, int hi) { return v < lo ? lo : v > hi ? 
 // MODE 0: on top or behind air (coverage scaled by scaleT: 256 on top, the row's dryT behind air).
 // MODE 1: behind liquid, transparency baked into the plane and no contrast floor: the texel colour as is.
 // MODE 2: behind liquid, general (throughLiquid per pixel).
+// MODE 3: behind liquid, transparency baked into the plane, with a contrast floor (Mark::wetColourT).
 template <int MODE>
 static void __attribute__((noinline)) spriteRunInt(const Tube &t, int y, int px0, int px1, const uint8_t *a, const uint16_t *c,
                                                    int scaleT, int T, int C) {
@@ -1009,6 +1081,7 @@ static void __attribute__((noinline)) spriteRunInt(const Tube &t, int y, int px0
     uint16_t col = *c;
     const uint16_t bg = __builtin_bswap16(fb[px]);
     if (MODE == 2) col = throughLiquid(bg, col, T, C);
+    else if (MODE == 3) col = Mark::wetColourT(bg, col, covT, T, C, true);
     fb[px] = __builtin_bswap16(covT >= 256 ? col : blend565T(bg, col, covT));
   }
 }
@@ -1038,6 +1111,7 @@ static void __attribute__((noinline)) spriteRunFrac(const Tube &t, int y, int px
     uint16_t col = m == a00 ? c0[cx] : m == a10 ? c0[cx - 1] : m == a01 ? c1[cx] : c1[cx - 1];
     const uint16_t bg = __builtin_bswap16(fb[px]);
     if (MODE == 2) col = throughLiquid(bg, col, T, C);
+    else if (MODE == 3) col = Mark::wetColourT(bg, col, covT, T, C, true);
     fb[px] = __builtin_bswap16(covT >= 256 ? col : blend565T(bg, col, covT));
   }
 }
@@ -1089,7 +1163,9 @@ struct SpriteRow {
     if (Hi <= Li || px1 <= Li || px0 >= Hi) { seg<0>(px0, px1, cx0, cy, frac, false, dT); return; }
     if (px0 < Li) { seg<0>(px0, Li, cx0, cy, frac, false, dT); cx0 += Li - px0; px0 = Li; }
     const int e = Hi < px1 ? Hi : px1;
-    if (liqMode == 1) seg<1>(px0, e, cx0, cy, frac, true, 256); else seg<2>(px0, e, cx0, cy, frac, true, 256);
+    if (liqMode == 1) seg<1>(px0, e, cx0, cy, frac, true, 256);
+    else if (liqMode == 3) seg<3>(px0, e, cx0, cy, frac, true, 256);
+    else seg<2>(px0, e, cx0, cy, frac, true, 256);
     cx0 += e - px0; px0 = e;
     if (px0 < px1) seg<0>(px0, px1, cx0, cy, frac, false, dT);
   }
@@ -1119,27 +1195,37 @@ struct SpriteRow {
   }
 };
 
-void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
+void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb, const Warp &warp, const Mark &mark) const {
   const int sourceTop = lb.yTop - y0, gw = g.w > 128 ? 128 : g.w;
   const int ix = (int)ffloor(lb.wetDx), iy = (int)ffloor(lb.wetDy);
   const int wx1 = (int)((lb.wetDx - ix) * 256 + 0.5f), wx0 = 256 - wx1, wy1 = (int)((lb.wetDy - iy) * 256 + 0.5f), wy0 = 256 - wy1;
   const bool frac = wx1 != 0 || wy1 != 0;
-  // Column ranges of the two copies from the middle-row split (generic path: dcol / wcol): the dry copy
-  // where the panel column is outside [lo, hi), the wet copy where the shifted column is inside it, one
-  // extra wet column for the fractional overhang. A column shows exactly one copy.
+  // Column ranges of the two copies from the wet shares (generic path: dcol / wcol): the dry copy on the
+  // columns before the first and after the last one with any liquid, the wet copy on the shifted columns that
+  // are liquid on every row (an interval: the rows' intervals intersected), one extra wet column for the
+  // fractional overhang. Every other column is under a meniscus and takes drawRampColumn (a share-0 column
+  // between two meniscus ones included: there it draws what the dry copy would). A column shows one image.
   int dA0 = 0, dA1 = 0, dB0 = gw, dB1 = gw, w0 = 0, w1 = frac ? gw + 1 : gw;
-  if (!wet.all) {
-    const int lo = (int)fceil(wet.lo), hi = (int)fceil(wet.hi);   // integer x >= lo  <=>  x >= ceil(lo)
-    if (hi <= lo) { dA1 = gw; w1 = w0; }
-    else { dA1 = clampI(lo - x, 0, gw); dB0 = clampI(hi - x, 0, gw); w0 = clampI(lo - x - ix, 0, w1); w1 = clampI(hi - x - ix, w0, w1); }
+  if (!warp.all()) {
+    while (dA1 < gw && warp(x + dA1) == 0) dA1++;
+    if (dA1 < gw) while (warp(x + dB0 - 1) == 0) dB0--;   // stops at dA1, whose share is > 0
+    int a = w0; while (a < w1 && warp(x + ix + a) != 256) a++;
+    int b = a; while (b < w1 && warp(x + ix + b) == 256) b++;
+    w0 = a; w1 = b;
   }
+  // under a meniscus: every column the scaled shift can reach that neither copy draws (shares strictly between,
+  // or 0 between two such columns)
+  const int xr0 = x + (ix < 0 ? ix : 0), xr1 = x + gw + (lb.wetDx > 0 ? (int)fceil(lb.wetDx) : 0);
+  auto ramp = [&](int xd, int k) { return k != 256 && (k != 0 || (xd - x >= dA1 && xd - x < dB0)); };
+  bool anyRamp = false;
+  if (!warp.all()) for (int xd = xr0; xd <= xr1 && !anyRamp; xd++) anyRamp = ramp(xd, warp(xd));
   const bool anyDry = dA1 > dA0 || dB1 > dB0, anyWet = w1 > w0;
-  if (!anyDry && !anyWet) return;
+  if (!anyDry && !anyWet && !anyRamp) return;
 #ifdef DIGIT_PROF
   prof[0]++;
 #endif
   SpriteRow r{*this, mark, g, 0, 0, 0, 0, 0, {0, 0}, {0, 0}, wx0 * wy0, wx1 * wy0, wx0 * wy1, wx1 * wy1,
-              mark.C <= 0 && mark.bakedT ? 1 : 2, mark.bakedT ? 256 : mark.T};
+              !mark.bakedT ? 2 : mark.C <= 0 ? 1 : 3, mark.T};
   const int a0 = lb.dryRy0 < lb.ry0 ? lb.dryRy0 : lb.ry0, a1 = lb.dryRy1 > lb.ry1 ? lb.dryRy1 : lb.ry1;
   const BandInfo *band = mark.onTop ? nullptr : mark.edges.band;
   for (int ry = a0; ry <= a1; ry++) {
@@ -1176,25 +1262,29 @@ void Tube::drawSpriteGlyph(const ScaledGlyph &g, int x, int y0, const Labels &lb
       else r.run(x + ix + w0, x + ix + w1, w0, cy, true);
     }
   }
+  if (!anyRamp) return;
+  const SpriteSampler ss(g);
+  for (int xd = xr0; xd <= xr1; xd++) { const int k = warp(xd); if (ramp(xd, k)) drawRampColumn(ss, x, xd, k, y0, lb, mark, false); }
 }
-void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
+void Tube::drawBitmapGlyph(const Font &f, int d, int x, int y0, const Labels &lb, const Warp &warp, const Mark &mark) const {
   BitmapSampler s(f, d, lb);
-  if (lb.shadow >= 0) drawGlyph(s, x, y0, lb, wet, mark, true);   // 1 px shadow copy offset down-right, then the body
-  drawGlyph(s, x, y0, lb, wet, mark, false);
+  if (lb.shadow >= 0) drawGlyph(s, x, y0, lb, warp, mark, true);   // 1 px shadow copy offset down-right, then the body
+  drawGlyph(s, x, y0, lb, warp, mark, false);
 }
-void Tube::drawLabels(int y0, const Labels &lb, const Wet &wet, const Mark &mark) const {
+void Tube::drawLabels(int y0, const Labels &lb, const Warp &warp, const Mark &mark) const {
   for (int i = 0; i < lb.n; i++) {
     const Label &l = lb.list[i]; int x = l.x0;
     for (int k = 0; k < l.len; k++) {
       int d = l.text[k] - '0';
-      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, y0, lb, wet, mark);
-      else drawBitmapGlyph(*lb.font, d, x, y0, lb, wet, mark);
+      if (lb.sprite) drawSpriteGlyph(lb.sprite[d], x, y0, lb, warp, mark);
+      else drawBitmapGlyph(*lb.font, d, x, y0, lb, warp, mark);
       x += l.adv[k] + lb.gap;
     }
   }
 }
 
-// wetRows/dryRows: source-row tables behind liquid vs behind air; edges null = all wet. Parallax is liquid-only.
+// wetRows/dryRows: source-row tables behind liquid vs behind air, blended by a tick's wet share (wetShare,
+// built by drawTube for these edges); edges null = all wet. Parallax is liquid-only.
 void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows, const int16_t *dryRows,
                      const Edges *edges, const Mark &mark, float dxFull, float dyFull) const {
   bool minutes = ticksN == 60;
@@ -1209,7 +1299,6 @@ void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows
   uint16_t cMin = q(scale(hexToRgb(minutes ? p.tickColorM : p.tickColorH), br));
   uint16_t cMaj = q(scale(hexToRgb(minutes ? p.tickMajorColorM : p.tickMajorColorH), br));
   int pos = (int)jround(minutes ? p.tickPosM : p.tickPosH);
-  float edgeLo = edges ? edges->lo[H >> 1] : 0, edgeHi = edges ? edges->hi[H >> 1] : 0;
   auto warpedRange = [&](const int16_t *sourceRows, int sourceA, int sourceB, int &a, int &b) {
     a = H; b = -1;
     for (int ry = 0; ry < H; ry++) if (sourceRows[ry] >= sourceA && sourceRows[ry] <= sourceB) {
@@ -1267,10 +1356,15 @@ void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows
     bool major = majorEvery > 0 && i % majorEvery == 0;
     int h = major ? hMaj : hMin; if (h <= 0) continue;
     int w = major ? wMaj : wMin, x0 = xc - ((w - 1) >> 1); uint16_t c = major ? cMaj : cMin;
-    bool wet = !edges || (xc >= edgeLo && xc < edgeHi);
-    float k = wet ? 1 : 0;   // air refracts nothing: no parallax
-    const int *R = rng[wet ? 1 : 0][major ? 1 : 0];
-    int topA = R[0], topB = R[1], botA = R[2], botB = R[3];
+    const int share = Warp(edges ? wetShare : nullptr)(xc);
+    int topA, topB, botA, botB;
+    if (share == 0 || share == 256) { const int *R = rng[share ? 1 : 0][major ? 1 : 0]; topA = R[0]; topB = R[1]; botA = R[2]; botB = R[3]; }
+    else {   // across the meniscus: the tick's own source rows (sim drawTicks)
+      int16_t rows[TUBE_HEIGHT_MAX];
+      for (int ry = 0; ry < H; ry++) rows[ry] = (int16_t)blendRow(dryRows[ry], wetRows[ry], share);
+      warpedRange(rows, 0, h - 1, topA, topB); warpedRange(rows, H - h, H - 1, botA, botB);
+    }
+    const float k = share * (1 / 256.0f);   // air refracts nothing: the parallax grows with the wet share
     if (pos != 1) drawSegment(x0, w, c, topA, topB, true, k);
     if (pos != 0) drawSegment(x0, w, c, botA, botB, false, k);
   }
@@ -2013,6 +2107,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       boundLo[ry] = L - hi; boundHi[ry] = L - lo;
     } else { boundLo[ry] = lo; boundHi[ry] = hi; }
   }
+  if (!p.ticksOnTop || !p.digitsOnTop) buildWetShare(bounds, H, wetShare, wetRun);
 
   // Scale marks, all before bubbles.
   bool haveLabels = layoutLabels(y0, p, gen, ticksN, st.acrossTilt, st.edgeLight, st.fillTarget, labels);
@@ -2027,7 +2122,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   auto drawDigitLayer = [&](bool onTop) {
     if (haveLabels && p.digitsOnTop == onTop) {
       Mark digitMark(*this, y0, bounds, p, onTop, p.markContrast * p.digitBright, labels.sprite && labels.shadow >= 0);
-      drawLabels(y0, labels, Wet(onTop ? nullptr : &bounds, H), digitMark);
+      drawLabels(y0, labels, Warp(onTop ? nullptr : wetShare), digitMark);
     }
   };
   drawTickLayer(false);
@@ -2123,7 +2218,9 @@ bool render_init() {
     tubes[i].set.poolC = (uint16_t *)heap_caps_malloc(GLYPH_POOL_PX * 2, MALLOC_CAP_SPIRAM);
     tubes[i].set.poolA = (uint8_t *)heap_caps_malloc(GLYPH_POOL_PX, MALLOC_CAP_SPIRAM);
     tubes[i].set.poolS = (uint8_t *)heap_caps_malloc(GLYPH_SPAN_BYTES, MALLOC_CAP_SPIRAM);
-    ok = ok && tubes[i].set.poolC && tubes[i].set.poolA && tubes[i].set.poolS;
+    tubes[i].wetShare = (uint16_t *)heap_caps_malloc(PANEL_W * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    tubes[i].wetRun = (int16_t *)heap_caps_malloc((PANEL_W + 1) * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    ok = ok && tubes[i].set.poolC && tubes[i].set.poolA && tubes[i].set.poolS && tubes[i].wetShare && tubes[i].wetRun;
   }
   return ok;
 }

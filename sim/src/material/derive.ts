@@ -20,7 +20,7 @@ import { rgb565, rgb565to888 } from '../../../spec/layout';
 export const DERIVED_KEYS = [
   'liquid', 'liquidHi', 'liquidLo', 'liquidTransparency', 'liquidThin', 'shadeDepth',
   'highlightH', 'highlightBright', 'highlightSharp', 'glassHi', 'glassHiBright', 'glassReflect', 'glassRim', 'glassWall',
-  'glassWallGlow', 'rimLight', 'rimTint', 'glassBody', 'glassOverLiquid', 'lightPhys', 'lightAngle', 'ambientLight', 'liquidBright', 'markContrast',
+  'glassWallGlow', 'rimLight', 'rimTint', 'glassBody', 'glassOverLiquid', 'lightPhys', 'lightAngle', 'ambientLight', 'liquidBright',
   'tickLens', 'bottomLens', 'bubbleRim', 'bubbleDark', 'edgeGlow', 'glowStrength', 'frontBright', 'edgeLightGain', 'edgeSoft',
   'surfaceFill', 'surfaceBlick', 'contactAngle', 'contactHyst', 'contactDyn', 'capLength', 'freeDamp', 'freeBounce', 'meniscusK',
   'meniscusDamp', 'meniscusInertia', 'angleTiltGain', 'angleGyroGain', 'angleMax', 'wetFilm', 'traces', 'traceAmount', 'traceDry',
@@ -161,7 +161,7 @@ const ABSORPTION_KEYS: readonly MaterialKey[] = ['absorptionR', 'absorptionG', '
 const DRIVERS: readonly { keys: readonly (keyof Params)[]; material: readonly MaterialKey[]; design?: readonly DesignKey[] }[] = [
   { keys: ['freeDamp', 'freeBounce', 'meniscusK', 'meniscusDamp', 'angleTiltGain', 'angleGyroGain', 'wetFilm', 'traceFollow', 'traceThin'],
     material: ['viscosity', 'density', 'surfaceTension', 'innerRadius'] },
-  { keys: ['liquidTransparency', 'liquid', 'liquidHi', 'liquidLo', 'shadeDepth', 'liquidThin', 'markContrast'],
+  { keys: ['liquidTransparency', 'liquid', 'liquidHi', 'liquidLo', 'shadeDepth', 'liquidThin'],
     material: [...ABSORPTION_KEYS, 'scattering', 'exposure', 'ambient'], design: ['tubeBack'] },
   { keys: ['glowStrength', 'edgeGlow', 'lightPhys', 'liquidBright', 'glassOverLiquid'], material: EMISSION_KEYS },
   { keys: ['contactAngle', 'contactHyst'], material: ['contactAngle', 'contactHysteresis'] },
@@ -365,7 +365,6 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
   const fizzCount = gas === 'carbonated' ? Math.round(30 + 30 * m.gasLevel)
     : gas === 'boiling' ? Math.round(45 + 15 * m.gasLevel) : gas === 'trapped' ? Math.round(120 * m.gasLevel) : 0;
 
-  const rear = !d.ticksOnTop || !d.digitsOnTop;
   const lens = Math.min(1, 0.45 * (m.ior - 1) / 0.333);
   const derived: Pick<Params, DerivedKey> = {
     ...colour.params,
@@ -375,7 +374,6 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
     lightAngle: m.lightElevation / 2,
     ambientLight: 0,   // the derived colours already carry the white room light (highlight, rim); ambientize would desaturate twice
     liquidBright: emissive ? 1.3 : 1,
-    markContrast: opacity === 'opaque' ? 0 : rear ? 24 : 0,
     tickLens: lens,
     bottomLens: lens,
     edgeGlow: emissive ? Math.round(18 + 16 * Math.min(1, ELum)) : metal ? 0 : 19,

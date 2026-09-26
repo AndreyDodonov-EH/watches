@@ -431,6 +431,7 @@
       "brightness",
       "tickBright",
       "digitBright",
+      "markContrast",
       "fizzSizeVar",
       "fizzShadeOff",
       "fizzDepth",

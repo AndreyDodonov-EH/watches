@@ -1195,7 +1195,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   tickMajorColorM: { help: 'Major tick colour.', group: 'Ticks · minutes', label: 'major colour' },
   tickPosM: { help: 'Tube edge used by the minutes ladder.', group: 'Ticks · minutes', label: 'edge', min: 0, max: 2, step: 1, options: ['top', 'bottom', 'both'] },
   liquidTransparency: { help: 'How much of ticks/digits shows through the liquid. 0 = opaque liquid.', group: 'Shape', min: 0, max: 1, step: 0.01 },
-  markContrast: { help: 'Min luma difference a tick/digit keeps from the liquid behind it. 0 = off.', group: 'Shape', label: 'mark contrast in liquid', min: 0, max: 120, step: 2 },
+  markContrast: { help: 'Min luma difference a tick/digit keeps from the liquid behind it. 0 = off. Material mode: at most 120 × the liquid transparency (the floor may fake only what the liquid lets through); a clear liquid needs 16 or more.', group: 'Shape', label: 'mark contrast in liquid', min: 0, max: 120, step: 2 },
   // digits — shared
   digits: { help: 'Show numeric labels along the bottom of the tube.', group: 'Digits', label: 'show digits' },
   digitFont: {

@@ -84,6 +84,8 @@ Design changes against the legacy look, each forced by a derive rejection: olive
 cuvee `tickBright` 1.5 → 1.3, pinot and spritz `tickBright` 2 → 1.3, `digitBright` 2 → 1.8. Glow derives
 opaque: its emission is summed into the body in linear light, and a bright emitter over a dark backing can
 only be shown near opaque (`T_up`). Xenon keeps the legacy design (`freeLiquid` false: a plasma is pinned).
+`markContrast` is a design key since 2026-09-26: every entry pins the value the former policy derived (24 for rear
+marks behind a non-opaque liquid, else 0), so the derived Params did not change.
 
 ## Base look (from `examples/`)
 
@@ -114,7 +116,8 @@ Traces (residue on the glass where an edge receded — blood smear, syrup coatin
 
 Opacity (`liquidTransparency`):
 - Dried residue retains its shaded pigment colour independently of bulk transparency; `traceAmount`, `traceStain`, and drying control its visibility.
-- opaque ≤ 0.12: ticks and digits printed on top (rear marks would be invisible or faked by `markContrast`); shadeDepth 0.5–0.95.
+- rear marks (any class): the legibility floor fakes what the liquid lets through, so `markContrast ≤ 120 × liquidTransparency`.
+- opaque ≤ 0.12: ticks and digits printed on top, or rear marks shown dimly (markContrast ≤ 14); shadeDepth 0.5–0.95.
 - translucent 0.25–0.55: rear marks allowed (bright sprite digits need no markContrast floor); shadeDepth 0.5–0.85.
 - clear ≥ 0.7 (colourless liquids only — a tinted liquid mixed 70 % toward the dark back turns khaki, so tinted ones are translucent): shadeDepth 0.3–0.55; liquidHi is a white surface reflection (saturation < 0.2); glassOverLiquid ≥ 0.5; rear marks need markContrast ≥ 16.
 

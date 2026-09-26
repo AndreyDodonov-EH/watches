@@ -45,6 +45,14 @@ function designOf(id: string, extra: Design = {}): Design {
  *  until 2026-09-26, now design keys. Every entry pins these values, so its derived Params are unchanged. */
 const FIZZ_LOOK: Design = { fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzDepth: 0.7, fizzBlick: 0.6, fizzSquash: 1.25, fizzAcrossGain: 1.05 };
 
+/** markContrast was derived until 2026-09-26 (24 for rear marks behind a non-opaque liquid, else 0) and is a
+ *  design key since: every entry pins the value it derived, so its derived Params are unchanged. The entries
+ *  that derived 24: */
+const MARK_FLOOR_24: ReadonlySet<string> = new Set([
+  'alpine', 'aerated-oil', 'honey', 'glycerine', 'cola', 'champagne', 'cuvee', 'olive-oil', 'urine', 'malt', 'cryo', 'spritz', 'xenon',
+]);
+const markFloor = (id: string): Design => ({ markContrast: MARK_FLOOR_24.has(id) ? 24 : 0 });
+
 /** An own design: the DESIGN_KEYS of `p` (a look built on the house base, no legacy preset behind it). */
 function designFrom(p: Partial<Params>): Design {
   const d: Record<string, unknown> = {};
@@ -86,7 +94,7 @@ function entry(id: string, note: string, source: string, m: Partial<Material>, o
   return {
     id, name: legacy.name, note, source,
     material: { ...DEFAULT_MATERIAL, ...m },
-    design: designOf(id, { ...FIZZ_LOOK, ...o.extra }),
+    design: designOf(id, { ...FIZZ_LOOK, ...markFloor(id), ...o.extra }),
     provenance: provenance(o.handbook ?? false, o.over),
   };
 }
@@ -94,7 +102,7 @@ function entry(id: string, note: string, source: string, m: Partial<Material>, o
 /** A material-only entry: no legacy preset of that id; the design is its own (designFrom). */
 function own(id: string, name: string, note: string, source: string, m: Partial<Material>, design: Design, o: Omit<EntryOptions, 'extra'> = {}): MaterialPreset {
   if (PRESETS.some((x) => x.id === id)) throw new Error(`material preset ${id}: a legacy preset has that id (use entry)`);
-  return { id, name, note, source, material: { ...DEFAULT_MATERIAL, ...m }, design, provenance: provenance(o.handbook ?? false, o.over) };
+  return { id, name, note, source, material: { ...DEFAULT_MATERIAL, ...m }, design: { ...design, ...markFloor(id) }, provenance: provenance(o.handbook ?? false, o.over) };
 }
 
 /** Standard rod, rear marks behind the liquid (the house base on the 54 px rod, alpine's mark scale). */
