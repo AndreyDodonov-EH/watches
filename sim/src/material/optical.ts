@@ -361,8 +361,11 @@ export function colourLaws(c: ColourInput): ColourOutput {
       highlightH, highlightBright, highlightSharp: 2,
       glassHi: '#dfe6ea', glassHiBright: 0.55 * Lhi, glassReflect: 0.25 * Lhi, glassRim: 0.45 + 0.35 * Lhi,
       glassBody: 0.4 * m.ambient, glassWallGlow, glassOverLiquid,
-      // a bubble's rim refracts the side light, not the backing behind it: dark on a light backing, light on a dark one
-      bubbleRim: rgbHex(map3((i) => enc255(Math.min(1, L.Es + 0.35 * Cfree[i])))), bubbleDark: 0.25 + 0.5 * (1 - Tsnap),
+      // A bubble's rim totally reflects the light inside the liquid, not the backing behind it: the side light filtered
+      // by the liquid on its way in (half the bore), plus the body's own colour. Its centre is a clear window: the
+      // only loss is the Fresnel reflection at its two liquid/gas surfaces (the tint over the see-through core).
+      bubbleRim: rgbHex(map3((i) => enc255(Math.min(1, L.Es * km(K[i], S, m.innerRadius, 0).Tr + 0.35 * Cfree[i])))),
+      bubbleDark: 1 - (1 - fresnel(1, m.ior, 1)) ** 2,
       // side-lit rim of a dielectric liquid; its tint is solved on the real palette (derive.ts)
       rimLight: c.metal || c.plasma ? 0 : 1,
     },

@@ -388,3 +388,19 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - coherence.ts messages name some keys only in prose ("tube back", "contact angle", "a liquid"); derive.ts maps them with aliases. Returning `{ keys, text }` from coherenceIssues would remove the parsing.
 - WSL headless Chromium has no emoji font (⛔ renders as tofu), so the status bar draws its markers in CSS; installing fonts-noto-color-emoji would make emoji shots honest.
 - Material head row: the preset select is squeezed to "custo▾" at the 340 px panel width; give it its own line or shorten the checkbox label.
+- Material fizz size is now free (2·r_b·pxPerMm, 1–16 px), but count stays class-bound (carbonated ≥ 30): big bubbles at
+  the count floor may crowd the bore — consider scaling fizzCount by bubble area if a large-bead look reads busy.
+- Big / dense material fizz raises per-frame fill on the board (trapped now up to 120 bubbles: glycerine 120 × 2.9 px, aerated-oil 90); bench `glycerine` before shipping it.
+- Still (trapped) fizz under ~2 px reads as dust, not bubbles (1-px ring = one AA pixel); a size floor for slow fizz might help.
+- Palette parity (firmware `Tube::buildPalette` rows vs sim `buildPalette`, via `#include "render.cpp"` + gen_params into a temp
+  tree) was built ad hoc for the fizz-ring change and matched 27/27 palettes exactly; worth committing as a check (no board needed).
+- Scalar `liquidTransparency` cannot show a saturated translucent filter over a light backing: T ≤ minᵢ targetᵢ/backᵢ, so a
+  liquid that nearly kills one channel derives opaque on white (old spritz: T 0.0002). Transparent spritz now = paler
+  absorption (B 0.3/mm caps T at 0.29); per-channel transmission in the mix would lift the trade-off.
+- T_max counts backing channels ≥ 8 levels, so a near-black backing (cola's gradient, G = 8) snaps a dark-red body opaque
+  over a 2-level miss; a threshold relative to the target (or ~16 levels) would stop that.
+- Side-light rim uses only the view chord Tr(d_w) (≈2.4 mm), not the light's in-path, so caramel-spectrum liquids get bright
+  gold edges (malt edges #e6dfbd, old cola #deca84); cola was darkened via exposure 0.8 instead.
+- `check:materials` derives each material only on its own design, but the dropdown keeps the user's design: cola
+  (absorptionR 0.01) passed its check yet was rejected (12, wall 9 levels over) on spritz's white design. A material ×
+  every-preset-design sweep in the checker would catch that (xenon's design rejects every liquid by rule 11, exempt it).

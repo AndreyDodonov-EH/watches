@@ -35,7 +35,6 @@ export const FIXED_KEYS = [
   'v', 'highlightInset', 'surfaceBand', 'surfaceRim', 'surfaceWidth', 'surfaceTone', 'freeGain',
   'fillK', 'fillDamp', 'fillSloshGain', 'angleK', 'angleDamp',
   'acrossK', 'acrossDamp', 'acrossGyroGain', 'shakeGain', 'deadzone', 'accelLpHz', 'gyroHpHz', 'gyroDeadzone', 'gyroMax', 'inputGain',
-  'fizzSizeVar', 'fizzAcrossGain', 'fizzSquash', 'fizzShadeOff', 'fizzDepth', 'fizzBlick',
   'bubble', 'bubbleW', 'bubbleH', 'bubbleGap', 'bubbleY', 'bubbleRollGain', 'bubbleTiltGain',
 ] as const satisfies readonly (keyof Params)[];
 export type FixedKey = (typeof FIXED_KEYS)[number];
@@ -99,12 +98,15 @@ const TRACE_THIN: readonly Anchor[] = [[0, 1.5], [X_V, 0.6], [4, 0.3]];
 const FIZZ_SPEED: readonly Anchor[] = [[-1, 0], [0.5, 3], [1.5, 20], [2, 40], [2.5, 55], [3, 60]];
 const GLOW: readonly Anchor[] = [[0.02, 0.4], [1, 0.8]];
 const GAS: readonly MaterialClass['gas'][] = ['none', 'carbonated', 'boiling', 'trapped'];
-const GAS_RANGE: Record<MaterialClass['gas'], { size: [number, number]; speed: [number, number] } | undefined> = {
+const GAS_RANGE: Record<MaterialClass['gas'], { speed: [number, number] } | undefined> = {
   none: undefined,
-  carbonated: { size: [1, 2], speed: [30, 55] },
-  boiling: { size: [1, 1.5], speed: [45, 60] },
-  trapped: { size: [2, 4], speed: [0, 8] },
+  carbonated: { speed: [30, 55] },
+  boiling: { speed: [45, 60] },
+  trapped: { speed: [0, 8] },
 };
+/** The drawable fizz diameter (PARAM_META.fizzSize): the only bound on the bubble-radius law — the size
+ *  follows bubbleRadius in every gas class. */
+const FIZZ_SIZE: [number, number] = [PARAM_META.fizzSize.min ?? 1, PARAM_META.fizzSize.max ?? 16];
 /** digitFont values ≥ this select the image sprite fonts (render.ts SPRITE_FONT = FONTS.length). */
 const SPRITE_FONT = 5;
 /** A backing this light (luma, 8-bit) is named by an overexposure rejection (9: "darken the backing"). */
@@ -361,7 +363,7 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
   const fizzSpeed = classClamp(anchored(Math.log10(Math.max(vbPx, 1e-12)), FIZZ_SPEED), gr?.speed);
   const s = Math.min(1, fizzSpeed / 30);
   const fizzCount = gas === 'carbonated' ? Math.round(30 + 30 * m.gasLevel)
-    : gas === 'boiling' ? Math.round(45 + 15 * m.gasLevel) : gas === 'trapped' ? Math.round(12 * m.gasLevel) : 0;
+    : gas === 'boiling' ? Math.round(45 + 15 * m.gasLevel) : gas === 'trapped' ? Math.round(120 * m.gasLevel) : 0;
 
   const rear = !d.ticksOnTop || !d.digitsOnTop;
   const lens = Math.min(1, 0.45 * (m.ior - 1) / 0.333);
@@ -405,7 +407,7 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
     traceFilm: 0.05 * m.solidsFraction * clamp(x / X_V),
     fizz: gas !== 'none',
     fizzCount,
-    fizzSize: classClamp(2 * m.bubbleRadius * pxPerMm, gr?.size),
+    fizzSize: clamp(2 * m.bubbleRadius * pxPerMm, ...FIZZ_SIZE),
     fizzSpeed,
     fizzFoamLife: m.foamStability,
     fizzFlatRise: 0.15 + 0.3 * s,
@@ -420,7 +422,6 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
       : { fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6 }),
     acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0,
     accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31, gyroMax: 470, inputGain: 1,
-    fizzSizeVar: 0.5, fizzAcrossGain: 1.05, fizzSquash: 1.25, fizzShadeOff: 0.3, fizzDepth: 0.7, fizzBlick: 0.6,
     bubble: false, bubbleW: DEFAULT_PARAMS.bubbleW, bubbleH: DEFAULT_PARAMS.bubbleH, bubbleGap: DEFAULT_PARAMS.bubbleGap,
     bubbleY: DEFAULT_PARAMS.bubbleY, bubbleRollGain: DEFAULT_PARAMS.bubbleRollGain, bubbleTiltGain: DEFAULT_PARAMS.bubbleTiltGain,
   };

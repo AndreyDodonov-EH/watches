@@ -166,7 +166,7 @@ after the palette inversion (below).
 | `liquidBright`, `brightness` | `liquidBright = 1`; emissive: 1.3 with the derived encoded `liquid`/`liquidHi`/`liquidLo` ÷ 1.3 (the palette scales encoded values, so the product is unchanged). `brightness` design. |
 | `markContrast` | Legibility policy: opaque 0; otherwise 24 when any marks are behind the liquid, else 0. |
 | `tickLens`, `bottomLens` | Depth warp of rear marks seen through the liquid cylinder grows with its index: `min(1, 0.45·(ior − 1)/0.333)` (water 0.45, oil 0.63). The dry-side and rod fields are design (rod calibration). |
-| `bubbleRim` | `enc255(min(1, E_s·white + 0.35·C⁰(0)))` with the backing-free body `C⁰`, `E_s = exposure·(ambient + 0.25·lightIntensity)` (the side-light irradiance of the rim term). A bubble's rim refracts light arriving from the side, not the backing behind it: it reads darker than a light backing and brighter than a dark one (the former `0.65·white` made bubbles vanish on white). Frizzante: luma 219 on #ffffff, 181 on #000000; `bubbleDark = 0.25 + 0.5·(1 − T)`. |
+| `bubbleRim` | `enc255(min(1, E_s·Tr(r) + 0.35·C⁰(0)))` with the backing-free body `C⁰`, `E_s = exposure·(ambient + 0.25·lightIntensity)` (the side-light irradiance of the rim term) and `Tr(r)` the Kubelka–Munk transmission over half the bore (the side light is filtered by the liquid on its way to the bubble: a tinted liquid's bubbles carry its colour, a colourless one's stay white). A bubble's rim totally reflects the light inside the liquid, not the backing behind it: it reads darker than a light backing and brighter than a dark one (the former `0.65·white` made bubbles vanish on white). The renderer shades the ring by the liquid's body lighting at that row (not the composited row: backing, surface highlight and glass do not light a bubble), so on a dark backing a bubble is lighter than the liquid. Frizzante: luma 219 on #ffffff, 181 on #000000. `bubbleDark = 1 − (1 − F)²`, `F = ((n − 1)/(n + 1))²`: the core is a clear window that loses only the reflection at its two surfaces (water 0.04, oil 0.07; the former `0.25 + 0.5·(1 − T)` drew dark cores). |
 
 ## Edge and glow
 
@@ -217,10 +217,10 @@ the coherence ranges. `x_μ = log10 μ_eff`; class thresholds at `x_μ = 0.398` 
 | Key | Law |
 |---|---|
 | `fizz` | `gasMode ≠ none` and not plasma. |
-| `fizzSize` | Drawn diameter `2·r_b · pxPerMm` px (0.06 mm, 54 px tube → 1.16 px), class clamp (carbonated 1–2, boiling 1–1.5, trapped 2–4). `fizzSizeVar` 0.5. |
+| `fizzSize` | Drawn diameter `2·r_b · pxPerMm` px (0.06 mm, 54 px tube → 1.16 px), bounded only by the drawable range 1–16 px (no class clamp: the size is the look's, so the bubble-radius slider is live over its whole 0.02–0.4 mm; 0.4 mm, 54 px tube → 7.7 px). The spread `fizzSizeVar` is a design key. |
 | `fizzSpeed` | `anchored(log10 v_b[px/s], [(−1, 0), (0.5, 3), (1.5, 20), (2, 40), (2.5, 55), (3, 60)])`, class clamp (carbonated 30–55, boiling 45–60, trapped 0–8). `v_b` in px/s = `v_b[m/s] · 1000 · pxPerMm`. Water/0.06 mm: 76 px/s → 35; cola/0.07 mm: 89 → 38; honey/0.12 mm: 0.04 px/s → 0 (trapped band); liquid oxygen (μ 0.19, ρ 1141)/0.05 mm: 315 px/s → 55. |
-| `fizzCount` | carbonated `30 + 30·gasLevel`, boiling `45 + 15·gasLevel`, trapped `round(12·gasLevel)`. `fizzFoamLife = foamStability`. |
-| `fizzFlatRise`, `fizzEdgeRise`, `fizzDriftGain` | Scale with the rise: `s = min(1, fizzSpeed/30)`: `0.15 + 0.3 s`, `0.2 + 0.3 s`, `0.4 + 0.6 s`. `fizzAcrossGain` 1.05, `fizzSquash` 1.25, `fizzShadeOff` 0.3, `fizzDepth` 0.7, `fizzBlick` 0.6 fixed. |
+| `fizzCount` | carbonated `30 + 30·gasLevel`, boiling `45 + 15·gasLevel`, trapped `round(120·gasLevel)` (a few held bubbles to a dense suspension; honey 0.04 → 5). `fizzFoamLife = foamStability`. |
+| `fizzFlatRise`, `fizzEdgeRise`, `fizzDriftGain` | Scale with the rise: `s = min(1, fizzSpeed/30)`: `0.15 + 0.3 s`, `0.2 + 0.3 s`, `0.4 + 0.6 s`. `fizzAcrossGain fizzSquash fizzShadeOff fizzDepth fizzBlick` are design keys. |
 | `bubble*` (spirit level) | `bubble` off; the rest at `DEFAULT_PARAMS`. |
 
 ## Ownership of every legacy `Params` key
@@ -228,7 +228,9 @@ the coherence ranges. `x_μ = log10 μ_eff`; class thresholds at `x_μ = 0.398` 
 - **Design pass-through** (schema `design.allow`): `tubeHeight hoursY minutesY remaining cornerR lens
   lensCurve meniscusLens topLens topParallax tickDryLens digitDryLens tickParallax digitParallax tubeBack
   tubeBack2 tubeBackGradient` all `tick*` (except `tickLens`) `ticksOnTop tickEmboss` all `digit*`
-  `digitsOnTop freeLiquid freeHomeK readTiltStart readTiltEnd playHold brightness tickBright digitBright`.
+  `digitsOnTop freeLiquid freeHomeK readTiltStart readTiltEnd playHold brightness tickBright digitBright`, and the
+  fizz look `fizzSizeVar fizzShadeOff fizzDepth fizzBlick fizzSquash fizzAcrossGain` (taste, not physics: fixed
+  policy until 2026-09-26; the presets pin the former values 0.5 / 0.3 / 0.7 / 0.6 / 1.25 / 1.05).
 - **Derived** (tables above): `liquid liquidHi liquidLo liquidTransparency liquidThin shadeDepth
   highlightH highlightBright highlightSharp glassHi glassHiBright glassReflect glassRim glassWall
   glassWallGlow glassBody glassOverLiquid lightPhys lightAngle ambientLight liquidBright markContrast
@@ -240,7 +242,7 @@ the coherence ranges. `x_μ = log10 μ_eff`; class thresholds at `x_μ = 0.398` 
 - **Fixed policy**: `v` (= `PARAMS_VERSION`), `highlightInset` 0, `surfaceBand surfaceRim surfaceWidth
   surfaceTone`, `freeGain` 570, `fillK fillDamp fillSloshGain angleK angleDamp` (liquids), `acrossK
   acrossDamp acrossGyroGain shakeGain deadzone accelLpHz gyroHpHz gyroDeadzone gyroMax inputGain`,
-  `fizzSizeVar fizzAcrossGain fizzSquash fizzShadeOff fizzDepth fizzBlick`, `bubble` off + `bubbleW
+  `bubble` off + `bubbleW
   bubbleH bubbleGap bubbleY bubbleRollGain bubbleTiltGain` defaults.
   `derive` asserts that the union of the three sets is exactly `keyof Params`, so a new legacy field
   cannot appear without an owner.
@@ -254,7 +256,7 @@ exposure 1, 54 px tube (`pxPerMm` 9.64), design backing as listed. Colours are 8
 |---|---|---|---|---|---|
 | water | μ 1, ρ 1000, γ 72, ior 1.333, K 0, S 0, θ 20 ± 10, solids 0, gas dissolved 0.6 / r_b 0.06 / foam 4, back #0a0e10 | watery / clear, T 0.92 (two-pass 0.85² ≈ 0.72 through the liquid; the fixture's F_t·Tr² luma) | liquid (48,48,48) backing-free haze taken directly (clear class; the legacy mix attenuates it, residual accepted), liquidLo (15,15,15), liquidHi (189,190,190), liquidThin 0, shadeDepth 0.3 (was 0.35; clear class minimum), highlightBright 0.60, glassWallGlow 0.27, glassOverLiquid 0.54 | freeDamp 0.8, bounce 0.20, K 475, damp 8, contactDyn 8.2, capLength 2.65, tilt 6.5, gyro 0.42 | wetFilm 10.5, traces off, fizz 1.16 px / 35 px/s / 48, glow 0.07 |
 | olive oil | μ 84, ρ 915, γ 32, ior 1.47, K (0.05, 0.07, 0.45), θ 15 ± 8, solids 0.3, drying 2, back #110b03 | medium / translucent, T 0.47 | liquid (57,53,0), liquidLo (5,7,0), liquidHi (192,189,164), residual 0, liquidThin 1.0, shadeDepth 0.4, highlightBright 0.55, glassWallGlow 0.20, glassOverLiquid 0.5 | freeDamp 3.35, bounce 0.05 (clamped), K 200 (clamped), damp 20.8, contactDyn 47, capLength 1.85, tilt 3.64, gyro 0.20 | wetFilm 18.8, traceAmount 0.57, traceStain 0.24, traceFollow 0.20, glow 0.04 |
-| honey | μ 10000, ρ 1420, γ 70, ior 1.49, K (0.06, 0.18, 0.7), θ 25 ± 20, solids 0.8, drying 2, gas trapped 0.4 / r_b 0.12 / foam 20, back #0c0703 | viscous / translucent, T 0.27 | liquid (44,21,0), liquidLo (9,2,0), liquidHi (199,184,161), residual 0.6 levels, liquidThin 1.0, shadeDepth 0.4, highlightBright 0.53, glassWallGlow 0.15 | freeDamp 8.65, bounce 0, K 79, damp 33, contactDyn 90, capLength 2.19, tilt 1.62, gyro 0.07 | wetFilm 28.3, traceAmount 1.32, traceStain 0.57, traceFollow 0.07, fizz 2.31 px / 0 px/s / 5 |
+| honey | μ 10000, ρ 1420, γ 70, ior 1.49, K (0.06, 0.18, 0.7), θ 25 ± 20, solids 0.8, drying 2, gas trapped 0.04 / r_b 0.12 / foam 20, back #0c0703 | viscous / translucent, T 0.27 | liquid (44,21,0), liquidLo (9,2,0), liquidHi (199,184,161), residual 0.6 levels, liquidThin 1.0, shadeDepth 0.4, highlightBright 0.53, glassWallGlow 0.15 | freeDamp 8.65, bounce 0, K 79, damp 33, contactDyn 90, capLength 2.19, tilt 1.62, gyro 0.07 | wetFilm 28.3, traceAmount 1.32, traceStain 0.57, traceFollow 0.07, fizz 2.31 px / 0 px/s / 5 |
 | mercury | metallic 1, reflectance 0.75, μ 1.55, ρ 13546, γ 485, θ 140 ± 15 | metal / opaque, T 0 | liquid (152,152,152), liquidLo (65,65,65), liquidHi white, shadeDepth 0.95, highlightBright 1.3, glassOverLiquid 1 | freeDamp 0.8 (clamped), bounce 0.51, K 500 (clamped), damp 8 (clamped), contactDyn 5.1, capLength 1.87, tilt 2, gyro 0.4 | wetFilm 0, traces off, fizz off, glow 0 |
 | xenon | phase plasma, emission (0.35, 0.2, 0.9), ior 1.0, back #05020c, design freeLiquid false | plasma / translucent, T 0.5 fixed | liquid (123,95,187) = enc(E)/1.3, liquidLo (123,95,187) (was (53,39,83): emission is not shaded), liquidHi (196,176,196) (white specular + 1.5·E clipped in linear, ÷ 1.3), shadeDepth 0.85, glassOverLiquid 0.4 | freeLiquid off, fill 260/22/0.5, angle 300/26/0.5/max 2, gyro 0.03, contact 100/0/0, K 400, damp 30, inertia 0 | film 0, traces off, fizz off, glowStrength 0.52, edgeGlow 23, lightPhys 0, liquidBright 1.3 |
 | blood | μ 4, ρ 1060, γ 58, ior 1.35, K (1, 20, 25), S 1, θ 30 ± 15, solids 0.45, drying 1.5, back #050203, front marks | medium / opaque, T 0.000 | liquid (120,35,31), liquidLo (49,9,7), liquidHi (247,168,166), residual 0, shadeDepth 0.95 (was 0.9; scattering body, class maximum), highlightBright 0.63, glassOverLiquid 0.53 | freeDamp 1.87, bounce 0.10, K 288, damp 14.8, contactDyn 14.1, capLength 2.31, tilt 4.85, gyro 0.29 | wetFilm 15.3, traceAmount 1.06, traceStain 0.34, traceFollow 0.29 |

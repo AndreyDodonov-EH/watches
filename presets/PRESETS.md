@@ -44,7 +44,8 @@ Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; supersede
 
 The same looks as material presets (`MATERIAL_PRESETS` in `sim/src/material/presets.ts`): each is a physical
 material (viscosity, density, surface tension, index, absorption / scattering, emission, wetting, residue, gas)
-plus the design keys (layout, backing, marks, digits) its legacy preset sets. All other legacy `Params` are
+plus the design keys (layout, backing, marks, digits) its legacy preset sets, or — for the material-only entries
+(aerated-oil, glycerine) — a design of its own on the house base. All other legacy `Params` are
 derived by `sim/src/material/derive.ts` from `presets/materials/*.json` (the material files); the derived
 `Params` are in `presets/physical/<id>.json` (same format as the legacy JSONs, input of `gen_params.py`).
 `npm run dump:presets` writes both directories; `npm run check:materials` (section 14) checks that every entry
@@ -57,7 +58,9 @@ derives without rejection, is coherent for its inferred class, has complete per-
 | frizzante | Frizzante | watery | clear | carbonated | no | handbook; absorption 0 |
 | alpine | Alpine spring | watery | translucent | carbonated | no | handbook; trace absorption estimated |
 | olive-oil | Olive oil | medium | translucent | none | no | handbook; absorption estimated |
+| aerated-oil | Aerated oil | medium | translucent | trapped (90, 2.9 px) | no | handbook (sunflower oil); absorption estimated; gas level artistic; own design (espresso backing, cream print, copper rear numerals) |
 | honey | Honey | viscous | translucent | trapped | no | handbook (viscosity 20 °C ~10 Pa·s); absorption estimated |
+| glycerine | Aerated glycerine | viscous | clear | trapped (120, 2.9 px) | no | handbook (glycerol); absorption estimated; gas level artistic; own design (blue-black backing, steel rear numerals) |
 | blood | Blood | medium | opaque | none | no | handbook; optical coefficients from tissue-optics literature (reduced scattering) |
 | milk | Milk | medium | opaque | none | no | handbook (viscosity at ~10 °C); scattering estimated |
 | mercury | Mercury | metal | opaque | none | no | handbook; reflectance estimated |
@@ -73,7 +76,7 @@ derives without rejection, is coherent for its inferred class, has complete per-
 | malt | Single malt | medium | translucent | none | no | handbook (40 % ethanol); absorption estimated |
 | cryo | Cryo oxygen | watery | clear | boiling | no | handbook (90 K) |
 | pinot | Pinot noir | watery | opaque (on parchment) | none | no | handbook (12 % ethanol); absorption estimated |
-| spritz | Aperol spritz | watery | opaque (on white) | carbonated | no | estimated |
+| spritz | Aperol spritz | watery | translucent | carbonated | no | estimated |
 | tide | Bioluminescent tide | watery | opaque | carbonated | yes | sea water handbook; emission artistic |
 | phosphor | Phosphor sample | watery | opaque (on white paper) | none | no | estimated |
 
@@ -129,9 +132,10 @@ Wetting:
 
 Gas:
 - none: fizz off.
-- carbonated: fizz on, size 1–2 px, speed 30–55, count 30–60 (watery only).
-- boiling: fizz on, size 1–1.5, speed 45–60, count 45–60.
-- trapped (viscous / molten): fizz on, size 2–4, speed ≤ 8, count ≤ 12.
+- carbonated: fizz on, speed 30–55, count 30–60 (watery only).
+- boiling: fizz on, speed 45–60, count 45–60.
+- trapped (viscous / molten): fizz on, speed ≤ 8, count ≤ 120 (a few held bubbles to a dense suspension: they never leave, so a trapped liquid holds more than a bead shows).
+- bubble size is a look, not a class: any drawable `fizzSize` (1–16 px) is coherent.
 
 Colour & scale:
 - luma(liquid) < luma(liquidHi) (liquidLo is the Lambert dark under physical light and may sit above a very dark body).

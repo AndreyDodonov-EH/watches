@@ -147,6 +147,7 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
       const chord = Math.sqrt(Math.max(0, 1 - u * u)), m = Math.max(c[0], c[1], c[2]);
       c = mix(c, [m, m, m], p.liquidThin * (1 - chord) * (1 - chord));
     }
+    rowL[y] = luma(c);   // the light inside the liquid at this row (before the backing, highlight and glass: they do not light a bubble)
     // A transparent liquid shows the tube back through it: blend the lit liquid toward the
     // (panel-dimmed) back. The highlight is a reflection off the liquid surface, so it goes on
     // after that (undiluted), and the glass wall over both.
@@ -179,11 +180,11 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     traceRows[y] = q(scale(rgb565to888(q(residue)), 0.85));
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));
-    rowL[y] = luma(c);
   }
-  // Fizz ring: the lit rim shaded exactly as the liquid is at that row (its luma relative to the brightest row),
-  // capped at 0.8 so the white pinpoint reads above it. A fixed light ramp used to floor at 0.35 and left bubbles
-  // darker than the liquid around them on shallow-shaded presets with a dark bubbleRim.
+  // Fizz ring: the lit rim shaded as the liquid is lit at that row (the body shading relative to its brightest row;
+  // the backing seen through, the surface highlight and the glass reflections are not light inside the liquid),
+  // capped at 0.8 so the white pinpoint reads above it. Shading by the composited row capped the ring below the
+  // liquid body on glossy presets (the highlight / glass rows set the maximum) and left bubbles darker than it.
   const rowLMax = Math.max(1, ...rowL);
   for (let y = 0; y < H; y++) bubbleRimRows[y] = q(ambientize(scale(rimLit, 0.8 * rowL[y] / rowLMax), bodyL, ambAmt));
   return {

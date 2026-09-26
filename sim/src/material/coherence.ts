@@ -97,13 +97,14 @@ export function coherenceIssues(p: Params, m: Material): string[] {
   if (m.gas === 'none') want(!p.fizz, 'no gas: fizz must be off');
   else {
     want(p.fizz, `${m.gas}: fizz must be on`);
-    const G: Record<string, { size: Range; speed: Range; count: Range }> = {
-      carbonated: { size: [1, 2], speed: [30, 55], count: [30, 60] },
-      boiling: { size: [1, 1.5], speed: [45, 60], count: [45, 60] },
-      trapped: { size: [2, 4], speed: [0, 8], count: [0, 12] },
+    // the bubble size is a look (the material's bubble radius), not a class: any drawable size is coherent
+    const G: Record<string, { speed: Range; count: Range }> = {
+      carbonated: { speed: [30, 55], count: [30, 60] },
+      boiling: { speed: [45, 60], count: [45, 60] },
+      trapped: { speed: [0, 8], count: [0, 120] },
     };
     const g = G[m.gas];
-    inR('fizzSize', p.fizzSize, g.size); inR('fizzSpeed', p.fizzSpeed, g.speed); inR('fizzCount', p.fizzCount, g.count);
+    inR('fizzSpeed', p.fizzSpeed, g.speed); inR('fizzCount', p.fizzCount, g.count);
     if (m.gas === 'carbonated') want(m.viscosity === 'watery', 'carbonated implies watery');
   }
 
