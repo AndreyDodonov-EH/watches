@@ -1,6 +1,6 @@
 import './style.css';
 import { PANEL_W, PANEL_H } from '@spec/layout';
-import { PRESETS, presetParams, type Params } from './params';
+import { GAS_MODELS, PRESETS, gasParams, presetParams, type Params } from './params';
 import { ImuFilter, PHYS_DT, fillLevels, newTube, stepTube, type TiltInput } from './physics';
 import { renderFrame, blit, stepFizz, fb, fizz, loadSprites, tubeLayout } from './render';
 import { DEFAULT_OVERLAY, LEATHER_PAD_X, LEATHER_PAD_Y, applyOverlay, buildOverlayDom } from './overlay';
@@ -326,7 +326,7 @@ const materialUi = buildMaterialPanel($('panel'), matState, {
 panelUi.setLocked(matState.mode === 'material' ? LOCKED_KEYS : new Set());
 
 // URL params, applied on top of the restored session — for reproducible states / screenshots:
-//   ?fresh=1 (ignore the saved session) &preset=<id from PRESETS> &t=10:09 &demo=120 &settle=1
+//   ?fresh=1 (ignore the saved session) &preset=<id from PRESETS> &gas=<id from GAS_MODELS> &t=10:09 &demo=120 &settle=1
 //   &along=0.3 &across=0 &scale=3 &cuff=0 &lens=0.6 &lenscurve=1 &lenssmooth=1 &leather=black &grid=1
 //   &p.<paramKey>=<value>   e.g. &p.liquid=%2339ff14&p.bubble=0
 // Physical material (applied in this order): preset → &material=<id from MATERIAL_PRESETS> (enters
@@ -339,10 +339,12 @@ panelUi.setLocked(matState.mode === 'material' ? LOCKED_KEYS : new Set());
     return typeof cur === 'boolean' ? v === '1' || v === 'true' : typeof cur === 'number' ? parseFloat(v) : v;
   };
   const preset = PRESETS.find((e) => e.id === u.get('preset'));
+  const gas = u.get('gas'), gasOk = GAS_MODELS.some((g) => g.id === gas);
+  if (gas && !gasOk) console.warn(`?gas=${gas}: no such gas model`);
   if (preset) {
-    Object.assign(params, presetParams(preset));
+    Object.assign(params, presetParams(preset, gasOk ? gas! : preset.gas[0]));
     if (matState.mode === 'material') materialUi.adoptDesign();
-  }
+  } else if (gasOk && matState.mode !== 'material') Object.assign(params, gasParams(gas!));
   if (u.has('material') && !materialUi.selectPreset(u.get('material')!, true)) console.warn(`?material=${u.get('material')}: no such material preset`);
   for (const [k, v] of u) if (k.startsWith('m.')) {
     const key = k.slice(2);

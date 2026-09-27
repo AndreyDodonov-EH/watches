@@ -787,7 +787,10 @@ function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
     want = FIZZ_MAX;
   }
   const H = tubeLayout(p).H;
-  while (arr.length < want) { const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v, life: 0, z: Math.random() }); }
+  while (arr.length < want) {
+    if (p.fizzSource === 1) { const f: Fizz = { x: 0, y: 0, v: 0, life: 0, z: 0 }; springSpawn(f, p, H, fizzSurf[i], fizzSurfL[i], len); arr.push(f); continue; }
+    const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v, life: 0, z: Math.random() });
+  }
   if (arr.length > want) arr.length = want;
 }
 /** Bubble radius px for size factor `v`. */
@@ -805,13 +808,25 @@ function fizzSpawnY(p: Params, H: number, v: number): number {
   const lo = fizzWall(p) + fizzR(p, v), hi = H - lo;
   return hi <= lo ? H / 2 : lo + Math.random() * (hi - lo);
 }
+/** Spring (`fizzSource` 1): a new size and depth, born at the spring — `fizzSourceY` across the bore (whole
+ *  disc inside), `fizzSourceX` along that row's liquid (between the surfaces, as a respawn; the column
+ *  0..`len` before drawTube has published them) — each axis jittered by up to ±`fizzSourceSpread` px. */
+function springSpawn(f: Fizz, p: Params, H: number, surf: Float32Array, surfL: Float32Array, len: number): void {
+  f.v = 0.5 + Math.random(); f.z = Math.random(); f.life = 0;
+  const r = fizzR(p, f.v), s = p.fizzSourceSpread, lo = fizzWall(p) + r, hi = H - lo;
+  f.y = hi <= lo ? H / 2 : Math.max(lo, Math.min(hi, lo + p.fizzSourceY * (hi - lo) + (2 * Math.random() - 1) * s));
+  const xl = surf.length === H ? -discFit(surfL, H, f.y, r, -1) + FOAM_CATCH : 0;
+  const xh = surf.length === H ? discFit(surf, H, f.y, r, 1) - FOAM_CATCH : len;
+  f.x = xh <= xl ? (xl + xh) / 2 : Math.max(xl, Math.min(xh, xl + p.fizzSourceX * (xh - xl) + (2 * Math.random() - 1) * s));
+}
 /** Fizz rises against the in-plane gravity (`along`, `across`) at `fizzSpeed` px/s on both axes:
  *  along-tilt drives it toward the high end (`fizzDriftGain`), across-tilt toward the high edge (`fizzAcrossGain`).
  *  Out-of-plane gravity (face up) reads as a slow screen-up rise (`fizzFlatRise`) plus a drift toward the
  *  exposed surface (`fizzEdgeRise`: the time edge, or the home edge of a free slug whose time edge sits
  *  against the far end); shake speeds everything up.
  *  A bubble leaving the liquid on either axis respawns at the low side of that axis — except at an exposed
- *  surface the rise points at: with `fizzFoamLife` > 0 it parks in it (see settleFoam) and pops later. */
+ *  surface the rise points at: with `fizzFoamLife` > 0 it parks in it (see settleFoam) and pops later.
+ *  A spring (`fizzSource` 1) takes every rebirth instead — exit, recycle, pop — so the bubbles rise as a stream. */
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
   if (p.remaining) along = -along; // fizz lives in the mirrored liquid frame (see drawTube)
   const speed = p.fizzSpeed * (1 + 3 * agitation);
@@ -819,7 +834,7 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
   const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain));
   const vy = -speed * ((1 - Math.abs(a)) * up * p.fizzFlatRise + a);   // screen up = -y
   const vxTilt = -speed * Math.max(-1, Math.min(1, along * p.fizzDriftGain));
-  const H = tubeLayout(p).H;
+  const H = tubeLayout(p).H, spring = p.fizzSource === 1;
   for (let i = 0; i < 2; i++) {
     const len = fizzLen[i], surf = fizzSurf[i], surfL = fizzSurfL[i], exposed = fizzExposed[i];
     if (surf.length !== H || len <= 0) continue;   // no surfaces for this height yet (drawTube publishes them)
@@ -841,8 +856,9 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
         }
         else {
           const left = Math.abs(f.life) - dt * (1 + 3 * agitation);   // shaking pops the foam
-          if (left <= 0) { f.life = 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, -1); f.z = Math.random(); }
-          else f.life = side * left;
+          if (left > 0) f.life = side * left;
+          else if (spring) springSpawn(f, p, H, surf, surfL, len);
+          else { f.life = 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, -1); f.z = Math.random(); }
           continue;
         }
       }
@@ -850,7 +866,11 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
       f.x += vx * f.v * dt;
       // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
       const hide = fizzHideY(p, f.v);
-      if (f.y < hide || f.y >= H - hide) { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; respawn(f, -1); f.z = Math.random(); continue; }
+      if (f.y < hide || f.y >= H - hide) {
+        if (spring) springSpawn(f, p, H, surf, surfL, len);
+        else { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; respawn(f, -1); f.z = Math.random(); }
+        continue;
+      }
       // The flow carrying its rim within FOAM_CATCH of a surface (the whole disc, so big bubbles never poke
       // through), or into the foam already there (it joins at the back, not rising through it): at the
       // surface the rise heads for it parks for a random life around fizzFoamLife and glides onto it
@@ -860,6 +880,7 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
       const r = fizzR(p, f.v);
       const outR = vx > 0 && f.x > discFit(surf, H, f.y, r, 1) - FOAM_CATCH, outL = vx < 0 && -f.x > discFit(surfL, H, f.y, r, -1) - FOAM_CATCH;
       if ((side > 0 && outR) || (side < 0 && outL) || (side !== 0 && touchesFoam(fizz[i], f, r, p, side))) f.life = side * p.fizzFoamLife * (0.5 + Math.random());
+      else if ((outR || outL) && spring) springSpawn(f, p, H, surf, surfL, len);
       else if (outR || outL) { f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, vx < 0 ? 0 : 1); f.z = Math.random(); }
       else f.x = Math.max(-foamFront(surfL, H, f.y, -1), Math.min(foamFront(surf, H, f.y, 1), f.x));
     }

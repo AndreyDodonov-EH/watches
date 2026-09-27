@@ -1380,13 +1380,6 @@ static inline float fizzWall(const Params &p) { return p.glassWall > 0 ? fmx(1, 
 static inline float fizzHideY(const Params &p, float v) { float w = fizzWall(p); return w > 0 ? fmx(0, w - fizzR(p, v)) : 3; }
 // Random row with the whole bubble in the bore, so bubbles never sit half behind the wall.
 static inline float fizzSpawnY(const Params &p, int H, float v) { float lo = fizzWall(p) + fizzR(p, v), hi = H - lo; return hi <= lo ? H / 2.0f : lo + frand() * (hi - lo); }
-void Tube::ensureFizz(const Params &p, float len, float agitation) {
-  fizzLen = len;
-  int want = (int)ffloor(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want < 0) want = 0;
-  if (want > MAX_FIZZ) { if (want > fizzOverflowPeak) fizzOverflowPeak = want; want = MAX_FIZZ; }
-  while (fizzN < want) { float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v, 0, frand() }; }
-  fizzN = want;
-}
 // Surface front `surf` (liquid frame) at float row y, in u = side * x: where a parked bubble's centre sits.
 static float foamFront(const float *surf, int H, float y, int side) {
   const float yc = clampf(y, 0, H - 1); const int i = (int)ffloor(yc), j = i + 1 < H ? i + 1 : H - 1;
@@ -1418,6 +1411,28 @@ static void fizzRespawnX(const Tube &t, const Params &p, Fizz &f, int at) {
   const float r = fizzR(p, f.v);
   const float lo = -discFit(t.fizzSurfL, t.H, f.y, r, -1) + FOAM_CATCH, hi = discFit(t.fizzSurf, t.H, f.y, r, 1) - FOAM_CATCH;
   f.x = hi <= lo ? (lo + hi) / 2 : at < 0 ? lo + frand() * (hi - lo) : at > 0 ? lo : hi;
+}
+// Spring (fizzSource 1): a new size and depth, born at the spring — fizzSourceY across the bore (whole disc
+// inside), fizzSourceX along that row's liquid (between the surfaces, as a respawn; the column 0..fizzLen until
+// drawTube has published them, `surfs`) — each axis jittered by up to ±fizzSourceSpread px. See sim springSpawn.
+static void springSpawn(const Tube &t, const Params &p, Fizz &f, bool surfs) {
+  f.v = 0.5f + frand(); f.z = frand(); f.life = 0;
+  const float r = fizzR(p, f.v), s = p.fizzSourceSpread, lo = fizzWall(p) + r, hi = t.H - lo;
+  f.y = hi <= lo ? t.H / 2.0f : clampf(lo + p.fizzSourceY * (hi - lo) + (2 * frand() - 1) * s, lo, hi);
+  const float xl = surfs ? -discFit(t.fizzSurfL, t.H, f.y, r, -1) + FOAM_CATCH : 0;
+  const float xh = surfs ? discFit(t.fizzSurf, t.H, f.y, r, 1) - FOAM_CATCH : t.fizzLen;
+  f.x = xh <= xl ? (xl + xh) / 2 : clampf(xl + p.fizzSourceX * (xh - xl) + (2 * frand() - 1) * s, xl, xh);
+}
+void Tube::ensureFizz(const Params &p, float len, float agitation) {
+  const bool surfs = fizzLen > 0;   // a previous drawTube published the surfaces
+  fizzLen = len;
+  int want = (int)ffloor(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want < 0) want = 0;
+  if (want > MAX_FIZZ) { if (want > fizzOverflowPeak) fizzOverflowPeak = want; want = MAX_FIZZ; }
+  while (fizzN < want) {
+    if (p.fizzSource == 1) { springSpawn(*this, p, fizz[fizzN++], surfs); continue; }
+    float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v, 0, frand() };
+  }
+  fizzN = want;
 }
 // Parked bubbles: sit centred on the surface front — foam floats half out of the liquid — lagging behind an
 // advance (and gliding on after being caught) no faster than the rise, pushed back by a recession; slide along
@@ -1482,7 +1497,8 @@ static void settleFoam(Tube &t, const Params &p, float speed, const float *surf,
 // Rises against in-plane gravity at fizzSpeed px/s on both axes; face up = slow screen-up rise plus a drift
 // toward the exposed surface (the time edge, or the home edge of a free slug whose time edge sits against
 // the far end). While the rise points at an exposed surface and fizzFoamLife > 0, a bubble reaching it parks
-// in its meniscus (settleFoam) and pops later; otherwise it respawns at the far side. See sim stepFizz.
+// in its meniscus (settleFoam) and pops later; otherwise it respawns at the far side. A spring (fizzSource 1)
+// takes every rebirth instead — exit, recycle, pop — so the bubbles rise as a stream. See sim stepFizz.
 int fizzOverflow() { return fizzOverflowPeak; }
 
 void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
@@ -1492,6 +1508,7 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   const float a = clampf(across * p.fizzAcrossGain, -1, 1);
   const float vy = -speed * ((1 - fabsf(a)) * up * p.fizzFlatRise + a);
   const float vxTilt = -speed * clampf(along * p.fizzDriftGain, -1, 1);
+  const bool spring = p.fizzSource == 1;
   for (int i = 0; i < 2; i++) {
     Tube &t = tubes[i]; const float len = t.fizzLen; const int H = t.H; const int exposed = t.fizzExposed;
     if (len <= 0) continue;   // no liquid drawn yet: no surfaces
@@ -1509,8 +1526,9 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
         }
         else {
           const float left = fabsf(f.life) - dt * (1 + 3 * agitation);   // shaking pops the foam
-          if (left <= 0) { f.life = 0; f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, -1); f.z = frand(); }
-          else f.life = side * left;
+          if (left > 0) f.life = side * left;
+          else if (spring) springSpawn(t, p, f, true);
+          else { f.life = 0; f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, -1); f.z = frand(); }
           continue;
         }
       }
@@ -1518,7 +1536,11 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
       f.x += vx * f.v * dt;
       // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
       const float hide = fizzHideY(p, f.v);
-      if (f.y < hide || f.y >= H - hide) { f.v = 0.5f + frand(); const float h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; fizzRespawnX(t, p, f, -1); f.z = frand(); continue; }
+      if (f.y < hide || f.y >= H - hide) {
+        if (spring) springSpawn(t, p, f, true);
+        else { f.v = 0.5f + frand(); const float h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; fizzRespawnX(t, p, f, -1); f.z = frand(); }
+        continue;
+      }
       // The flow carrying its rim within FOAM_CATCH of a surface (the whole disc, so big bubbles never poke
       // through), or into the foam already there (it joins at the back): at the surface the rise heads for it
       // parks (settleFoam); anywhere else it is recycled at the side the flow comes from. A bubble the flow does
@@ -1526,6 +1548,7 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
       const float r = fizzR(p, f.v);
       const bool outR = vx > 0 && f.x > discFit(t.fizzSurf, H, f.y, r, 1) - FOAM_CATCH, outL = vx < 0 && -f.x > discFit(t.fizzSurfL, H, f.y, r, -1) - FOAM_CATCH;
       if ((side > 0 && outR) || (side < 0 && outL) || (side != 0 && touchesFoam(t, f, r, p, side))) f.life = side * p.fizzFoamLife * (0.5f + frand());
+      else if ((outR || outL) && spring) springSpawn(t, p, f, true);
       else if (outR || outL) { f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, vx < 0 ? 0 : 1); f.z = frand(); }
       else f.x = fmx(-foamFront(t.fizzSurfL, H, f.y, -1), fmn(foamFront(t.fizzSurf, H, f.y, 1), f.x));
     }

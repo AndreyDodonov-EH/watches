@@ -437,7 +437,11 @@
       "fizzDepth",
       "fizzBlick",
       "fizzSquash",
-      "fizzAcrossGain"
+      "fizzAcrossGain",
+      "fizzSource",
+      "fizzSourceX",
+      "fizzSourceY",
+      "fizzSourceSpread"
     ]
   }
 }

@@ -31,6 +31,18 @@ Every preset is one real liquid in one real vessel, declared with a *material* (
 | xenon | Xenon | emissive plasma, no inertia | rear ticks, bold print |
 | molten | Molten iron | emissive opaque metal, non-wetting, gas bubbles | forged numerals behind (dry side only) |
 | free | Free liquid | user-tuned slug (2026-08-26), exempt from the checker | copper numerals |
+| absinthe | Absinthe | user look from presets.zip (2026-09-02), exempt | vivid green on white, widest 79 px tubes, large black rear numerals |
+| chartreuse | Chartreuse | user look (2026-08-31), exempt | bright yellow-green on black, soft glowing edge, bronze rear numerals |
+| bottle | Bottle green | user look (2026-09-01), exempt | dark green, 80 px tubes on charcoal, faint rear numerals |
+| claret | Claret | user look (2026-09-18), exempt | near-opaque dark red draining right, light numerals on white |
+| olive-white | Olive oil on white | user look (2026-09-18), exempt | the tuned olive oil drained from the right over white |
+| menthe | Menthe | user look (2026-09-25), exempt | translucent teal on white, dark rear numerals |
+| lime | Lime soda | user look (2026-09-26, hand-tuned physical export), exempt | pale lime over white |
+| patrick | Patrick pink | user look (2026-09-09), exempt | opaque pink, yellow print on the glass |
+| seltzer | Seltzer | user look (2026-09-23, the Cuvée reference), exempt | colourless water on white |
+| glycerol | Glycerol on white | user look (2026-09-23), exempt | colourless viscous liquid on white |
+| glycerol-dark | Dark glycerol | user export (2026-09-27), exempt | smoky grey viscous liquid on pale sage, rim-lit, dark rear numerals |
+| prosecco | Prosecco | user physical material (2026-09-26), stored as its derived Params, exempt | pale straw on white |
 
 The original signature presets also exist as `<id>-big` for the second, wider physical rod (`bigLens()` in `params.ts`, from
 `examples/urine_big.json`): 72 px tubes at y 11 / 144, `lens` −0.05 with curve −3, marks moved with the tube
@@ -39,6 +51,37 @@ front digits drop their `topLens` pre-warp. `urine-big` reproduces the example e
 Pinot noir, Aperol spritz, Cuvée, Nocturne, Bioluminescent tide and Phosphor sample are standard-rod only.
 
 Removed: `user1`, `mint`, `neon`, `concept` (legacy colour-only looks; superseded by `glow`/`frizzante`).
+
+The user looks from absinthe on came from `presets.zip` (2026-09-27, 25 exports; glycerol-dark is a later export). Dropped as
+duplicates or superseded: `alpine_mineral` (= alpine), `bubbly_urine` and `params (38)` (= urine + gas),
+`params (37)` (= free), `olive_oil_small` (= olive-oil), `params (39)`/`(51)`/`(57)`/`(56)`/`(66)` (earlier
+saves of chartreuse / absinthe / olive-white / seltzer / lime), `great_material` (lime is its later hand-tuned
+export), `material`/`material (1)` (unnamed material-mode drafts of aerated oil and spritz).
+
+## Gas
+
+A preset is the liquid and vessel only: its `p` sets no `fizz*` key (checked). Gas is a separate model from
+`GAS_MODELS` in `params.ts`; each preset lists the models that fit it (`gas`, signature first, `none` always
+offered), `presetParams(e, gas = e.gas[0])` applies one, the picker's gas dropdown swaps it without touching
+anything else, and `?gas=<id>` selects it by URL. Dumped JSONs and the material checks use the signature.
+
+| id | name | taken from |
+|---|---|---|
+| none | No gas | — |
+| fine-bead | Fine bead | frizzante / champagne / alpine (merged 2026-09-27; alpine's bead went from 2 px to 1 px) |
+| lively-bead | Lively bead | cola |
+| pearl-bead | Pearl bead | cuvée |
+| brisk-pearls | Brisk pearls | lime soda / prosecco |
+| foam-ring | Foam ring | spritz |
+| large-bubbles | Large bubbles | glycerol |
+| slow-bubbles | Slow bubbles | free liquid |
+| trapped | Trapped bubbles | dark glycerol (replaced the aerated-oil haze, 2026-09-27) |
+| held-air | Held air | honey |
+| gas-pockets | Gas pockets | molten iron |
+| boiling | Boiling | cryo oxygen |
+| sparks | Plankton sparks | bioluminescent tide |
+
+In material mode the gas comes from the material (gasMode / gasLevel), so the dropdown is disabled there.
 
 ## Physical collection
 

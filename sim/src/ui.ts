@@ -1,5 +1,5 @@
 // Minimal control panel generated from PARAM_META. No framework.
-import { DEFAULT_PARAMS, PARAM_META, PRESETS, migrateParams, presetParams, type Params, type PresetEntry } from './params';
+import { DEFAULT_PARAMS, GAS_MODELS, GAS_KEYS, PARAM_META, PRESETS, gasParams, migrateParams, presetParams, type Params, type PresetEntry } from './params';
 
 /** `key` is set for a single-field edit; absent for preset/import/reset (whole struct changed). */
 export interface UiHooks { onChange: (key?: keyof Params) => void; }
@@ -78,20 +78,34 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): Panel 
     for (const e of PRESETS) if (pick(e)) { const o = new Option(e.name, e.id); o.title = e.note; g.appendChild(o); }
     sel.appendChild(g);
   }
-  sel.oninput = () => { const e = PRESETS.find((x) => x.id === sel.value); if (e) apply(presetParams(e)); };
-  bar.appendChild(sel);
-  btn('Reset all', () => apply(structuredClone(DEFAULT_PARAMS)));
+  // gas is picked apart from the liquid: the models that fit the selected preset (signature first), or all
+  // of them when the params did not come from a preset; switching replaces only the fizz keys
+  const gasSel = document.createElement('select'); gasSel.className = 'presets'; gasSel.title = 'Gas model (fizz)';
+  const fillGas = (e?: PresetEntry) => {
+    gasSel.replaceChildren(new Option('gas…', ''));
+    for (const id of e?.gas ?? GAS_MODELS.map((g) => g.id)) {
+      const g = GAS_MODELS.find((x) => x.id === id)!;
+      const o = new Option(g.name, g.id); o.title = g.note; gasSel.add(o);
+    }
+    gasSel.value = e?.gas[0] ?? '';
+  };
+  fillGas();
+  sel.oninput = () => { const e = PRESETS.find((x) => x.id === sel.value); if (e) { fillGas(e); apply(presetParams(e)); } };
+  gasSel.oninput = () => { if (gasSel.value) apply(gasParams(gasSel.value)); };
+  bar.append(sel, gasSel);
+  btn('Reset all', () => { fillGas(); apply(structuredClone(DEFAULT_PARAMS)); });
   btn('Export JSON', () => {
     const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'params.json'; a.click();
   });
   btn('Copy JSON', () => { navigator.clipboard.writeText(JSON.stringify(p, null, 2)); });
   const file = document.createElement('input'); file.type = 'file'; file.accept = '.json'; file.style.display = 'none';
-  file.onchange = async () => { const f = file.files?.[0]; if (!f) return; apply(migrateParams(JSON.parse(await f.text()))); };
+  file.onchange = async () => { const f = file.files?.[0]; if (!f) return; fillGas(); apply(migrateParams(JSON.parse(await f.text()))); };
   btn('Import JSON', () => file.click());
   bar.appendChild(file);
   root.prepend(bar);
   const setLocked = (keys: ReadonlySet<string>) => {
+    gasSel.disabled = GAS_KEYS.some((k) => keys.has(k));  // material mode derives the gas from the material
     for (const [k, inp] of inputs) {
       const locked = keys.has(k);
       inp.disabled = locked;

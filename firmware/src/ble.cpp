@@ -48,7 +48,6 @@ void ble_init(const char *name) {
   txChar = svc->createCharacteristic(NUS_TX_UUID, NIMBLE_PROPERTY::NOTIFY);
   NimBLECharacteristic *rx = svc->createCharacteristic(NUS_RX_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   rx->setCallbacks(new RxCb());
-  svc->start();
   // Name + 128-bit UUID exceed the 31-byte adv packet: name in adv, UUID in scan response.
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   NimBLEAdvertisementData advData, scanData;

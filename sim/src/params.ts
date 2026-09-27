@@ -88,6 +88,10 @@ export interface Params {
   fizzFoamLife: number;   // s, mean time a bubble sits parked under the surface before it pops (0 = never parks, the old respawn)
   fizzDepth: number;      // 0..1 how much a bubble deeper in the bore fades toward the liquid (scaled by 1 − liquidTransparency)
   fizzBlick: number;      // 0..1 specular pinpoint on bubbles ≥ 2.5 px radius, on the lit side
+  fizzSource: number;     // 0 scattered (born anywhere in the liquid), 1 spring (born at one point, like an aquarium airstone)
+  fizzSourceX: number;    // 0..1 spring position along the liquid column (0 = home end, 1 = surface)
+  fizzSourceY: number;    // 0..1 spring position across the bore (0 = top wall, 1 = bottom wall)
+  fizzSourceSpread: number; // px, ± jitter around the spring point on both axes
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
@@ -271,6 +275,10 @@ export const DEFAULT_PARAMS: Params = {
   fizzFoamLife: 6,
   fizzDepth: 0.7,
   fizzBlick: 0.6,
+  fizzSource: 0,
+  fizzSourceX: 0.2,
+  fizzSourceY: 1,
+  fizzSourceSpread: 1.5,
   fizzSpeed: 14,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 13, tickMinorWidthH: 1, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMinorWidthM: 1, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
@@ -384,8 +392,6 @@ export const MODERN_BASE: Partial<Params> = {
   meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 15,
   edgeSoft: 0, frontBright: 0, edgeGlow: 19, glowStrength: 0.06, cornerR: 0, edgeLightGain: 0.55,
   bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleTiltGain: 14, bubbleDark: 0.91,
-  fizz: false, fizzCount: 10, fizzSize: 2, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 14,
-  fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2,
   ticksOnTop: false, tickLens: 0.45, tickParallax: 4.75, tickDryLens: 0.1, tickEmboss: 0.3,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 6, tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3,
   tickColorH: '#404040', tickMajorColorH: '#4d4d4d', tickPosH: 2,
@@ -432,7 +438,6 @@ export const PRESET_FRIZZANTE: Partial<Params> = {
   bubbleRim: '#f4ffff',
   glassHi: '#dfeef4', glassBody: 0.12, glassHiBright: 0.55, glassReflect: 0.28, glassRim: 0.75, glassOverLiquid: 0.7,
   highlightH: 8, highlightBright: 0.9, highlightSharp: 3, shadeDepth: 0.45,
-  fizz: true, fizzCount: 50, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 42, fizzFlatRise: 0.5, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 4,
   liquidTransparency: 0.85, markContrast: 20,
   tickStepM: 1, tickMajorEveryM: 5, tickColorH: '#9fb8c2', tickMajorColorH: '#ffffff', tickColorM: '#8fa9b4', tickMajorColorM: '#ffffff',
   digitFont: 9, digitTintAmount: 0, digitTone: 0,
@@ -458,9 +463,6 @@ export const PRESET_ALPINE: Partial<Params> = {
   meniscusInertia: 2.5,
   edgeSoft: 1.4, surfaceBand: 0.38, surfaceRim: 0.35,
   surfaceWidth: 3, surfaceTone: 0, edgeGlow: 8, glowStrength: 0.03,
-  fizz: true, fizzCount: 60, fizzSize: 2, fizzSizeVar: 0.45,
-  fizzSpeed: 42, fizzFlatRise: 0.5, fizzSquash: 1.2,
-  fizzEdgeRise: 0.5, fizzFoamLife: 2.5,
   tickStepH: 1, tickMajorEveryH: 2, tickMinorHeightH: 5,
   tickMajorHeightH: 7, tickMinorWidthH: 1, tickMajorWidthH: 2,
   tickStepM: 5, tickMajorEveryM: 10, tickMinorHeightM: 5,
@@ -484,7 +486,7 @@ export const PRESET_URINE: Partial<Params> = {
   ...MODERN_BASE, ...WATERY,
   liquid: '#6d6112', liquidHi: '#809419', liquidLo: '#79792a', bubbleRim: '#322606',
   meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 15,
-  fizz: false, liquidTransparency: 0.52,
+  liquidTransparency: 0.52,
 };
 
 /** Venous blood in a graduated syringe: opaque, a few times thicker than water, coats the glass. */
@@ -541,7 +543,6 @@ export const PRESET_HONEY: Partial<Params> = {
   glassHi: '#f0dcb0', glassBody: 0.08, glassHiBright: 0.45, glassReflect: 0.25, glassRim: 0.6,
   highlightH: 14, highlightBright: 0.4, highlightSharp: 1.8, shadeDepth: 0.78,
   traces: true, traceAmount: 0.7, traceDry: 2, traceFollow: 0.08, traceStain: 0.45, traceThin: 0.3,   // syrup coats thickly whatever the speed, crawls back slowly
-  fizz: true, fizzCount: 5, fizzSize: 3, fizzSizeVar: 0.6, fizzShadeOff: 0.5, fizzSpeed: 3, fizzFlatRise: 0.15, fizzDriftGain: 0.4, fizzAcrossGain: 0.8, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 20,
   liquidTransparency: 0.32,
   tickColorH: '#4a3210', tickMajorColorH: '#5a3e14', tickColorM: '#4a3210', tickMajorColorM: '#5a3e14',
   digitFont: 6, digitTint: '#d4923a', digitTintAmount: 0.5, digitTone: 0,
@@ -554,7 +555,6 @@ export const PRESET_COLA: Partial<Params> = {
   liquid: '#3a1206', liquidHi: '#e8b890', liquidLo: '#120602', tubeBack: '#070403', tubeBack2: '#140c07', bubbleRim: '#f0d8c4',
   glassHi: '#e8dcd2', glassBody: 0.08, glassHiBright: 0.5, glassReflect: 0.25, glassRim: 0.6, glassOverLiquid: 0.5,
   highlightH: 9, highlightBright: 0.5, highlightSharp: 3, shadeDepth: 0.7,
-  fizz: true, fizzCount: 40, fizzSize: 1.5, fizzSizeVar: 0.6, fizzSpeed: 36, fizzFlatRise: 0.45, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 5,
   liquidTransparency: 0.38, markContrast: 24,
   tickColorH: '#4a3e32', tickMajorColorH: '#5a4a3c', tickColorM: '#4a3e32', tickMajorColorM: '#5a4a3c',
   digitFont: 9, digitTint: '#f3e6c8', digitTintAmount: 0.4, digitTone: 0,
@@ -584,7 +584,6 @@ export const PRESET_CHAMPAGNE: Partial<Params> = {
   liquid: '#8a7228', liquidHi: '#fff8dc', liquidLo: '#4a3808', tubeBack: '#080602', tubeBack2: '#161004', bubbleRim: '#fff4cc',
   glassHi: '#f6ecd0', glassBody: 0.1, glassHiBright: 0.55, glassReflect: 0.3, glassRim: 0.7, glassOverLiquid: 0.55,
   highlightH: 9, highlightBright: 0.55, highlightSharp: 2.6, shadeDepth: 0.55,
-  fizz: true, fizzCount: 60, fizzSize: 1, fizzSizeVar: 0.4, fizzSpeed: 46, fizzFlatRise: 0.45, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 4,
   liquidTransparency: 0.5, markContrast: 24,
   tickColorH: '#4a3e18', tickMajorColorH: '#5a4c20', tickColorM: '#4a3e18', tickMajorColorM: '#5a4c20',
   digitFont: 11, digitTint: '#e0b45a', digitTintAmount: 0.2, digitTone: 0,
@@ -599,7 +598,6 @@ export const PRESET_CRYO: Partial<Params> = {
   highlightH: 10, highlightBright: 0.45, highlightSharp: 1.8, shadeDepth: 0.45,
   meniscusK: 520, meniscusDamp: 4, meniscusInertia: 4, wetFilm: 8,
   freeDamp: 0.5, freeBounce: 0.3, angleTiltGain: 8, angleGyroGain: 0.5,
-  fizz: true, fizzCount: 55, fizzSize: 1, fizzSizeVar: 0.5, fizzSpeed: 52, fizzFlatRise: 0.6, fizzDriftGain: 1.2, fizzSquash: 1.3, fizzEdgeRise: 0.6, fizzFoamLife: 2,
   liquidTransparency: 0.72, markContrast: 20,
   tickColorH: '#3a5060', tickMajorColorH: '#465e70', tickColorM: '#3a5060', tickMajorColorM: '#465e70',
   digitFont: 5, digitTint: '#a6d8ff', digitTintAmount: 0.6, digitTone: 0.15,
@@ -670,7 +668,6 @@ export const PRESET_MOLTEN: Partial<Params> = {
   meniscusK: 400, meniscusDamp: 14, meniscusInertia: 4, wetFilm: 0,
   freeDamp: 2.5, freeBounce: 0.05,
   edgeSoft: 0, frontBright: 16, edgeGlow: 26, glowStrength: 0.6, edgeLightGain: 1,
-  fizz: true, fizzCount: 10, fizzSize: 2.5, fizzSizeVar: 0.5, fizzShadeOff: 0.4, fizzSpeed: 7, fizzFlatRise: 0.25, fizzDriftGain: 0.6, fizzAcrossGain: 0.8, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 15,
   liquidTransparency: 0.06,
   tickEmboss: 0.35, tickPosH: 2, tickPosM: 2, tickColorH: '#6a5248', tickMajorColorH: '#b39a8c', tickColorM: '#6a5248', tickMajorColorM: '#b39a8c',
   digitFont: 8, digitTint: '#b06a34', digitTintAmount: 0.45, digitTone: 0.3,
@@ -692,9 +689,8 @@ const PRESET_FREE: Partial<Params> = {
   highlightSharp: 3, highlightInset: 31, shadeDepth: 0.74,
   meniscusK: 460, meniscusDamp: 5, meniscusInertia: 2,
   wetFilm: 15, edgeSoft: 0.7, frontBright: 23, edgeGlow: 40, glowStrength: 0.21, edgeLightGain: 0.55, bubbleW: 28,
-  bubbleH: 20, bubbleGap: 18, bubbleY: 0.28, bubbleTiltGain: 14, bubbleDark: 0.55, fizzCount: 19, fizzSize: 4.5,
-  fizzSizeVar: 0.7, fizzShadeOff: 0.55, fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2,
-  fizzSpeed: 13, tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22, tickMinorWidthH: 2,
+  bubbleH: 20, bubbleGap: 18, bubbleY: 0.28, bubbleTiltGain: 14, bubbleDark: 0.55,
+  tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22, tickMinorWidthH: 2,
   tickMajorWidthH: 3, tickColorH: '#243120', tickMajorColorH: '#243120', tickPosH: 1, tickMajorEveryM: 0,
   tickMinorHeightM: 5, tickMajorHeightM: 28, tickMinorWidthM: 2, tickColorM: '#243120', tickMajorColorM: '#243120',
   tickPosM: 1, tickLens: 0.45, tickParallax: 4.75, tickDryLens: 0.35, tickEmboss: 0.55, digitFont: 7,
@@ -720,8 +716,6 @@ const PRESET_OLIVE_OIL: Partial<Params> = {
   edgeSoft: 3.7, frontBright: 0, edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55,
   bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
   bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.12,
-  fizz: false, fizzCount: 59, fizzSize: 4.5, fizzSizeVar: 1, fizzShadeOff: 0.5,
-  fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2, fizzSpeed: 40,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 17, tickMajorHeightH: 22,
   tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b', tickMajorColorH: '#4d4d4d', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 18, tickMajorHeightM: 28,
@@ -760,10 +754,8 @@ const PRESET_PINOT: Partial<Params> = {
   traceAmount: 1, traceDry: 1.5, traceFollow: 0.15, traceStain: 0.3, traceThin: 1, traceFilm: 0.03,
   edgeSoft: 4, frontBright: 0, surfaceBand: 0.3, surfaceRim: 0.35, surfaceWidth: 4, surfaceTone: -0.1,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
-  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0, fizz: false,
-  fizzCount: 120, fizzSize: 5.5, fizzSizeVar: 0.65, fizzShadeOff: 0.2, fizzDriftGain: 1.35,
-  fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 1.25, fizzEdgeRise: 0.3, fizzFoamLife: 1.5,
-  fizzSpeed: 28, ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0,
+  ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22,
   tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#6a4a20', tickMajorColorH: '#6a4a20', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 12, tickMajorHeightM: 28,
   tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#6a4a20', tickMajorColorM: '#6a4a20', tickPosM: 2,
@@ -798,9 +790,8 @@ const PRESET_SPRITZ: Partial<Params> = {
   traceDry: 1, traceFollow: 0.5, traceStain: 0.2, traceThin: 1.5, traceFilm: 0, edgeSoft: 4, frontBright: 0,
   surfaceBand: 0.3, surfaceRim: 0.35, surfaceWidth: 4, surfaceTone: 0, edgeGlow: 0, glowStrength: 0,
   cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
-  bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0, fizz: true, fizzCount: 80, fizzSize: 5,
-  fizzSizeVar: 0.65, fizzShadeOff: 0.2, fizzDriftGain: 1.35, fizzAcrossGain: 1.05, fizzFlatRise: 0.45,
-  fizzSquash: 1.25, fizzEdgeRise: 0.35, fizzFoamLife: 2.5, fizzSpeed: 30, ticksH: true, tickStepH: 1,
+  bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0,
+  ticksH: true, tickStepH: 1,
   tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3,
   tickColorH: '#233052', tickMajorColorH: '#233052', tickPosH: 2, ticksM: true, tickStepM: 5,
   tickMajorEveryM: 0, tickMinorHeightM: 12, tickMajorHeightM: 28, tickMinorWidthM: 2, tickMajorWidthM: 2,
@@ -835,9 +826,8 @@ const PRESET_CUVEE: Partial<Params> = {
   traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0, edgeSoft: 2.4, frontBright: 0,
   surfaceBand: 0.18, surfaceRim: 0.24, surfaceWidth: 3, surfaceTone: -0.08, edgeGlow: 0, glowStrength: 0,
   cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
-  bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.3, fizz: true, fizzCount: 64, fizzSize: 3.8,
-  fizzSizeVar: 0.8, fizzShadeOff: 0.2, fizzDriftGain: 1.35, fizzAcrossGain: 1.05, fizzFlatRise: 0.4,
-  fizzSquash: 1.05, fizzEdgeRise: 0.4, fizzFoamLife: 1.6, fizzSpeed: 28, ticksH: true, tickStepH: 1,
+  bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.3,
+  ticksH: true, tickStepH: 1,
   tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22, tickMinorWidthH: 1, tickMajorWidthH: 3,
   tickColorH: '#51472d', tickMajorColorH: '#51472d', tickPosH: 2, ticksM: true, tickStepM: 5,
   tickMajorEveryM: 0, tickMinorHeightM: 12, tickMajorHeightM: 28, tickMinorWidthM: 1, tickMajorWidthM: 2,
@@ -872,9 +862,8 @@ const PRESET_NOCTURNE: Partial<Params> = {
   traceAmount: 0.9, traceDry: 1.8, traceFollow: 0.3, traceStain: 0.5, traceThin: 1, traceFilm: 0,
   edgeSoft: 2.2, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.48, surfaceWidth: 3, surfaceTone: -0.15,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
-  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.3, fizz: false,
-  fizzCount: 0, fizzSize: 3.8, fizzSizeVar: 0.8, fizzShadeOff: 0.2, fizzDriftGain: 1.35, fizzAcrossGain: 1.05,
-  fizzFlatRise: 0.4, fizzSquash: 1.05, fizzEdgeRise: 0.4, fizzFoamLife: 0, fizzSpeed: 28, ticksH: true,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.3,
+  ticksH: true,
   tickStepH: 1, tickMajorEveryH: 2, tickMinorHeightH: 6, tickMajorHeightH: 11, tickMinorWidthH: 1,
   tickMajorWidthH: 2, tickColorH: '#a1adba', tickMajorColorH: '#d8e2eb', tickPosH: 0, ticksM: true,
   tickStepM: 1, tickMajorEveryM: 5, tickMinorHeightM: 4, tickMajorHeightM: 9, tickMinorWidthM: 1,
@@ -911,9 +900,8 @@ const PRESET_TIDE: Partial<Params> = {
   traces: false, traceAmount: 0, traceDry: 1, traceFollow: 0.5, traceStain: 0.2, traceThin: 1.5, traceFilm: 0,
   edgeSoft: 4, frontBright: 10, surfaceBand: 0.35, surfaceRim: 0.5, surfaceWidth: 4, surfaceTone: 0.2,
   edgeGlow: 26, glowStrength: 0.6, cornerR: 0, edgeLightGain: 0.3, bubble: false, bubbleW: 27, bubbleH: 20,
-  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0, fizz: true,
-  fizzCount: 55, fizzSize: 1.5, fizzSizeVar: 0.6, fizzShadeOff: 0, fizzDriftGain: 1.6, fizzAcrossGain: 1.05,
-  fizzFlatRise: 0.3, fizzSquash: 1, fizzEdgeRise: 0.1, fizzFoamLife: 0, fizzSpeed: 9, ticksH: true,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0,
+  ticksH: true,
   tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 5, tickMajorHeightH: 11, tickMinorWidthH: 1,
   tickMajorWidthH: 2, tickColorH: '#3f6a76', tickMajorColorH: '#6fa4ae', tickPosH: 2, ticksM: true,
   tickStepM: 5, tickMajorEveryM: 15, tickMinorHeightM: 5, tickMajorHeightM: 12, tickMinorWidthM: 1,
@@ -933,7 +921,63 @@ const PRESET_TIDE: Partial<Params> = {
   digitBright: 1.2, ambientLight: 0,
 };
 
-export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; mat?: Material; legacy?: boolean; big?: boolean }
+/** Gas is chosen separately from the liquid: a preset's `p` carries no fizz key, its `gas` lists the models
+ *  that fit the liquid (the first is its signature, applied by presetParams) and the picker's gas dropdown
+ *  swaps between them. A model sets every GAS_KEYS key (unset ones take DEFAULT_PARAMS). */
+export const GAS_KEYS = [
+  'fizz', 'fizzCount', 'fizzSize', 'fizzSizeVar', 'fizzShadeOff', 'fizzSpeed', 'fizzDriftGain', 'fizzAcrossGain',
+  'fizzFlatRise', 'fizzSquash', 'fizzEdgeRise', 'fizzFoamLife', 'fizzDepth', 'fizzBlick',
+  'fizzSource', 'fizzSourceX', 'fizzSourceY', 'fizzSourceSpread',
+] as const satisfies readonly (keyof Params)[];
+export type GasKey = (typeof GAS_KEYS)[number];
+
+export interface GasModel { id: string; name: string; note: string; p: Partial<Pick<Params, GasKey>> }
+
+/** The gas catalogue, each taken from the preset whose bead defined it (2026-09-27). */
+export const GAS_MODELS: readonly GasModel[] = [
+  { id: 'none', name: 'No gas', note: 'still liquid', p: { fizz: false } },
+  { id: 'fine-bead', name: 'Fine bead', note: 'dense 1 px carbonation rising fast (frizzante, champagne, alpine)',
+    p: { fizz: true, fizzCount: 60, fizzSize: 1, fizzSizeVar: 0.4, fizzShadeOff: 0.3, fizzSpeed: 44, fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.5, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 4 } },
+  { id: 'lively-bead', name: 'Lively bead', note: 'soda bubbles, slightly larger, long-lived foam (cola)',
+    p: { fizz: true, fizzCount: 40, fizzSize: 1.5, fizzSizeVar: 0.6, fizzShadeOff: 0.3, fizzSpeed: 36, fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 1.3, fizzEdgeRise: 0.5, fizzFoamLife: 5 } },
+  { id: 'pearl-bead', name: 'Pearl bead', note: 'visible pale pearls collecting briefly at the surface (cuvée)',
+    p: { fizz: true, fizzCount: 64, fizzSize: 3.8, fizzSizeVar: 0.8, fizzShadeOff: 0.2, fizzSpeed: 28, fizzDriftGain: 1.35, fizzAcrossGain: 1.05, fizzFlatRise: 0.4, fizzSquash: 1.05, fizzEdgeRise: 0.4, fizzFoamLife: 1.6 } },
+  { id: 'brisk-pearls', name: 'Brisk pearls', note: 'pearls racing up, short foam (lime soda, prosecco)',
+    p: { fizz: true, fizzCount: 60, fizzSize: 4, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 59, fizzDriftGain: 1, fizzAcrossGain: 1, fizzFlatRise: 0.45, fizzSquash: 1, fizzEdgeRise: 0.5, fizzFoamLife: 1.5 } },
+  { id: 'foam-ring', name: 'Foam ring', note: 'lively large bead packing into a ring at the surface (spritz)',
+    p: { fizz: true, fizzCount: 80, fizzSize: 5, fizzSizeVar: 0.65, fizzShadeOff: 0.2, fizzSpeed: 30, fizzDriftGain: 1.35, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 1.25, fizzEdgeRise: 0.35, fizzFoamLife: 2.5 } },
+  { id: 'large-bubbles', name: 'Large bubbles', note: 'big round bubbles, few, quick to pop (glycerol)',
+    p: { fizz: true, fizzCount: 48, fizzSize: 7.5, fizzSizeVar: 0.65, fizzShadeOff: 0.15, fizzSpeed: 28, fizzDriftGain: 1.35, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 1.1, fizzEdgeRise: 0.3, fizzFoamLife: 1.5 } },
+  { id: 'slow-bubbles', name: 'Slow bubbles', note: 'a few big bubbles drifting up lazily (free liquid, oil)',
+    p: { fizz: true, fizzCount: 19, fizzSize: 4.5, fizzSizeVar: 0.7, fizzShadeOff: 0.55, fizzSpeed: 13, fizzDriftGain: 0.85, fizzAcrossGain: 1.05, fizzFlatRise: 0.45, fizzSquash: 2, fizzEdgeRise: 0.3, fizzFoamLife: 6 } },
+  { id: 'trapped', name: 'Trapped bubbles', note: 'many bubbles held almost still in a thick liquid (dark glycerol; the material trapped class)',
+    p: { fizz: true, fizzCount: 120, fizzSize: 5.7818, fizzSizeVar: 0.65, fizzShadeOff: 0.15, fizzSpeed: 2.455, fizzDriftGain: 0.4491, fizzAcrossGain: 1.05, fizzFlatRise: 0.1745, fizzSquash: 1.1, fizzEdgeRise: 0.2245, fizzFoamLife: 1.5 } },
+  { id: 'held-air', name: 'Held air', note: 'a handful of bubbles caught in syrup (honey)',
+    p: { fizz: true, fizzCount: 5, fizzSize: 3, fizzSizeVar: 0.6, fizzShadeOff: 0.5, fizzSpeed: 3, fizzDriftGain: 0.4, fizzAcrossGain: 0.8, fizzFlatRise: 0.15, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 20 } },
+  { id: 'gas-pockets', name: 'Gas pockets', note: 'slow bubbles in a melt (molten iron)',
+    p: { fizz: true, fizzCount: 10, fizzSize: 2.5, fizzSizeVar: 0.5, fizzShadeOff: 0.4, fizzSpeed: 7, fizzDriftGain: 0.6, fizzAcrossGain: 0.8, fizzFlatRise: 0.25, fizzSquash: 1.4, fizzEdgeRise: 0.2, fizzFoamLife: 15 } },
+  { id: 'boiling', name: 'Boiling', note: 'fine vapour bubbles streaming up (cryo oxygen)',
+    p: { fizz: true, fizzCount: 55, fizzSize: 1, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 52, fizzDriftGain: 1.2, fizzAcrossGain: 1.05, fizzFlatRise: 0.6, fizzSquash: 1.3, fizzEdgeRise: 0.6, fizzFoamLife: 2 } },
+  { id: 'sparks', name: 'Plankton sparks', note: 'tiny bright specks drifting, no foam (bioluminescent tide)',
+    p: { fizz: true, fizzCount: 55, fizzSize: 1.5, fizzSizeVar: 0.6, fizzShadeOff: 0, fizzSpeed: 9, fizzDriftGain: 1.6, fizzAcrossGain: 1.05, fizzFlatRise: 0.3, fizzSquash: 1, fizzEdgeRise: 0.1, fizzFoamLife: 0 } },
+];
+export type GasId = string;
+
+/** Every GAS_KEYS value of model `id` (unset keys from DEFAULT_PARAMS). Throws on an unknown id. */
+export function gasParams(id: GasId): Pick<Params, GasKey> {
+  const g = GAS_MODELS.find((x) => x.id === id);
+  if (!g) throw new Error(`no gas model ${id}`);
+  const out = {} as Record<GasKey, unknown>;
+  for (const k of GAS_KEYS) out[k] = DEFAULT_PARAMS[k];
+  return { ...(out as Pick<Params, GasKey>), ...g.p };
+}
+
+/** Fitting-gas lists: the signature first, then the groups, `none` always offered. */
+const SODA = ['fine-bead', 'lively-bead', 'pearl-bead', 'brisk-pearls', 'foam-ring', 'large-bubbles'];
+const OILY = ['slow-bubbles', 'trapped'];
+const gases = (first: GasId, ...groups: readonly GasId[][]): GasId[] => [...new Set([first, ...groups.flat(), 'none'])];
+
+export interface PresetEntry { id: string; name: string; note: string; p: Partial<Params>; gas: readonly GasId[]; mat?: Material; legacy?: boolean; big?: boolean }
 
 /** Big-lens twin of a preset (examples/urine_big.json, 2026-08-27): the second physical rod is wider and
  *  barely magnifies, so the tubes grow to 72 px at y 11 / 144, `lens` drops to −0.05 with a −3 curve, and
@@ -981,7 +1025,7 @@ export const PRESET_PHOSPHOR: Partial<Params> = {
   edgeSoft: 1.4, frontBright: 4, edgeGlow: 6, glowStrength: 0.03,
   surfaceBand: 0.7, surfaceRim: 1, surfaceWidth: 5, surfaceTone: 0.3,
   surfaceFill: 0.35, surfaceBlick: 0.8,
-  fizz: false, bubble: false,
+  bubble: false,
   tickStepH: 1, tickMajorEveryH: 3, tickStepM: 5, tickMajorEveryM: 15,
   tickColorH: '#5c5c5c', tickMajorColorH: '#232323', tickColorM: '#5c5c5c', tickMajorColorM: '#232323',
   digitFont: 10, digitTint: '#262626', digitTintAmount: 0.4, digitTone: -0.3,
@@ -991,39 +1035,440 @@ export const PRESET_PHOSPHOR: Partial<Params> = {
   liquidTransparency: 0.5, liquidBright: 1.15, tickBright: 1, digitBright: 1,
 };
 
+/** Absinthe (zip params (52), 2026-09-02): vivid green on a white backing in the widest (79 px) tubes, large black numerals behind the liquid. */
+const PRESET_ABSINTHE: Partial<Params> = {
+  tubeHeight: 79, hoursY: 5, minutesY: 156, remaining: false, liquid: '#1d6e12', liquidHi: '#809419',
+  liquidLo: '#79792a', tubeBack: '#ffffff', tubeBack2: '#2e2e2e', tubeBackGradient: 0, glassHi: '#859093',
+  glassBody: 0.42, glassHiBright: 0.46, glassReflect: 0.2, glassRim: 0.53, glassWall: 4, glassWallGlow: 0.25,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.41, lens: -0.1, lensCurve: -0.05, bubbleRim: '#245b28',
+  highlightH: 16, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.68,
+  liquidThin: 0.4, contactAngle: 76.8361, contactHyst: 12.1639, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
+  meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 20, traces: true, traceAmount: 1.55,
+  traceDry: 0.95, traceFollow: 0.64, traceStain: 0.65, traceThin: 2.15, traceFilm: 0, edgeSoft: 3.6,
+  frontBright: 0, surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1,
+  surfaceBlick: 0, edgeGlow: 17, glowStrength: 0.3, cornerR: 0, edgeLightGain: -0.2, bubble: false,
+  bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14,
+  bubbleDark: 0.21, ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 26, tickMajorHeightH: 22,
+  tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#404040', tickMajorColorH: '#4d4d4d', tickPosH: 2,
+  ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 26, tickMajorHeightM: 28,
+  tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#383838', tickMajorColorM: '#4d4d4d', tickPosM: 2,
+  ticksOnTop: false, tickLens: 0.75, tickParallax: 5, tickDryLens: 0.8, tickEmboss: 0.4, digits: true,
+  digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#101010',
+  digitShadowStrength: 1, digitShadowOffset: 1, digitFont: 7, digitTint: '#827c40', digitTintAmount: 0.9,
+  digitTone: -0.4, digitScaleX: 3.5, digitScaleY: 3.25, digitScaleXMin: 2.5, digitScaleYMin: 2.75,
+  digitBottomMin: 30, digitBottom: 27, digitsOnTop: false, bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35,
+  topParallax: -10, digitParallax: 5, liquidTransparency: 0.15, markContrast: 62, digitsLeadingZero: false,
+  digitMinuteStep: 5, digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false,
+  digitsLastOnlyM: false, freeLiquid: true, freeGain: 570, freeDamp: 0.8, freeBounce: 0.2, freeHomeK: 150,
+  readTiltStart: 20, readTiltEnd: 50, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207,
+  angleDamp: 17.6, angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 73,
+  acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5,
+  gyroDeadzone: 31, gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 1.75, tickBright: 2,
+  digitBright: 1.59, ambientLight: 1,
+};
+
+/** Chartreuse (zip params (40), 2026-08-31): bright yellow-green on black, soft glowing edge, bronze numerals behind the liquid. */
+const PRESET_CHARTREUSE: Partial<Params> = {
+  tubeHeight: 47, hoursY: 0, minutesY: 185, remaining: false, liquid: '#1d6e12', liquidHi: '#809419',
+  liquidLo: '#79792a', tubeBack: '#000000', tubeBack2: '#000000', tubeBackGradient: 1, glassHi: '#859093',
+  glassBody: 0.04, glassHiBright: 0.34, glassReflect: 0.2, glassRim: 0.52, glassWall: 4, glassWallGlow: 0.25,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.4, lens: -0.5, lensCurve: -0.05, bubbleRim: '#425b2a',
+  highlightH: 17, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.68,
+  liquidThin: 0.4, contactAngle: 67.8596, contactHyst: 18, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
+  meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 15, traces: false, traceAmount: 0.6,
+  traceDry: 1, traceFollow: 0.25, traceStain: 0.3, traceThin: 1, traceFilm: 0, edgeSoft: 3.1, frontBright: 0,
+  surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0,
+  edgeGlow: 17, glowStrength: 0.3, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.38, ticksH: true,
+  tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 11, tickMajorHeightH: 22, tickMinorWidthH: 2,
+  tickMajorWidthH: 3, tickColorH: '#404040', tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true,
+  tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 10, tickMajorHeightM: 28, tickMinorWidthM: 2,
+  tickMajorWidthM: 2, tickColorM: '#383838', tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false,
+  tickLens: 0.85, tickParallax: 6, tickDryLens: 0.65, tickEmboss: 0.15, digits: true, digitColor: '#e3e3e3',
+  digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#101010', digitShadowStrength: 1,
+  digitShadowOffset: 1, digitFont: 7, digitTint: '#827c40', digitTintAmount: 0.9, digitTone: -0.4,
+  digitScaleX: 3.5, digitScaleY: 3.25, digitScaleXMin: 2.5, digitScaleYMin: 2.75, digitBottomMin: 13,
+  digitBottom: 15, digitsOnTop: false, bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10,
+  digitParallax: 6, liquidTransparency: 0.52, markContrast: 0, digitsLeadingZero: false, digitMinuteStep: 5,
+  digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false,
+  freeLiquid: true, freeGain: 570, freeDamp: 0.8, freeBounce: 0.2, freeHomeK: 150, readTiltStart: 20,
+  readTiltEnd: 50, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6,
+  angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 73, acrossK: 200,
+  acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31,
+  gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 2, tickBright: 1.38, digitBright: 2,
+  ambientLight: 0,
+};
+
+/** Bottle green (zip params (50), 2026-09-01): dark green in 80 px tubes on a charcoal backing, faint rear numerals and a coating residue. */
+const PRESET_BOTTLE: Partial<Params> = {
+  tubeHeight: 80, hoursY: 0, minutesY: 224, remaining: false, liquid: '#405e08', liquidHi: '#27800f',
+  liquidLo: '#2a6416', tubeBack: '#0f0f0f', tubeBack2: '#2e2e2e', tubeBackGradient: 0, glassHi: '#859093',
+  glassBody: 0.06, glassHiBright: 0.3, glassReflect: 0.14, glassRim: 0.5, glassWall: 4, glassWallGlow: 0.25,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.22, lens: 0.1, lensCurve: -1.3, bubbleRim: '#0c1f05',
+  highlightH: 10, highlightBright: 0, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.86, liquidThin: 0.4,
+  contactAngle: 75.5715, contactHyst: 13.4285, contactDyn: 8, capLength: 2.7, meniscusLens: 0, meniscusK: 280,
+  meniscusDamp: 16, meniscusInertia: 2, wetFilm: 15, traces: true, traceAmount: 0.55, traceDry: 0.55,
+  traceFollow: 1, traceStain: 0.6, traceThin: 2, traceFilm: 0, edgeSoft: 1.9, frontBright: 0, surfaceBand: 0.5,
+  surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0, edgeGlow: 14,
+  glowStrength: 0.06, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28,
+  bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.26, ticksH: true, tickStepH: 1,
+  tickMajorEveryH: 0, tickMinorHeightH: 24, tickMajorHeightH: 26, tickMinorWidthH: 1, tickMajorWidthH: 2,
+  tickColorH: '#7a7a7a', tickMajorColorH: '#e8eef2', tickPosH: 2, ticksM: true, tickStepM: 5,
+  tickMajorEveryM: 0, tickMinorHeightM: 34, tickMajorHeightM: 36, tickMinorWidthM: 3, tickMajorWidthM: 2,
+  tickColorM: '#ffffff', tickMajorColorM: '#ffffff', tickPosM: 2, ticksOnTop: false, tickLens: 0.9,
+  tickParallax: 3.75, tickDryLens: 0.8, tickEmboss: 0.3, digits: true, digitColor: '#e3e3e3',
+  digitColor2: '#20312f', digitShadow: false, digitShadowColor: '#101010', digitShadowStrength: 1,
+  digitShadowOffset: 1, digitFont: 7, digitTint: '#664e1a', digitTintAmount: 0.9, digitTone: 0.15,
+  digitScaleX: 3.25, digitScaleY: 3.75, digitScaleXMin: 2.25, digitScaleYMin: 3, digitBottomMin: 28,
+  digitBottom: 26, digitsOnTop: false, bottomLens: 0.35, digitDryLens: 0.15, topLens: 1, topParallax: -5.25,
+  digitParallax: 3.75, liquidTransparency: 0.48, markContrast: 0, digitsLeadingZero: false,
+  digitMinuteStep: 10, digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false,
+  digitsLastOnlyM: false, freeLiquid: true, freeGain: 570, freeDamp: 2.5, freeBounce: 0.1, freeHomeK: 150,
+  readTiltStart: 20, readTiltEnd: 50, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207,
+  angleDamp: 17.6, angleTiltGain: 4, angleGyroGain: 0.25, angleMax: 6, lightPhys: 0.5, lightAngle: 73,
+  acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5,
+  gyroDeadzone: 31, gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 1.34, tickBright: 0.34,
+  digitBright: 0.97, ambientLight: 0,
+};
+
+/** Claret (zip params (55), 2026-09-18): near-opaque dark red draining toward the right, light numerals on a white backing. */
+const PRESET_CLARET: Partial<Params> = {
+  tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: true, liquid: '#420000', liquidHi: '#240000',
+  liquidLo: '#2e0000', tubeBack: '#ffffff', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#322d2a',
+  glassBody: 0.32, glassHiBright: 0.06, glassReflect: 0.35, glassRim: 0.67, glassWall: 10, glassWallGlow: 0.79,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.64, lens: -0.2, lensCurve: 0.2, bubbleRim: '#8f2828',
+  highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
+  liquidThin: 0.6, contactAngle: 72.6537, contactHyst: 0, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
+  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, wetFilm: 0, traces: false, traceAmount: 0.25,
+  traceDry: 1.7, traceFollow: 0.58, traceStain: 0.35, traceThin: 1.25, traceFilm: 0, edgeSoft: 3.2,
+  frontBright: 1, surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1,
+  surfaceBlick: 0, edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55, bubble: false,
+  bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14,
+  bubbleDark: 0.87, ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25, tickMajorHeightH: 22,
+  tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b', tickMajorColorH: '#4d4d4d', tickPosH: 2,
+  ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 25, tickMajorHeightM: 28,
+  tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b', tickMajorColorM: '#4d4d4d', tickPosM: 2,
+  ticksOnTop: false, tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true,
+  digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#101010',
+  digitShadowStrength: 0.8, digitShadowOffset: 1, digitFont: 9, digitTint: '#2a1c09', digitTintAmount: 0.15,
+  digitTone: -0.25, digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75,
+  digitBottomMin: 21, digitBottom: 22, digitsOnTop: false, bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35,
+  topParallax: -10, digitParallax: 4.75, liquidTransparency: 0.1, markContrast: 0, digitsLeadingZero: false,
+  digitMinuteStep: 5, digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false,
+  digitsLastOnlyM: false, freeLiquid: true, freeGain: 1300, freeDamp: 2.2, freeBounce: 0, freeHomeK: 150,
+  readTiltStart: 20, readTiltEnd: 50, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207,
+  angleDamp: 17.6, angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 73,
+  acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 2, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5,
+  gyroDeadzone: 31, gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 1.3, tickBright: 1.2,
+  digitBright: 2, ambientLight: 1,
+};
+
+/** Olive oil on white (zip params (58), 2026-09-18): the tuned olive oil drained from the right over a white backing, heavy residue. */
+const PRESET_OLIVE_WHITE: Partial<Params> = {
+  tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: true, liquid: '#5e5b08', liquidHi: '#8a8619',
+  liquidLo: '#89861f', tubeBack: '#ffffff', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#322d2a',
+  glassBody: 0.32, glassHiBright: 0.06, glassReflect: 0.35, glassRim: 0.67, glassWall: 9, glassWallGlow: 0.79,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.64, lens: -0.2, lensCurve: 0.2, bubbleRim: '#3e3d1d',
+  highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
+  liquidThin: 0.6, contactAngle: 72.6537, contactHyst: 11.4, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
+  meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, wetFilm: 15, traces: true, traceAmount: 2,
+  traceDry: 1.7, traceFollow: 1, traceStain: 1, traceThin: 2.1, traceFilm: 0, edgeSoft: 4, frontBright: 1,
+  surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0,
+  edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.43, ticksH: true,
+  tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25, tickMajorHeightH: 22, tickMinorWidthH: 2,
+  tickMajorWidthH: 3, tickColorH: '#372e0b', tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true,
+  tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 25, tickMajorHeightM: 28, tickMinorWidthM: 2,
+  tickMajorWidthM: 2, tickColorM: '#372e0b', tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false,
+  tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3',
+  digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#101010', digitShadowStrength: 0.8,
+  digitShadowOffset: 1, digitFont: 7, digitTint: '#2a1c09', digitTintAmount: 0.6, digitTone: -0.25,
+  digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 21,
+  digitBottom: 22, digitsOnTop: false, bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10,
+  digitParallax: 4.75, liquidTransparency: 0.17, markContrast: 0, digitsLeadingZero: false, digitMinuteStep: 5,
+  digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false,
+  freeLiquid: true, freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 150, readTiltStart: 20,
+  readTiltEnd: 50, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6,
+  angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 73, acrossK: 200,
+  acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31,
+  gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 1.62, tickBright: 1.2, digitBright: 2,
+  ambientLight: 1,
+};
+
+/** Menthe (zip params (67), 2026-09-25): translucent teal on white, dark rear numerals. */
+const PRESET_MENTHE: Partial<Params> = {
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#187767', liquidHi: '#b7c2bd',
+  liquidLo: '#1c7364', tubeBack: '#ffffff', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#545c4d',
+  glassBody: 0.15, glassHiBright: 0.25, glassReflect: 0.18, glassRim: 0.69, glassWall: 5, glassWallGlow: 0,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.75, lens: -0.2, lensCurve: 0.2, bubbleRim: '#6f807e',
+  highlightH: 8, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.56,
+  liquidThin: 0.6, contactAngle: 60, contactHyst: 14.5, contactDyn: 27, capLength: 2.1, meniscusLens: -0.3,
+  meniscusK: 355, meniscusDamp: 21.5, meniscusInertia: 5.3, wetFilm: 13, traces: false, traceAmount: 0.6,
+  traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0.88, edgeSoft: 4, frontBright: 0,
+  surfaceBand: 0.3, surfaceRim: 0.25, surfaceWidth: 6.5, surfaceTone: 0, surfaceFill: 0.45, surfaceBlick: 0,
+  edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.32, ticksH: true,
+  tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25, tickMajorHeightH: 22, tickMinorWidthH: 2,
+  tickMajorWidthH: 3, tickColorH: '#372e0b', tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true,
+  tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 25, tickMajorHeightM: 28, tickMinorWidthM: 2,
+  tickMajorWidthM: 2, tickColorM: '#372e0b', tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false,
+  tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3',
+  digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#121212', digitShadowStrength: 0.5,
+  digitShadowOffset: 1, digitFont: 7, digitTint: '#3a2308', digitTintAmount: 0.65, digitTone: -0.4,
+  digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 21,
+  digitBottom: 22, digitsOnTop: false, bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10,
+  digitParallax: 4.75, liquidTransparency: 0.74, markContrast: 0, digitsLeadingZero: false, digitMinuteStep: 5,
+  digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false,
+  freeLiquid: true, freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 0, readTiltStart: 0, readTiltEnd: 1,
+  playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6, angleTiltGain: 6.5,
+  angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 31, acrossK: 200, acrossDamp: 20,
+  acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31, gyroMax: 470,
+  inputGain: 1, brightness: 1, liquidBright: 1.79, tickBright: 2, digitBright: 2, ambientLight: 1,
+};
+
+/** Lime soda (zip params (68), 2026-09-26): pale lime over white, a physical-material export tuned by hand. */
+const PRESET_LIME: Partial<Params> = {
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: false, liquid: '#98ff5a', liquidHi: '#ffffff',
+  liquidLo: '#000000', tubeBack: '#ffffff', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#dfe6ea',
+  glassBody: 0.092, glassHiBright: 0.3283, glassReflect: 0.1492, glassRim: 0.6589, glassWall: 7.5149,
+  glassWallGlow: 0.2969, rimLight: 1, rimTint: '#49125f', glassOverLiquid: 0.533, lens: -0.2, lensCurve: 0.2,
+  bubbleRim: '#b9c4b3', highlightH: 14, highlightBright: 1, highlightSharp: 2, highlightInset: 0,
+  shadeDepth: 0.4, liquidThin: 1, contactAngle: 70, contactHyst: 8.5, contactDyn: 5.1794, capLength: 6.279,
+  meniscusLens: 0.05, meniscusK: 550, meniscusDamp: 8.8728, meniscusInertia: 2.9786, wetFilm: 8, traces: true,
+  traceAmount: 0.4377, traceDry: 1, traceFollow: 0.4709, traceStain: 0.167, traceThin: 1.4807,
+  traceFilm: 0.0002, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
+  surfaceTone: 0, surfaceFill: 0.505, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.055, cornerR: 0,
+  edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
+  bubbleRollGain: 0.5, bubbleTiltGain: 0, bubbleDark: 0.0439, ticksH: true, tickStepH: 1, tickMajorEveryH: 0,
+  tickMinorHeightH: 15, tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b',
+  tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true, tickStepM: 5, tickMajorEveryM: 0,
+  tickMinorHeightM: 15, tickMajorHeightM: 28, tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b',
+  tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false, tickLens: 0.473, tickParallax: 5.5,
+  tickDryLens: 0.1, tickEmboss: 0.25, digits: true, digitColor: '#e3e3e3', digitColor2: '#20312f',
+  digitShadow: true, digitShadowColor: '#121212', digitShadowStrength: 0.5, digitShadowOffset: 1, digitFont: 7,
+  digitTint: '#3a2308', digitTintAmount: 0.65, digitTone: -0.4, digitScaleX: 3.5, digitScaleY: 2.75,
+  digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 20, digitBottom: 19, digitsOnTop: false,
+  bottomLens: 0.473, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
+  liquidTransparency: 0.55, markContrast: 26, digitsLeadingZero: false, digitMinuteStep: 5, digitHourStep: 1,
+  digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false, freeLiquid: true,
+  freeGain: 570, freeDamp: 0.8873, freeBounce: 0.3197, freeHomeK: 0, readTiltStart: 0, readTiltEnd: 1,
+  playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6,
+  angleTiltGain: 6.2818, angleGyroGain: 0.4025, angleMax: 6, lightPhys: 1, lightAngle: 22.5, acrossK: 200,
+  acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31,
+  gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 0.86, tickBright: 0.92, digitBright: 1.51,
+  ambientLight: 1,
+};
+
+/** Patrick pink (zip patrick_pin, 2026-09-09): opaque bubblegum pink, yellow numerals and ticks printed on the glass. */
+const PRESET_PATRICK: Partial<Params> = {
+  tubeHeight: 60, hoursY: 0, minutesY: 185, remaining: false, liquid: '#dd73b6', liquidHi: '#dd73b6',
+  liquidLo: '#dd73b6', tubeBack: '#110b03', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#4e3145',
+  glassBody: 0.32, glassHiBright: 0, glassReflect: 0.35, glassRim: 0.69, glassWall: 4, glassWallGlow: 0.25,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.64, lens: -0.2, lensCurve: 0.2, bubbleRim: '#2d3319',
+  highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
+  liquidThin: 0.4, contactAngle: 159.5921, contactHyst: 1.2, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
+  meniscusK: 360, meniscusDamp: 3, meniscusInertia: 10, wetFilm: 0, traces: false, traceAmount: 2, traceDry: 2,
+  traceFollow: 0.66, traceStain: 1, traceThin: 0.1, traceFilm: 0, edgeSoft: 4, frontBright: 0,
+  surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0,
+  edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
+  bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.12, ticksH: true,
+  tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25, tickMajorHeightH: 22, tickMinorWidthH: 2,
+  tickMajorWidthH: 3, tickColorH: '#7e8c18', tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true,
+  tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 25, tickMajorHeightM: 28, tickMinorWidthM: 2,
+  tickMajorWidthM: 2, tickColorM: '#7e8c18', tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: true,
+  tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3',
+  digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#101010', digitShadowStrength: 1,
+  digitShadowOffset: 1, digitFont: 9, digitTint: '#ffea00', digitTintAmount: 1, digitTone: 0.2, digitScaleX: 3,
+  digitScaleY: 2.5, digitScaleXMin: 2.25, digitScaleYMin: 2, digitBottomMin: 31, digitBottom: 27,
+  digitsOnTop: true, bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
+  liquidTransparency: 0, markContrast: 0, digitsLeadingZero: false, digitMinuteStep: 5, digitHourStep: 1,
+  digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false, freeLiquid: true,
+  freeGain: 1110, freeDamp: 1.7, freeBounce: 0.4, freeHomeK: 150, readTiltStart: 20, readTiltEnd: 50,
+  playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6, angleTiltGain: 6.5,
+  angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 73, acrossK: 200, acrossDamp: 20,
+  acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31, gyroMax: 470,
+  inputGain: 1, brightness: 1, liquidBright: 0.98, tickBright: 1.2, digitBright: 2, ambientLight: 1,
+};
+
+/** Seltzer (zip perfect_frizzante, 2026-09-23): colourless water on white, the reference the Cuvée glass was tuned against. */
+const PRESET_SELTZER: Partial<Params> = {
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#b8daff', liquidHi: '#b8daff',
+  liquidLo: '#b8daff', tubeBack: '#ffffff', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#545c4d',
+  glassBody: 0, glassHiBright: 0.08, glassReflect: 0.58, glassRim: 0.63, glassWall: 4.5, glassWallGlow: 0,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.75, lens: -0.2, lensCurve: 0.2, bubbleRim: '#ffffff',
+  highlightH: 0, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.31,
+  liquidThin: 0.42, contactAngle: 77.0824, contactHyst: 10.5, contactDyn: 8, capLength: 2.7,
+  meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 16, traces: false,
+  traceAmount: 0, traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0, edgeSoft: 4,
+  frontBright: 0, surfaceBand: 0.1, surfaceRim: 0.2, surfaceWidth: 6, surfaceTone: 0.05, surfaceFill: 1,
+  surfaceBlick: 0, edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27,
+  bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.06,
+  ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25, tickMajorHeightH: 22,
+  tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b', tickMajorColorH: '#4d4d4d', tickPosH: 2,
+  ticksM: true, tickStepM: 5, tickMajorEveryM: 0, tickMinorHeightM: 25, tickMajorHeightM: 28,
+  tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b', tickMajorColorM: '#4d4d4d', tickPosM: 2,
+  ticksOnTop: false, tickLens: 0.85, tickParallax: 6, tickDryLens: 1, tickEmboss: 0.4, digits: true,
+  digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadow: true, digitShadowColor: '#121212',
+  digitShadowStrength: 0.5, digitShadowOffset: 1, digitFont: 7, digitTint: '#3a2308', digitTintAmount: 0.65,
+  digitTone: -0.4, digitScaleX: 3.5, digitScaleY: 2.75, digitScaleXMin: 3, digitScaleYMin: 2.75,
+  digitBottomMin: 21, digitBottom: 22, digitsOnTop: false, bottomLens: 0.5, digitDryLens: 0.1, topLens: 0.35,
+  topParallax: -10, digitParallax: 5.5, liquidTransparency: 0.92, markContrast: 0, digitsLeadingZero: false,
+  digitMinuteStep: 5, digitHourStep: 1, digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false,
+  digitsLastOnlyM: false, freeLiquid: true, freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 0,
+  readTiltStart: 0, readTiltEnd: 1, playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207,
+  angleDamp: 17.6, angleTiltGain: 6.5, angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 31,
+  acrossK: 200, acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5,
+  gyroDeadzone: 31, gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 0.51, tickBright: 2,
+  digitBright: 2, ambientLight: 1,
+};
+
+/** Glycerol on white (zip glycerin, 2026-09-23): colourless viscous liquid on white with a coating residue. */
+const PRESET_GLYCEROL: Partial<Params> = {
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: true, liquid: '#878787', liquidHi: '#878787',
+  liquidLo: '#575757', tubeBack: '#ffffff', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#545c4d',
+  glassBody: 0, glassHiBright: 0, glassReflect: 0.58, glassRim: 0.63, glassWall: 4.5, glassWallGlow: 0,
+  rimLight: 0, rimTint: '#000000', glassOverLiquid: 0, lens: -0.2, lensCurve: 0.2, bubbleRim: '#2f3f0d',
+  highlightH: 1, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.31,
+  liquidThin: 0.42, contactAngle: 72.8328, contactHyst: 10.5, contactDyn: 8, capLength: 2.7,
+  meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 16, traces: true,
+  traceAmount: 0.35, traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0.21,
+  edgeSoft: 4, frontBright: 14, surfaceBand: 0.25, surfaceRim: 0.95, surfaceWidth: 4, surfaceTone: -0.05,
+  surfaceFill: 1, surfaceBlick: 0, edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55,
+  bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5,
+  bubbleTiltGain: 14, bubbleDark: 0, ticksH: true, tickStepH: 1, tickMajorEveryH: 0, tickMinorHeightH: 25,
+  tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b',
+  tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true, tickStepM: 5, tickMajorEveryM: 0,
+  tickMinorHeightM: 25, tickMajorHeightM: 28, tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b',
+  tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false, tickLens: 0.85, tickParallax: 6, tickDryLens: 1,
+  tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadow: true,
+  digitShadowColor: '#121212', digitShadowStrength: 0.5, digitShadowOffset: 1, digitFont: 7,
+  digitTint: '#3a2308', digitTintAmount: 0.65, digitTone: -0.4, digitScaleX: 3.5, digitScaleY: 2.75,
+  digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 21, digitBottom: 22, digitsOnTop: false,
+  bottomLens: 0.45, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
+  liquidTransparency: 0.81, markContrast: 0, digitsLeadingZero: false, digitMinuteStep: 5, digitHourStep: 1,
+  digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false, freeLiquid: true,
+  freeGain: 840, freeDamp: 7, freeBounce: 0, freeHomeK: 0, readTiltStart: 0, readTiltEnd: 1, playHold: 5,
+  fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6, angleTiltGain: 6.5,
+  angleGyroGain: 0.42, angleMax: 6, lightPhys: 1, lightAngle: 31, acrossK: 200, acrossDamp: 20,
+  acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31, gyroMax: 470,
+  inputGain: 1, brightness: 1, liquidBright: 0, tickBright: 2, digitBright: 2, ambientLight: 1,
+};
+
+/** Dark glycerol (2026-09-27, user export): smoky grey viscous liquid on a pale sage backing, rim-lit, dark rear
+ *  numerals, a slow clinging coat; its signature gas (trapped) is the one it was saved with. */
+const PRESET_GLYCEROL_DARK: Partial<Params> = {
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: false, liquid: '#2d2d2d', liquidHi: '#bcbcbc',
+  liquidLo: '#0e0e0e', tubeBack: '#babbaa', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#dfe6ea',
+  glassBody: 0.08, glassHiBright: 0.2612, glassReflect: 0.1187, glassRim: 0.6162, glassWall: 4.8182,
+  glassWallGlow: 0.2678, rimLight: 1, rimTint: '#6d6b6a', glassOverLiquid: 0.5002, lens: -0.2, lensCurve: 0.2,
+  bubbleRim: '#b4b4b4', highlightH: 6, highlightBright: 1, highlightSharp: 2, highlightInset: 0,
+  shadeDepth: 0.3, liquidThin: 1, contactAngle: 20, contactHyst: 12, contactDyn: 90, capLength: 2.2131,
+  meniscusLens: 0.05, meniscusK: 105.7451, meniscusDamp: 28.1531, meniscusInertia: 1.8478, wetFilm: 24.534,
+  traces: true, traceAmount: 0.3317, traceDry: 2, traceFollow: 0.1258, traceStain: 0.18, traceThin: 0.5193,
+  traceFilm: 0.01, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
+  surfaceTone: 0, surfaceFill: 0.1838, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.0726, cornerR: 0,
+  edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
+  bubbleRollGain: 0.5, bubbleTiltGain: 0, bubbleDark: 0.33, ticksH: true, tickStepH: 1, tickMajorEveryH: 0,
+  tickMinorHeightH: 25, tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b',
+  tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true, tickStepM: 5, tickMajorEveryM: 0,
+  tickMinorHeightM: 25, tickMajorHeightM: 28, tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b',
+  tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false, tickLens: 0.6405, tickParallax: 6,
+  tickDryLens: 1, tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3', digitColor2: '#20312f',
+  digitShadow: true, digitShadowColor: '#121212', digitShadowStrength: 0.5, digitShadowOffset: 1, digitFont: 7,
+  digitTint: '#3a2308', digitTintAmount: 0.65, digitTone: -0.4, digitScaleX: 3.5, digitScaleY: 2.75,
+  digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 21, digitBottom: 22, digitsOnTop: false,
+  bottomLens: 0.6405, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
+  liquidTransparency: 0.65, markContrast: 36, digitsLeadingZero: false, digitMinuteStep: 5, digitHourStep: 1,
+  digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false, freeLiquid: true,
+  freeGain: 570, freeDamp: 6.8074, freeBounce: 0, freeHomeK: 0, readTiltStart: 0, readTiltEnd: 1, playHold: 5,
+  fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6, angleTiltGain: 2.2309,
+  angleGyroGain: 0.1039, angleMax: 6, lightPhys: 1, lightAngle: 30, acrossK: 200, acrossDamp: 20,
+  acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31, gyroMax: 470,
+  inputGain: 1, brightness: 1, liquidBright: 1, tickBright: 1.27, digitBright: 1.12, ambientLight: 0,
+};
+
+/** Prosecco (zip realistic_with_gas, 2026-09-26): pale straw on white, derived from a physical material (Params as derived today). */
+const PRESET_PROSECCO: Partial<Params> = {
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: false, liquid: '#ffe6b3', liquidHi: '#ffffff',
+  liquidLo: '#000000', tubeBack: '#ffffff', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#dfe6ea',
+  glassBody: 0.08, glassHiBright: 0.2655, glassReflect: 0.1207, glassRim: 0.619, glassWall: 4.8182,
+  glassWallGlow: 0.2577, rimLight: 1, rimTint: '#0c0f15', glassOverLiquid: 0.5314, lens: -0.2, lensCurve: 0.2,
+  bubbleRim: '#b4b2ad', highlightH: 6, highlightBright: 1, highlightSharp: 2, highlightInset: 0,
+  shadeDepth: 0.4, liquidThin: 1, contactAngle: 20, contactHyst: 10, contactDyn: 10.1656, capLength: 2.2069,
+  meniscusLens: 0.05, meniscusK: 400, meniscusDamp: 9.718, meniscusInertia: 2.9578, wetFilm: 12.7417,
+  traces: false, traceAmount: 0.3, traceDry: 1, traceFollow: 0.4427, traceStain: 0.05, traceThin: 1.462,
+  traceFilm: 0, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
+  surfaceTone: 0, surfaceFill: 0.505, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.044, cornerR: 0,
+  edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
+  bubbleRollGain: 0.5, bubbleTiltGain: 0, bubbleDark: 0.0439, ticksH: true, tickStepH: 1, tickMajorEveryH: 0,
+  tickMinorHeightH: 25, tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b',
+  tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true, tickStepM: 5, tickMajorEveryM: 0,
+  tickMinorHeightM: 25, tickMajorHeightM: 28, tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b',
+  tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false, tickLens: 0.473, tickParallax: 6, tickDryLens: 1,
+  tickEmboss: 0.4, digits: true, digitColor: '#e3e3e3', digitColor2: '#20312f', digitShadow: true,
+  digitShadowColor: '#121212', digitShadowStrength: 0.5, digitShadowOffset: 1, digitFont: 7,
+  digitTint: '#3a2308', digitTintAmount: 0.65, digitTone: -0.4, digitScaleX: 3.5, digitScaleY: 2.75,
+  digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 21, digitBottom: 22, digitsOnTop: false,
+  bottomLens: 0.473, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
+  liquidTransparency: 0.55, markContrast: 0, digitsLeadingZero: false, digitMinuteStep: 5, digitHourStep: 1,
+  digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false, freeLiquid: true,
+  freeGain: 570, freeDamp: 0.9718, freeBounce: 0.1686, freeHomeK: 0, readTiltStart: 0, readTiltEnd: 1,
+  playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6,
+  angleTiltGain: 6.0705, angleGyroGain: 0.3856, angleMax: 6, lightPhys: 1, lightAngle: 30, acrossK: 200,
+  acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31,
+  gyroMax: 470, inputGain: 1, brightness: 0.63, liquidBright: 1, tickBright: 1.05, digitBright: 1.73,
+  ambientLight: 0,
+};
+
 export const PRESETS: PresetEntry[] = [
-  { id: 'frizzante', name: 'Frizzante', note: 'colourless sparkling water, lab print, fine bead', p: PRESET_FRIZZANTE, mat: M('watery', 'clear', false, true, 'carbonated') },
-  { id: 'urine', name: 'Urine sample', note: 'clear amber, watery, specimen-cup graduations', p: PRESET_URINE, mat: M('watery', 'translucent', false, true, 'none') },
-  { id: 'blood', name: 'Blood', note: 'opaque venous red, coats the glass, syringe print', p: PRESET_BLOOD, mat: M('medium', 'opaque', false, true, 'none') },
-  { id: 'milk', name: 'Milk', note: 'opaque white colloid, soft highlight, printed scale', p: PRESET_MILK, mat: M('medium', 'opaque', false, true, 'none') },
-  { id: 'mercury', name: 'Mercury', note: 'convex bead, mirror specular, etched scale', p: PRESET_MERCURY, mat: M('metal', 'opaque', false, false, 'none') },
-  { id: 'honey', name: 'Honey', note: 'amber syrup, overdamped, clings, trapped air', p: PRESET_HONEY, mat: M('viscous', 'translucent', false, true, 'trapped') },
-  { id: 'olive-oil', name: 'Olive oil', note: 'user-tuned olive green, viscous slug, lingering residue', p: PRESET_OLIVE_OIL },
-  { id: 'cola', name: 'Cola', note: 'dark translucent, lively bead, enamel numerals', p: PRESET_COLA, mat: M('watery', 'translucent', false, true, 'carbonated') },
-  { id: 'malt', name: 'Single malt', note: 'amber, legs on the wall, brass numerals', p: PRESET_MALT, mat: M('medium', 'translucent', false, true, 'none') },
-  { id: 'champagne', name: 'Champagne', note: 'pale gold, dense bead, amber resin numerals', p: PRESET_CHAMPAGNE, mat: M('watery', 'translucent', false, true, 'carbonated') },
-  { id: 'cryo', name: 'Cryo oxygen', note: 'pale blue, boiling, frosted wall', p: PRESET_CRYO, mat: M('watery', 'clear', false, true, 'boiling') },
-  { id: 'ink', name: 'India ink', note: 'matte black, enamel numerals, panel mostly off', p: PRESET_INK, mat: M('medium', 'opaque', false, true, 'none') },
-  { id: 'glow', name: 'Glow stick', note: 'fluorescent green, glows past the cap, seven-segment print', p: PRESET_GLOW, mat: M('medium', 'translucent', true, true, 'none') },
-  { id: 'xenon', name: 'Xenon', note: 'violet discharge tube, glowing ends, no inertia', p: PRESET_XENON, mat: M('plasma', 'translucent', true, false, 'none') },
-  { id: 'molten', name: 'Molten iron', note: 'emissive orange, dense, non-wetting, forged numerals', p: PRESET_MOLTEN, mat: M('medium', 'opaque', true, false, 'trapped') },
-  { id: 'free', name: 'Free liquid', note: 'bottle green slug; gentle tilt reads time, strong tilt flows', p: PRESET_FREE },
+  { id: 'frizzante', name: 'Frizzante', note: 'colourless sparkling water, lab print, fine bead', p: PRESET_FRIZZANTE, gas: gases('fine-bead', SODA), mat: M('watery', 'clear', false, true, 'carbonated') },
+  { id: 'urine', name: 'Urine sample', note: 'clear amber, watery, specimen-cup graduations', p: PRESET_URINE, gas: gases('none', SODA, ['slow-bubbles']), mat: M('watery', 'translucent', false, true, 'none') },
+  { id: 'blood', name: 'Blood', note: 'opaque venous red, coats the glass, syringe print', p: PRESET_BLOOD, gas: gases('none', OILY), mat: M('medium', 'opaque', false, true, 'none') },
+  { id: 'milk', name: 'Milk', note: 'opaque white colloid, soft highlight, printed scale', p: PRESET_MILK, gas: gases('none', OILY), mat: M('medium', 'opaque', false, true, 'none') },
+  { id: 'mercury', name: 'Mercury', note: 'convex bead, mirror specular, etched scale', p: PRESET_MERCURY, gas: gases('none'), mat: M('metal', 'opaque', false, false, 'none') },
+  { id: 'honey', name: 'Honey', note: 'amber syrup, overdamped, clings, trapped air', p: PRESET_HONEY, gas: gases('held-air', ['trapped']), mat: M('viscous', 'translucent', false, true, 'trapped') },
+  { id: 'olive-oil', name: 'Olive oil', note: 'user-tuned olive green, viscous slug, lingering residue', p: PRESET_OLIVE_OIL, gas: gases('none', OILY) },
+  { id: 'cola', name: 'Cola', note: 'dark translucent, lively bead, enamel numerals', p: PRESET_COLA, gas: gases('lively-bead', SODA), mat: M('watery', 'translucent', false, true, 'carbonated') },
+  { id: 'malt', name: 'Single malt', note: 'amber, legs on the wall, brass numerals', p: PRESET_MALT, gas: gases('none', SODA), mat: M('medium', 'translucent', false, true, 'none') },
+  { id: 'champagne', name: 'Champagne', note: 'pale gold, dense bead, amber resin numerals', p: PRESET_CHAMPAGNE, gas: gases('fine-bead', SODA), mat: M('watery', 'translucent', false, true, 'carbonated') },
+  { id: 'cryo', name: 'Cryo oxygen', note: 'pale blue, boiling, frosted wall', p: PRESET_CRYO, gas: gases('boiling', ['fine-bead']), mat: M('watery', 'clear', false, true, 'boiling') },
+  { id: 'ink', name: 'India ink', note: 'matte black, enamel numerals, panel mostly off', p: PRESET_INK, gas: gases('none', ['slow-bubbles']), mat: M('medium', 'opaque', false, true, 'none') },
+  { id: 'glow', name: 'Glow stick', note: 'fluorescent green, glows past the cap, seven-segment print', p: PRESET_GLOW, gas: gases('none', ['sparks', 'slow-bubbles']), mat: M('medium', 'translucent', true, true, 'none') },
+  { id: 'xenon', name: 'Xenon', note: 'violet discharge tube, glowing ends, no inertia', p: PRESET_XENON, gas: gases('none'), mat: M('plasma', 'translucent', true, false, 'none') },
+  { id: 'molten', name: 'Molten iron', note: 'emissive orange, dense, non-wetting, forged numerals', p: PRESET_MOLTEN, gas: gases('gas-pockets'), mat: M('medium', 'opaque', true, false, 'trapped') },
+  { id: 'free', name: 'Free liquid', note: 'bottle green slug; gentle tilt reads time, strong tilt flows', p: PRESET_FREE, gas: gases('slow-bubbles', SODA) },
 ];
 // The original signatures also have big-rod variants; later additions are single standard-rod looks.
 PRESETS.push(...PRESETS.map((e) => ({ ...e, id: e.id + '-big', name: e.name + ' (big lens)', p: bigLens(e.p), big: true })));
-PRESETS.push({ id: 'phosphor', name: 'Phosphor sample', note: 'pale green solution in a clear lab vial on white paper, see-through meniscus, marker labels on the glass', p: PRESET_PHOSPHOR, mat: M('watery', 'translucent', false, true, 'none') });
-PRESETS.push({ id: 'alpine', name: 'Alpine spring', note: 'clear sparkling water, pale ceramic backing, slate markings', p: PRESET_ALPINE, mat: M('watery', 'clear', false, true, 'carbonated') });
-PRESETS.push({ id: 'pinot', name: 'Pinot noir', note: 'ruby red wine, legs on the glass, bronze cellar numerals', p: PRESET_PINOT });
-PRESETS.push({ id: 'spritz', name: 'Aperol spritz', note: 'vivid orange aperitivo, lively bead with a foam ring, navy enamel numerals on white', p: PRESET_SPRITZ });
+PRESETS.push({ id: 'phosphor', name: 'Phosphor sample', note: 'pale green solution in a clear lab vial on white paper, see-through meniscus, marker labels on the glass', p: PRESET_PHOSPHOR, gas: gases('none', SODA, ['sparks']), mat: M('watery', 'translucent', false, true, 'none') });
+PRESETS.push({ id: 'alpine', name: 'Alpine spring', note: 'clear sparkling water, pale ceramic backing, slate markings', p: PRESET_ALPINE, gas: gases('fine-bead', SODA), mat: M('watery', 'clear', false, true, 'carbonated') });
+PRESETS.push({ id: 'pinot', name: 'Pinot noir', note: 'ruby red wine, legs on the glass, bronze cellar numerals', p: PRESET_PINOT, gas: gases('none', SODA) });
+PRESETS.push({ id: 'spritz', name: 'Aperol spritz', note: 'vivid orange aperitivo, lively bead with a foam ring, navy enamel numerals on white', p: PRESET_SPRITZ, gas: gases('foam-ring', SODA) });
 
-PRESETS.push({ id: 'cuvee', name: 'Cuvée', note: 'straw-gold sparkling wine, ivory backing, bronze numerals and a fine pale bead', p: PRESET_CUVEE });
+PRESETS.push({ id: 'cuvee', name: 'Cuvée', note: 'straw-gold sparkling wine, ivory backing, bronze numerals and a fine pale bead', p: PRESET_CUVEE, gas: gases('pearl-bead', SODA) });
 
-PRESETS.push({ id: 'nocturne', name: 'Nocturne', note: 'blue-black ink, smoked glass, silver front markings and lingering wet residue', p: PRESET_NOCTURNE, mat: M('medium', 'opaque', false, true, 'none') });
-PRESETS.push({ id: 'tide', name: 'Bioluminescent tide', note: 'night-sea water glowing cyan at the edge, drifting plankton sparks, steel marks behind black glass', p: PRESET_TIDE });
+PRESETS.push({ id: 'nocturne', name: 'Nocturne', note: 'blue-black ink, smoked glass, silver front markings and lingering wet residue', p: PRESET_NOCTURNE, gas: gases('none', ['slow-bubbles']), mat: M('medium', 'opaque', false, true, 'none') });
+PRESETS.push({ id: 'tide', name: 'Bioluminescent tide', note: 'night-sea water glowing cyan at the edge, drifting plankton sparks, steel marks behind black glass', p: PRESET_TIDE, gas: gases('sparks', SODA) });
+// User looks recovered from presets.zip (2026-09-27): standard rod, exempt from the material ranges.
+PRESETS.push(
+  { id: 'absinthe', name: 'Absinthe', note: 'vivid green on white in the widest tubes, large black rear numerals', p: PRESET_ABSINTHE, gas: gases('pearl-bead', SODA) },
+  { id: 'chartreuse', name: 'Chartreuse', note: 'bright yellow-green on black, soft glowing edge, bronze rear numerals', p: PRESET_CHARTREUSE, gas: gases('slow-bubbles', SODA) },
+  { id: 'bottle', name: 'Bottle green', note: 'dark green in 80 px tubes on charcoal, faint rear numerals, coating residue', p: PRESET_BOTTLE, gas: gases('large-bubbles', SODA, ['slow-bubbles']) },
+  { id: 'claret', name: 'Claret', note: 'near-opaque dark red draining right, light numerals on white', p: PRESET_CLARET, gas: gases('slow-bubbles', SODA) },
+  { id: 'olive-white', name: 'Olive oil on white', note: 'the tuned olive oil drained from the right over a white backing, heavy residue', p: PRESET_OLIVE_WHITE, gas: gases('slow-bubbles', OILY) },
+  { id: 'menthe', name: 'Menthe', note: 'translucent teal on white, dark rear numerals', p: PRESET_MENTHE, gas: gases('foam-ring', SODA) },
+  { id: 'lime', name: 'Lime soda', note: 'pale lime over white, hand-tuned physical export', p: PRESET_LIME, gas: gases('brisk-pearls', SODA) },
+  { id: 'patrick', name: 'Patrick pink', note: 'opaque bubblegum pink, yellow print on the glass', p: PRESET_PATRICK, gas: gases('none', OILY) },
+  { id: 'seltzer', name: 'Seltzer', note: 'colourless water on white, the reference glass for Cuvée', p: PRESET_SELTZER, gas: gases('pearl-bead', SODA) },
+  { id: 'glycerol', name: 'Glycerol on white', note: 'colourless viscous liquid on white, coating residue', p: PRESET_GLYCEROL, gas: gases('large-bubbles', ['trapped', 'held-air']) },
+  { id: 'glycerol-dark', name: 'Dark glycerol', note: 'smoky grey viscous liquid on pale sage, rim-lit, dark rear numerals', p: PRESET_GLYCEROL_DARK, gas: gases('trapped', ['large-bubbles', 'held-air']) },
+  { id: 'prosecco', name: 'Prosecco', note: 'pale straw on white, from a physical material', p: PRESET_PROSECCO, gas: gases('brisk-pearls', SODA) },
+);
 
-/** Presets are whole looks: apply over the defaults, not over the current edit. */
-export function presetParams(e: PresetEntry): Params {
-  return { ...structuredClone(DEFAULT_PARAMS), ...e.p };
+/** Presets are whole looks: apply over the defaults, not over the current edit. `gas` defaults to the
+ *  preset's signature (its first fitting model). */
+export function presetParams(e: PresetEntry, gas: GasId = e.gas[0]): Params {
+  return { ...structuredClone(DEFAULT_PARAMS), ...e.p, ...gasParams(gas) };
 }
 
 export type ParamKey = keyof Params;
@@ -1172,6 +1617,10 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzFoamLife: { help: 'Bubbles reaching the surface park under it (following the meniscus, sliding to its corners and packing into a foam ring) and pop after this many seconds on average (each ±50 %). Shaking pops them faster; tilting the surface down releases them. 0 = respawn at the far end as before.', group: 'Bubble', label: 'foam life s', min: 0, max: 30, step: 0.5 },
   fizzDepth: { help: 'Each bubble sits at a random depth in the bore; a deeper one is seen through more liquid and fades toward it by this much (at the back wall). Scaled by 1 − liquidTransparency: an opaque liquid shows only the front bubbles, a clear one shows all alike. 0 = every bubble at full strength.', group: 'Bubble', label: 'fizz depth fade', min: 0, max: 1, step: 0.05 },
   fizzBlick: { help: 'Specular pinpoint on the lit side of bubbles of 2.5 px radius and up: neutral white room light (dimmed by brightness only), placed where the lit rim meets the dark core. 0 = none.', group: 'Bubble', label: 'fizz blick', min: 0, max: 1, step: 0.05 },
+  fizzSource: { help: 'Where bubbles are born. Scattered: anywhere in the liquid, recycled at the side the flow comes from. Spring: every bubble is born (and reborn after leaving the liquid or popping) at one point, so they rise as a stream, like an aquarium airstone or an underwater spring.', group: 'Bubble', label: 'fizz source', min: 0, max: 1, step: 1, options: ['scattered', 'spring'] },
+  fizzSourceX: { help: 'Spring: position along the liquid column, 0 = home end, 1 = the surface (a fraction of the liquid, so it stays submerged as the column changes).', group: 'Bubble', label: '· spring along', min: 0, max: 1, step: 0.01 },
+  fizzSourceY: { help: 'Spring: position across the bore, 0 = top wall, 1 = bottom wall (the whole bubble stays inside).', group: 'Bubble', label: '· spring across', min: 0, max: 1, step: 0.01 },
+  fizzSourceSpread: { help: 'Spring: ± px a bubble is born away from the spring point on both axes. 0 = a single point (one bead line).', group: 'Bubble', label: '· spring spread px', min: 0, max: 20, step: 0.5 },
   ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
   tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
   tickDryLens: { help: 'Cylinder warp for rear ticks where the tube is empty. Liquid magnifies the middle; air barely lenses, and negative stretches the edges instead, so the scale visibly jumps at the fill edge. Rear parallax is liquid-only.', group: 'Ticks', label: 'dry-side lens', min: -1, max: 1, step: 0.05 },

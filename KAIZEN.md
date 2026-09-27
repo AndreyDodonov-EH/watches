@@ -436,3 +436,16 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Tick heights at digit positions were clamped by a throwaway script (2026-09-26): ≥2 source rows and ≥1 screen
   row clear of the digit (incl. shadow) under both lenses. check-presets could assert the same so new presets
   and design edits can't reintroduce ticks running into digits.
+- Phylactery photo study: local `sim` could not import Playwright; used the saved renderer screenshot as the image-generation reference. Capture a fresh frame when preview dependencies are available.
+- Fizz spring (`fizzSource` 1): the plume is a straight bead line — no lateral wobble/widening as it rises; a
+  few springs (or a spring line) would read more like an aquarium. No preset uses it yet.
+- Fizz spring rebirth x: firmware ensureFizz treats "surfaces published" as `fizzLen > 0`, sim as
+  `fizzSurf.length === H` — they differ for one frame after a tubeHeight change (stale rows in firmware).
+
+## Presets / gas (2026-09-27)
+- Only a preset's signature gas is coherence-checked; switching a checked preset to foam-ring (80) or pearl-bead
+  (64) leaves the carbonated 30–60 count range. Check every listed gas, or trim those models, if it matters.
+- `presets/1.json` is a stale dump with no PRESETS entry (dump:presets never deletes files).
+- Preset `note`s still describe the signature bead ("fine bead", "trapped air"), which reads odd with another gas picked.
+- `presets.zip` (+ `:Zone.Identifier`) is still in the repo root; its keepers now live in `params.ts`.
+
