@@ -254,6 +254,7 @@ const pushParam = (key?: keyof Params) => {
 $('pull').onclick = async () => {
   try {
     Object.assign(params, await transport.getParams());
+    legacyPick = '';
     if (matState.mode === 'material') { materialUi.adoptDesign(); materialUi.rederive(true); } // the device's design, re-derived
     panelUi.refresh(); syncView(); save(); $('serialst').textContent = 'pulled';
   }
@@ -300,6 +301,7 @@ function paramsReplaced(): void {
  *  material mode a design key goes into the design and re-derives; a whole-struct change (legacy preset,
  *  import, reset) contributes its design keys. Derived / fixed keys are locked there. */
 function paramEdited(key?: keyof Params): void {
+  if (!key) legacyPick = matState.mode === 'legacy' ? panelUi.presetId() : '';
   if (matState.mode === 'material') {
     if (!key) materialUi.adoptDesign();
     else if (isDesignKey(key)) matState.design = { ...matState.design, [key]: params[key] };
@@ -311,6 +313,9 @@ function paramEdited(key?: keyof Params): void {
   if (!key) syncView();
   if (!key || LAYOUT_KEYS.includes(key)) { applyOverlay(ovlDom, overlay, tubeLayout(params)); drawGrid(); }
 }
+/** The legacy preset picked in legacy mode ('' after a reset / import / pull): ticking physical material
+ *  enters with its physical twin. Consumed by entering material mode. */
+let legacyPick = '';
 const panelUi = buildPanel($('panel'), params, { onChange: paramEdited });
 const materialUi = buildMaterialPanel($('panel'), matState, {
   params,
@@ -319,10 +324,14 @@ const materialUi = buildMaterialPanel($('panel'), matState, {
     // whole-state changes resync the device; a field edit pushes only what the derive changed
     if (whole) pushParam(); else for (const k of changed) pushParam(k);
   },
-  onMode: (mode) => panelUi.setLocked(mode === 'material' ? LOCKED_KEYS : new Set()),
+  onMode: (mode) => { panelUi.setLocked(mode === 'material' ? LOCKED_KEYS : new Set()); if (mode === 'material') legacyPick = ''; },
   save,
   onFlags: (keys) => panelUi.setFlagged(keys),
   revealLegacy: (key) => { panelUi.reveal(key); },
+  legacyPreset: () => {
+    const e = PRESETS.find((x) => x.id === legacyPick);
+    return e && { id: e.id, params: presetParams(e) };
+  },
 });
 panelUi.setLocked(matState.mode === 'material' ? LOCKED_KEYS : new Set());
 

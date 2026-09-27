@@ -32,6 +32,8 @@ export interface MaterialHooks {
   onFlags: (keys: ReadonlySet<keyof Params>) => void;
   /** Bring a legacy panel row into view (its group opened) and focus it. */
   revealLegacy: (key: keyof Params) => void;
+  /** The legacy preset the Params were last loaded from (its id and its unedited Params), if any. */
+  legacyPreset: () => { id: string; params: Params } | undefined;
 }
 
 export interface MaterialPanel {
@@ -388,8 +390,22 @@ export function buildMaterialPanel(root: HTMLElement, state: MaterialState, hook
     refresh(); rederive(true);
   }
 
+  /** Ticking after a legacy preset that has a physical twin (same id) enters with the twin's liquid and
+   *  design, not the stored material; design keys edited since the preset was picked stay. */
+  function enterFromLegacyPreset(): boolean {
+    const src = hooks.legacyPreset();
+    if (!src || !MATERIAL_PRESETS.some((e) => e.id === src.id)) return false;
+    const edited: Record<string, unknown> = {};
+    for (const k of DESIGN_KEYS) if (params[k] !== src.params[k]) edited[k] = params[k];
+    selectPreset(src.id, true);
+    state.design = { ...state.design, ...edited } as Design;
+    return true;
+  }
+
   mode.oninput = () => {
-    if (mode.checked) { enter(); rederive(true); } else leave();
+    if (!mode.checked) { leave(); return; }
+    if (!enterFromLegacyPreset()) enter();
+    rederive(true);
   };
   presetSel.oninput = () => {
     if (!presetSel.value) { refresh(); return; }

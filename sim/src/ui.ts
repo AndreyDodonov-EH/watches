@@ -12,6 +12,8 @@ export interface Panel {
   setFlagged: (keys: ReadonlySet<keyof Params>) => void;
   /** Open the row's group, scroll it into view and focus its first enabled input; false without a row. */
   reveal: (key: keyof Params) => boolean;
+  /** The preset the Params were last loaded from ('' after a reset or an import; field edits keep it). */
+  presetId: () => string;
 }
 
 export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): Panel {
@@ -93,14 +95,14 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): Panel 
   sel.oninput = () => { const e = PRESETS.find((x) => x.id === sel.value); if (e) { fillGas(e); apply(presetParams(e)); } };
   gasSel.oninput = () => { if (gasSel.value) apply(gasParams(gasSel.value)); };
   bar.append(sel, gasSel);
-  btn('Reset all', () => { fillGas(); apply(structuredClone(DEFAULT_PARAMS)); });
+  btn('Reset all', () => { sel.value = ''; fillGas(); apply(structuredClone(DEFAULT_PARAMS)); });
   btn('Export JSON', () => {
     const blob = new Blob([JSON.stringify(p, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'params.json'; a.click();
   });
   btn('Copy JSON', () => { navigator.clipboard.writeText(JSON.stringify(p, null, 2)); });
   const file = document.createElement('input'); file.type = 'file'; file.accept = '.json'; file.style.display = 'none';
-  file.onchange = async () => { const f = file.files?.[0]; if (!f) return; fillGas(); apply(migrateParams(JSON.parse(await f.text()))); };
+  file.onchange = async () => { const f = file.files?.[0]; if (!f) return; sel.value = ''; fillGas(); apply(migrateParams(JSON.parse(await f.text()))); };
   btn('Import JSON', () => file.click());
   bar.appendChild(file);
   root.prepend(bar);
@@ -125,5 +127,5 @@ export function buildPanel(root: HTMLElement, p: Params, hooks: UiHooks): Panel 
     row.querySelector<HTMLInputElement | HTMLSelectElement>('input:not(:disabled), select:not(:disabled)')?.focus({ preventScroll: true });
     return true;
   };
-  return { refresh, setLocked, setFlagged, reveal };
+  return { refresh, setLocked, setFlagged, reveal, presetId: () => sel.value };
 }

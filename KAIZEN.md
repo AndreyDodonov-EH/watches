@@ -449,3 +449,5 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Preset `note`s still describe the signature bead ("fine bead", "trapped air"), which reads odd with another gas picked.
 - `presets.zip` (+ `:Zone.Identifier`) is still in the repo root; its keepers now live in `params.ts`.
 
+- Legacy preset → tick loads the physical twin only within the page session (the pick is not persisted; after a reload the tick uses the stored material). `-big` legacy presets have no twin id, so they fall back too.
+- The legacy preset dropdown keeps showing the last pick after a device pull (only reset/import clear it).

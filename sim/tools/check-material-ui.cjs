@@ -199,6 +199,23 @@ const DESIGN = new Set(list(modelSrc, 'DESIGN_KEYS'));
     assert.equal(await page.locator('#panel .row[data-key=freeDamp] input[type=range]').isDisabled(), false);
     console.log('?fresh=1 starts in legacy mode: ok');
 
+    // ---- 5b. a legacy preset, then the tick: its physical twin (liquid + design), edits since the pick kept;
+    // one-shot — a later re-tick keeps the material chosen since
+    await page.selectOption('#mat-preset', 'honey'); await page.uncheck('#mat-mode');   // a stale stored material
+    await page.selectOption('#panel .bar select.presets >> nth=0', 'olive-oil');
+    await sim(() => { const i = document.getElementById('lens'); i.value = '0.3'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.check('#mat-mode');
+    assert.equal(await page.inputValue('#mat-preset'), 'olive-oil', 'the tick loads the legacy preset\'s twin, not the stored material');
+    assert.match(await statusKind(), /\bok\b/, `olive-oil twin derives: ${await status()}`);
+    assert.equal(await sim(() => window.sim.material.design.lens), 0.3, 'a design edit made after the preset pick stays');
+    assert.equal(await sim(() => window.sim.params.tubeHeight), 60, "the twin's design");
+    await page.selectOption('#mat-preset', 'frizzante'); await page.uncheck('#mat-mode'); await page.check('#mat-mode');
+    assert.equal(await page.inputValue('#mat-preset'), 'frizzante', 'the twin is taken once');
+    await page.uncheck('#mat-mode'); await page.selectOption('#panel .bar select.presets >> nth=0', 'olive-oil');
+    await page.click('#panel .bar button >> text=Reset all'); await page.check('#mat-mode');
+    assert.equal(await page.inputValue('#mat-preset'), 'frizzante', 'a reset forgets the legacy preset');
+    console.log('legacy preset → tick loads its twin (lens edit kept), once; a reset forgets it: ok');
+
     // ---- 6. export → import round trip; URL material / m. / p. overrides
     await go('?fresh=1&material=frizzante&m.gasLevel=0.3&p.tickBright=1.2&p.freeDamp=3');
     assert.equal(await sim(() => window.sim.material.mode), 'material');
