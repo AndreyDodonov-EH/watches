@@ -231,7 +231,8 @@ $('serialbtn').onclick = async () => {
   transport = links[$<HTMLSelectElement>('link').value]; serial.attach(transport);
   if (!transport.supported) { $('serialst').textContent = `${transport instanceof BleTransport ? 'Web Bluetooth' : 'Web Serial'} not supported (use Chrome)`; return; }
   try { await transport.connect(); } catch { return; }
-  await pushTime();  // port open may have reset the board
+  await transport.waitReady();  // port open may have reset the board: wait out its boot
+  await pushTime();
   await serial.setStream(true);
   srcRadio('serial').checked = true; inputSource = 'serial';
 };

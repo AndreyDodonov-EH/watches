@@ -2,7 +2,7 @@
 // Serial commands (115200, USB CDC; same protocol over BLE Nordic UART Service, name "liquid-watch"):
 //   l  liquid face (default)          c  calibration face        h  hello / orientation test
 //   f  live fps + frame timing        i  toggle IMU stream (50 Hz CSV)
-//   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze)
+//   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze; persists in NVS)
 //   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p contactAngle=140)
 //   p?  dump params as JSON           p!  reset params to the built-in preset (and erase NVS copy)
 //   params persist in NVS (autosave 2 s after last p write)
@@ -84,10 +84,20 @@ static TubeState tubeH, tubeM;
 static GravityNorm gnorm;
 static ImuFilter imuFilter;
 static TiltInput rawTilt = {0, 0, 0, 0};
-static float demoSpeed = 1;          // time multiplier (d<N>)
+static float demoSpeed = 1;          // time multiplier (d<N>); NVS key "demo", so demo mode survives resets and power loss
 // Wall clock lives in the RTC-backed system time (settimeofday): survives the USB-CDC DTR/RTS reset
 // that every host port open/close triggers. Power-on starts at 0 → default 10:09:30 until `t`/`T`.
-static double demoOffset = 0;        // seconds added by demo speed on top of real time
+// demoOffset sits in RTC memory next to it so a running demo clock survives that reset too.
+RTC_NOINIT_ATTR static double demoOffset;         // seconds added by demo speed on top of real time
+RTC_NOINIT_ATTR static uint32_t demoOffsetMagic;  // demoOffset valid (RTC memory is garbage after power-on)
+static const uint32_t DEMO_OFFSET_MAGIC = 0x64656d6f;
+static void demoLoad() {
+  if (demoOffsetMagic != DEMO_OFFSET_MAGIC || !isfinite(demoOffset)) { demoOffset = 0; demoOffsetMagic = DEMO_OFFSET_MAGIC; }
+  float v = prefs.getFloat("demo", 1);
+  if (isfinite(v) && v >= 0 && v <= 3600) demoSpeed = v;
+  if (demoSpeed != 1) out.printf("demo: x%g restored from nvs\n", demoSpeed);
+}
+static void demoSave() { if (prefs.getFloat("demo", 1) != demoSpeed) prefs.putFloat("demo", demoSpeed); }
 static double clockSec = 0;          // local seconds since midnight, refreshed every physics step
 static const time_t CLOCK_EPOCH_MIN = 86400L * 365;  // below this = never set since power-on
 static void setClockLocal(time_t localSec) { timeval tv = { localSec, 0 }; settimeofday(&tv, nullptr); demoOffset = 0; }
@@ -350,7 +360,7 @@ static void handleLine(char *line) {
       if (sscanf(arg, "%lld %d", &ep, &tz) >= 1) { setClockLocal((time_t)(ep + tz * 60L)); clockSec = clockNow(); out.printf("time %02d:%02d:%02d\n", (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60); }
       else out.println("usage: T <epoch_s> <tz_min>");
       break; }
-    case 'd': demoSpeed = atof(arg); out.printf("demo speed x%g\n", demoSpeed); break;
+    case 'd': demoSpeed = atof(arg); demoSave(); out.printf("demo speed x%g\n", demoSpeed); break;
     case 'p': {
       if (arg[0] == '?') dumpParams();
       else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsGen++; paramsErase(); out.println("params reset"); }
@@ -415,6 +425,7 @@ void setup() {
   have_imu = imu_init();
 #endif
   paramsLoad();
+  demoLoad();
   out.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);
   if (time(nullptr) < CLOCK_EPOCH_MIN) setClockLocal(CLOCK_EPOCH_MIN + 10 * 3600 + 9 * 60 + 30);

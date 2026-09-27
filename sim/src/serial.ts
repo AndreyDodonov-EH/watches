@@ -15,8 +15,9 @@ export class SerialImu {
 
   /** `i` toggles on the board; the reply states the resulting state, so re-send if it mismatches. */
   async setStream(on: boolean): Promise<void> {
-    const r = await this.t.request('i');
-    if (r.includes('off') === on) await this.t.request('i');
+    const isReply = (l: string) => l.startsWith('imu stream ');
+    const r = await this.t.request('i', isReply);
+    if (r.includes('off') === on) await this.t.request('i', isReply);
   }
 
   private parse(line: string): void {
