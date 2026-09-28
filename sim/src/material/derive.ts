@@ -20,7 +20,7 @@ import { rgb565, rgb565to888 } from '../../../spec/layout';
 export const DERIVED_KEYS = [
   'liquid', 'liquidHi', 'liquidLo', 'liquidTransparency', 'liquidThin', 'shadeDepth',
   'highlightH', 'highlightBright', 'highlightSharp', 'glassHi', 'glassHiBright', 'glassReflect', 'glassRim', 'glassWall',
-  'glassWallGlow', 'rimLight', 'rimTint', 'glassBody', 'glassOverLiquid', 'lightPhys', 'lightAngle', 'ambientLight', 'liquidBright',
+  'glassWallGlow', 'wallWet', 'rimLight', 'rimTint', 'glassBody', 'glassOverLiquid', 'lightPhys', 'lightAngle', 'ambientLight', 'liquidBright',
   'tickLens', 'bottomLens', 'bubbleRim', 'bubbleDark', 'edgeGlow', 'glowStrength', 'frontBright', 'edgeLightGain', 'edgeSoft',
   'surfaceFill', 'surfaceBlick', 'contactAngle', 'contactHyst', 'contactDyn', 'capLength', 'freeDamp', 'freeBounce', 'meniscusK',
   'meniscusDamp', 'meniscusInertia', 'angleTiltGain', 'angleGyroGain', 'angleMax', 'wetFilm', 'traces', 'traceAmount', 'traceDry',
@@ -459,7 +459,7 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
 /** Overlays zeroed and the panel dimmer at 1: the palette rows then carry only the body, the part the
  *  derivation fits (check-materials reads the same rows). */
 export const BODY_ONLY: Partial<Params> = {
-  brightness: 1, highlightBright: 0, glassHiBright: 0, glassReflect: 0, glassBody: 0, glassRim: 0, glassWallGlow: 0, ambientLight: 0,
+  brightness: 1, highlightBright: 0, glassHiBright: 0, glassReflect: 0, glassBody: 0, glassRim: 0, glassWallGlow: 0, wallWet: 1, ambientLight: 0,
 };
 /** RGB565 round trip of 8-bit channels (rounded, clamped). */
 export const q565 = (c: readonly number[]): RGB3 =>

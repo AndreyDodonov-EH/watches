@@ -1,5 +1,5 @@
 {
-  "v": 24,
+  "v": 25,
   "tubeHeight": 54,
   "hoursY": 0,
   "minutesY": 185,
@@ -16,7 +16,8 @@
   "glassReflect": 0.12067875696332926,
   "glassRim": 0.6189502597486609,
   "glassWall": 4.818181818181818,
-  "glassWallGlow": 0.4462640664666007,
+  "glassWallGlow": 0.54,
+  "wallWet": 1,
   "rimLight": 2,
   "rimTint": "#868b5d",
   "glassOverLiquid": 0.5003762357891919,

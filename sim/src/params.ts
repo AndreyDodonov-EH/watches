@@ -17,7 +17,8 @@ export interface Params {
   glassReflect: number;  // 0..1 faint second reflection on the lower wall
   glassRim: number;      // 0..1 grazing reflection across the wall band, brightest at the silhouette
   glassWall: number;     // px wall thickness at the top/bottom silhouette: dry rows behind it show no tube back (only the grazing reflection), rear marks fade out there
-  glassWallGlow: number; // 0..1 the wall band lit by light piped along the glass (visible on a black tube back); plateau across the band under the grazing rim
+  glassWallGlow: number; // 0..1 the dry wall band lit by light piped along the glass (visible on a black tube back; over the liquid the band shows the liquid); plateau across the band under the grazing rim
+  wallWet: number;       // 0..1 how far the contents fill the wall band and frustrate the glow piped along it: 1 a liquid (seen to the silhouette, no glow over it), 0 a gas (the band over the column is the empty tube's)
   rimLight: number;      // 0..4 gain: side-lit rim of a tinted liquid on a dark ground: adds rimLight·u²·rimTint to the liquid rows toward the walls
   rimTint: string;       // colour of that rim light (8-bit, scaled by brightness)
   glassOverLiquid: number; // 0..1 how much of the glass specular is laid over the liquid too
@@ -193,7 +194,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 24;
+export const PARAMS_VERSION = 25;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -214,6 +215,7 @@ export const DEFAULT_PARAMS: Params = {
   glassRim: 0.4,
   glassWall: 4,
   glassWallGlow: 0.25,
+  wallWet: 1,
   rimLight: 0,
   rimTint: '#000000',
   glassOverLiquid: 0.4,
@@ -641,7 +643,7 @@ export const PRESET_GLOW: Partial<Params> = {
  *  glow past the column end, bold print. */
 export const PRESET_XENON: Partial<Params> = {
   ...MODERN_BASE, ...LAYOUT_WIDE,
-  contactAngle: 100, contactHyst: 0, contactDyn: 0,
+  contactAngle: 100, contactHyst: 0, contactDyn: 0, wallWet: 0,
   liquid: '#5a30d8', liquidHi: '#d9c8ff', liquidLo: '#1a0570', tubeBack: '#05020c', tubeBack2: '#0a0418', bubbleRim: '#d8ccff',
   glassHi: '#a394d8', glassBody: 0.1, glassHiBright: 0.5, glassReflect: 0.2, glassRim: 0.6, glassOverLiquid: 0.4,
   highlightH: 14, highlightBright: 0.7, highlightSharp: 1.5, shadeDepth: 0.42,
@@ -960,6 +962,8 @@ export const GAS_MODELS: readonly GasModel[] = [
     p: { fizz: true, fizzCount: 55, fizzSize: 1, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 52, fizzDriftGain: 1.2, fizzAcrossGain: 1.05, fizzFlatRise: 0.6, fizzSquash: 1.3, fizzEdgeRise: 0.6, fizzFoamLife: 2 } },
   { id: 'sparks', name: 'Plankton sparks', note: 'tiny bright specks drifting, no foam (bioluminescent tide)',
     p: { fizz: true, fizzCount: 55, fizzSize: 1.5, fizzSizeVar: 0.6, fizzShadeOff: 0, fizzSpeed: 9, fizzDriftGain: 1.6, fizzAcrossGain: 1.05, fizzFlatRise: 0.3, fizzSquash: 1, fizzEdgeRise: 0.1, fizzFoamLife: 0 } },
+  { id: 'spring-pearls', name: 'Spring pearls', note: 'one spring at the home end sending a sparse line of large pearls across the bore (subtle soda)',
+    p: { fizz: true, fizzCount: 12, fizzSize: 5.5, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 48, fizzDriftGain: 1, fizzAcrossGain: 1, fizzFlatRise: 0.45, fizzSquash: 1.2, fizzEdgeRise: 0.5, fizzFoamLife: 1.5, fizzSource: 1, fizzSourceX: 0, fizzSourceY: 0.5, fizzSourceSpread: 1.5 } },
 ];
 export type GasId = string;
 
@@ -1420,6 +1424,40 @@ const PRESET_PROSECCO: Partial<Params> = {
   ambientLight: 0,
 };
 
+/** Subtle soda (user config, 2026-09-28): muted lime over warm grey, a spring of large pearls at the home end
+ *  (gas 'spring-pearls'), see-through dish. */
+const PRESET_SUBTLE_SODA: Partial<Params> = {
+  tubeHeight: 54, hoursY: 0, minutesY: 185, remaining: false, liquid: '#98ff5a', liquidHi: '#aab98d',
+  liquidLo: '#1e501b', tubeBack: '#cbcbb3', tubeBack2: '#000000', tubeBackGradient: 0, glassHi: '#dfe6ea',
+  glassBody: 0.19, glassHiBright: 0.3283, glassReflect: 0.1492, glassRim: 0.38, glassWall: 6.5,
+  glassWallGlow: 0.25, rimLight: 0.67, rimTint: '#000000', glassOverLiquid: 0.18, lens: -0.2, lensCurve: 0.2,
+  bubbleRim: '#b8ccad', highlightH: 8, highlightBright: 0.05, highlightSharp: 2, highlightInset: 0,
+  shadeDepth: 0.4, liquidThin: 1, contactAngle: 70, contactHyst: 9, contactDyn: 5.1794, capLength: 5.4,
+  meniscusLens: 0.05, meniscusK: 550, meniscusDamp: 8.8728, meniscusInertia: 2.9786, wetFilm: 8, traces: true,
+  traceAmount: 0.4377, traceDry: 1, traceFollow: 0.4709, traceStain: 0.167, traceThin: 1.4807,
+  traceFilm: 0.0002, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
+  surfaceTone: 0, surfaceFill: 0.505, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.055, cornerR: 0,
+  edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
+  bubbleRollGain: 0.5, bubbleTiltGain: 0, bubbleDark: 0, ticksH: true, tickStepH: 1, tickMajorEveryH: 0,
+  tickMinorHeightH: 15, tickMajorHeightH: 22, tickMinorWidthH: 2, tickMajorWidthH: 3, tickColorH: '#372e0b',
+  tickMajorColorH: '#4d4d4d', tickPosH: 2, ticksM: true, tickStepM: 5, tickMajorEveryM: 0,
+  tickMinorHeightM: 15, tickMajorHeightM: 28, tickMinorWidthM: 2, tickMajorWidthM: 2, tickColorM: '#372e0b',
+  tickMajorColorM: '#4d4d4d', tickPosM: 2, ticksOnTop: false, tickLens: 0.473, tickParallax: 5.5,
+  tickDryLens: 0.1, tickEmboss: 0.25, digits: true, digitColor: '#e3e3e3', digitColor2: '#20312f',
+  digitShadow: true, digitShadowColor: '#5c5c5c', digitShadowStrength: 0.7, digitShadowOffset: 2, digitFont: 7,
+  digitTint: '#483c0f', digitTintAmount: 0.6, digitTone: -0.6, digitScaleX: 3.5, digitScaleY: 2.75,
+  digitScaleXMin: 3, digitScaleYMin: 2.75, digitBottomMin: 20, digitBottom: 19, digitsOnTop: false,
+  bottomLens: 0.473, digitDryLens: 0.1, topLens: 0.35, topParallax: -10, digitParallax: 4.75,
+  liquidTransparency: 0.67, markContrast: 26, digitsLeadingZero: false, digitMinuteStep: 5, digitHourStep: 1,
+  digitHourStart: 0, digitMinuteStart: 0, digitsLastOnlyH: false, digitsLastOnlyM: false, freeLiquid: true,
+  freeGain: 570, freeDamp: 0.8873, freeBounce: 0.3197, freeHomeK: 0, readTiltStart: 0, readTiltEnd: 1,
+  playHold: 5, fillK: 756, fillDamp: 40, fillSloshGain: 5.5, angleK: 207, angleDamp: 17.6,
+  angleTiltGain: 6.2818, angleGyroGain: 0.4025, angleMax: 6, lightPhys: 1, lightAngle: 22.5, acrossK: 200,
+  acrossDamp: 20, acrossGyroGain: 0, shakeGain: 0, deadzone: 0, accelLpHz: 15.2, gyroHpHz: 5, gyroDeadzone: 31,
+  gyroMax: 470, inputGain: 1, brightness: 1, liquidBright: 0.46, tickBright: 0.92, digitBright: 1.51,
+  ambientLight: 1,
+};
+
 export const PRESETS: PresetEntry[] = [
   { id: 'frizzante', name: 'Frizzante', note: 'colourless sparkling water, lab print, fine bead', p: PRESET_FRIZZANTE, gas: gases('fine-bead', SODA), mat: M('watery', 'clear', false, true, 'carbonated') },
   { id: 'urine', name: 'Urine sample', note: 'clear amber, watery, specimen-cup graduations', p: PRESET_URINE, gas: gases('none', SODA, ['slow-bubbles']), mat: M('watery', 'translucent', false, true, 'none') },
@@ -1464,6 +1502,8 @@ PRESETS.push(
   { id: 'glycerol-dark', name: 'Dark glycerol', note: 'smoky grey viscous liquid on pale sage, rim-lit, dark rear numerals', p: PRESET_GLYCEROL_DARK, gas: gases('trapped', ['large-bubbles', 'held-air']) },
   { id: 'prosecco', name: 'Prosecco', note: 'pale straw on white, from a physical material', p: PRESET_PROSECCO, gas: gases('brisk-pearls', SODA) },
 );
+// User look (2026-09-28): standard rod, exempt from the material ranges.
+PRESETS.push({ id: 'subtle-soda', name: 'Subtle soda', note: 'muted lime over warm grey, a spring of large pearls rising from the home end, see-through dish', p: PRESET_SUBTLE_SODA, gas: gases('spring-pearls', SODA) });
 
 /** Presets are whole looks: apply over the defaults, not over the current edit. `gas` defaults to the
  *  preset's signature (its first fitting model). */
@@ -1526,6 +1566,7 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   }
   if (from < 23) { r.fizzDepth = DEFAULT_PARAMS.fizzDepth; r.fizzBlick = DEFAULT_PARAMS.fizzBlick; }
   if (from < 24) { r.rimLight = DEFAULT_PARAMS.rimLight; r.rimTint = DEFAULT_PARAMS.rimTint; }
+  if (from < 25) r.wallWet = DEFAULT_PARAMS.wallWet;
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -1546,12 +1587,13 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   glassBody: { help: 'Ambient cylinder shade of the empty wall. 0 = pure black.', group: 'Glass', label: 'ambient body', min: 0, max: 0.5, step: 0.01 },
   glassHiBright: { help: 'Strength of the glass specular band (same rows as the liquid highlight).', group: 'Glass', label: 'specular', min: 0, max: 1, step: 0.01 },
   glassReflect: { help: 'Faint second reflection on the lower wall.', group: 'Glass', label: 'lower reflection', min: 0, max: 1, step: 0.01 },
-  glassRim: { help: 'Grazing reflection across the wall band: brightest at the silhouette, fading inward.', group: 'Glass', label: 'wall rims', min: 0, max: 1, step: 0.01 },
+  glassRim: { help: 'Grazing reflection across the wall band: brightest at the silhouette, fading inward. The outer surface reflects it, so it is the same over the liquid.', group: 'Glass', label: 'wall rims', min: 0, max: 1, step: 0.01 },
   glassWall: { help: 'Wall thickness at the top/bottom silhouette in px. Behind it the empty tube shows no tube back (only the rim reflection) and rear marks fade out; the liquid reaches the silhouette.', group: 'Glass', label: 'wall thickness', min: 0, max: 10, step: 0.5 },
-  glassWallGlow: { help: 'Light piped along the glass lights the wall band itself, so the walls read on a black tube back. Plateau across the band, the grazing rim on top.', group: 'Glass', label: 'wall glow', min: 0, max: 1, step: 0.01 },
+  glassWallGlow: { help: 'Light piped along the dry glass lights the wall band itself, so the walls read on a black tube back; over the liquid the band shows the liquid (grazing rim only). Plateau across the band, the grazing rim on top.', group: 'Glass', label: 'wall glow', min: 0, max: 1, step: 0.01 },
+  wallWet: { help: 'How far the contents fill the wall band: 1 a liquid, seen to the silhouette with no wall glow over it; 0 a gas, the band over the column looks like the empty tube (wall only, glowing).', group: 'Glass', label: 'wall wetting', min: 0, max: 1, step: 0.01 },
   rimLight: { help: 'Side-lit rim of a tinted liquid on a dark ground: adds rimLight·u²·rimTint to the liquid rows toward the walls (a gain 0..4; the sum clamps at 255).', group: 'Glass', label: 'rim light', min: 0, max: 4, step: 0.01 },
   rimTint: { help: 'Side-lit rim of a tinted liquid on a dark ground: adds rimLight·u²·rimTint to the liquid rows toward the walls.', group: 'Glass', label: 'rim tint' },
-  glassOverLiquid: { help: 'How much of the glass specular is laid over the liquid too.', group: 'Glass', label: 'specular over liquid', min: 0, max: 1, step: 0.01 },
+  glassOverLiquid: { help: 'How much of the glass specular is laid over the liquid too (not the grazing rim: that stays full).', group: 'Glass', label: 'specular over liquid', min: 0, max: 1, step: 0.01 },
   brightness: { help: 'Global panel dimmer (emulates cmd 0x51).', group: 'Colour', label: 'brightness (panel)', min: 0.1, max: 1, step: 0.01 },
   liquidBright: { help: 'Per-layer trim on top of brightness: liquid body, highlight, shade, bubble, fizz.', group: 'Colour', label: '· liquid trim', min: 0, max: 2, step: 0.01 },
   tickBright: { help: 'Per-layer trim on top of brightness: tick ladder only.', group: 'Colour', label: '· ticks trim', min: 0, max: 2, step: 0.01 },

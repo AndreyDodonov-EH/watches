@@ -124,16 +124,24 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
   const rimW = (u: number): number => p.glassRim * Math.pow(Math.max(0, (Math.abs(u) - wallU) / (1 - wallU)), 2.5);
   // Wall glow: light piped along the wall (internal paths the cylinder trace omits) lights the band
   // itself, a plateau with a short ramp starting just inside the band; the grazing rim adds on top.
+  // Dry glass only, as far as the contents wet the wall (`wallWet`): a liquid frustrates the total
+  // internal reflection that pipes the light (glass/liquid critical angle ~62° vs ~42° against air),
+  // and, near index-matched, fills the band, so the column reads as wide as the tube; it takes the
+  // grazing rim (a front-surface reflection) alone. A gas (wallWet 0) does neither: over its column
+  // the glow stays and the band is the empty tube's — the contents are seen where the back would be
+  // (dryT). In between, both blend by wallWet. At 1 neither step runs.
   const glowW = (u: number): number => p.glassWallGlow * Math.max(0, Math.min(1, 0.4 + 3 * (Math.abs(u) - wallU) / (1 - wallU)));
   const wallW = (u: number): number => { const g = glowW(u), r = rimW(u); return g + r - g * r; };
   const wallT = (u: number): number => p.glassWall <= 0 ? 1 : Math.abs(u) >= wallU ? 0 : 1 - Math.exp(-(wallU - Math.abs(u)) / 0.04);
+  const wet = Math.max(0, Math.min(1, p.wallWet));
   for (let y = 0; y < H; y++) {
     const t = y / (H - 1);
     const gradient = Math.round(p.tubeBackGradient);
     const backMix = gradient === 1 ? t : gradient === 2 ? 1 - Math.abs(t * 2 - 1)
       : gradient === 3 ? Math.abs(t * 2 - 1) : 0;
     const back = mix(tubeBack, tubeBack2, backMix);
-    const u = (y + 0.5 - H / 2) / (H / 2), rim = wallW(u);
+    const u = (y + 0.5 - H / 2) / (H / 2), rim = rimW(u), wall = wallW(u);
+    const g = glowW(u) * (1 - wet), wetRim = g + rim - g * rim;   // over the contents: the glow they leave piped, the rim
     dryT[y] = wallT(u);
     // style shading: brightest around 1/3 from top, darkest at the bottom
     let c: [number, number, number];
@@ -168,15 +176,18 @@ export function buildPalette(p: Params, lightDeg = 0): Palette {
     const gw = glassW(y);
     const wetK = p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency, glassWet = gw * wetK;
     // Empty tube: the back shows through only where the ray reaches it (wall band dark), the glass
-    // body/specular over it, and the grazing rim on top.
-    tubeBackRows[y] = q(mix(scale(mix(scale(back, dryT[y]), ghi, gw), p.brightness), glassEdge, rim));
+    // body/specular over it, and the wall glow + grazing rim on top.
+    const dryRow = mix(scale(mix(scale(back, dryT[y]), ghi, gw), p.brightness), glassEdge, wall);
+    tubeBackRows[y] = q(dryRow);
     // Glass shading over the liquid: `glassOverLiquid` of the dry-side weight for an opaque liquid,
     // rising to the full dry-side weight as the liquid turns transparent (the lower reflection
-    // band must run continuously across the meniscus of a clear liquid). The rim follows the same rule.
-    c = ambientize(mix(mix(c, glassHiScaled, glassWet), glassEdge, rim * wetK), bodyL, ambAmt);
+    // band must run continuously across the meniscus of a clear liquid). The grazing rim is the outer
+    // surface's reflection, whatever is inside: full weight over the liquid and the residue alike.
+    c = ambientize(mix(mix(c, glassHiScaled, glassWet), glassEdge, wetRim), bodyL, ambAmt);
+    if (wet < 1) c = mix(c, dryRow, (1 - wet) * (1 - dryT[y]));   // unwetted band: the empty tube's row
     // A dried deposit retains pigment: its coverage comes from traceAmount / drying,
     // not from transmission through the bulk liquid. Keep the opaque-liquid shading.
-    residue = ambientize(mix(mix(residue, glassHiScaled, gw * p.glassOverLiquid), glassEdge, rim * p.glassOverLiquid), bodyL, p.ambientLight);
+    residue = ambientize(mix(mix(residue, glassHiScaled, gw * p.glassOverLiquid), glassEdge, wetRim), bodyL, p.ambientLight);
     traceRows[y] = q(scale(rgb565to888(q(residue)), 0.85));
     rows[y] = q(c);
     bubbleIn[y] = q(mix(c, [0, 0, 0], p.bubbleDark));

@@ -704,14 +704,17 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
   // rim rises toward the silhouette on both sides (glassRim). glassWall 0 keeps a one-row rim.
   float wallU = 1 - 2 * fmx(1, p.glassWall) / H;
   RGB glassEdge = scale(mix(ghi, {180, 190, 195}, 0.72f), p.brightness);
+  const float wet = clampf(p.wallWet, 0, 1);   // sim: a gas (0) keeps the glow and the empty tube's band over its column
   for (int y = 0; y < H; y++) {
     float t = (float)y / (H - 1);
     float u = (y + 0.5f - H / 2.0f) / (H / 2.0f), au = fabsf(u);
     float rim = p.glassRim * powf(fmx(0, (au - wallU) / (1 - wallU)), 2.5f);
     // Wall glow (sim glowW/wallW): light piped along the wall lights the band itself; plateau with a
-    // short ramp starting just inside the band, the grazing rim on top.
+    // short ramp starting just inside the band, the grazing rim on top. Dry glass only, as far as the contents
+    // wet the wall (wallWet): a liquid frustrates the internal reflection and fills the band (rim alone over it).
     float glow = p.glassWallGlow * clampf(0.4f + 3 * (au - wallU) / (1 - wallU), 0, 1);
-    rim = glow + rim - glow * rim;
+    const float wall = glow + rim - glow * rim;
+    const float gW = glow * (1 - wet), wetRim = gW + rim - gW * rim;   // over the contents: the glow they leave piped, the rim
     float dryT = p.glassWall <= 0 ? 1 : au >= wallU ? 0 : 1 - expf(-(wallU - au) / 0.04f);
     pal.dryT[y] = (uint16_t)(dryT * 256 + 0.5f);
     int gradient = (int)jround(p.tubeBackGradient);
@@ -747,11 +750,15 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     }
     float gw = glassW(p, y, hiTop, lam);
     float wetK = p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency, glassWet = gw * wetK;
-    // Empty tube: back only where the ray reaches it (wall band dark), glass over it, rim on top.
-    pal.tubeBackRows[y] = q(mix(scale(mix(scale(back, dryT), ghi, gw), p.brightness), glassEdge, rim));
-    c = ambientize(mix(mix(c, glassHiScaled, glassWet), glassEdge, rim * wetK), bodyL, ambAmt);   // glass weight rises to the dry-side one with transparency
+    // Empty tube: back only where the ray reaches it (wall band dark), glass over it, glow + rim on top.
+    const RGB dryRow = mix(scale(mix(scale(back, dryT), ghi, gw), p.brightness), glassEdge, wall);
+    pal.tubeBackRows[y] = q(dryRow);
+    // Glass weight rises to the dry-side one with transparency; the grazing rim is the outer surface's
+    // reflection, full weight over liquid and residue alike (sim).
+    c = ambientize(mix(mix(c, glassHiScaled, glassWet), glassEdge, wetRim), bodyL, ambAmt);
+    if (wet < 1) c = mix(c, dryRow, (1 - wet) * (1 - dryT));   // unwetted band: the empty tube's row
     // Dried pigment uses opaque-liquid shading; traceAmount / drying supply its coverage.
-    residue = ambientize(mix(mix(residue, glassHiScaled, gw * p.glassOverLiquid), glassEdge, rim * p.glassOverLiquid), bodyL, p.ambientLight);
+    residue = ambientize(mix(mix(residue, glassHiScaled, gw * p.glassOverLiquid), glassEdge, wetRim), bodyL, p.ambientLight);
     pal.traceRows[y] = q(scale(to888(q(residue)), 0.85f));
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));

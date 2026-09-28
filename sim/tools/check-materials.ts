@@ -396,7 +396,7 @@ const FIXTURES: Fixture[] = [
     d: fdesign('#0a0e10', REAR24), want: [
       ['viscosity', 'watery', 'x'], ['opacity', 'clear', 'x'], ['T', '0.92', 'T'], ['pxPerMm', '9.64', 'd'],
       ['liquid', [48, 48, 48], 'c'], ['liquidLo', [15, 15, 15], 'c'], ['liquidHi', [189, 190, 190], 'c'], ['liquidThin', '0', 'w'], ['shadeDepth', '0.3', 'w'],
-      ['highlightBright', '0.60', 'w'], ['glassWallGlow', '0.27', 'w'], ['glassOverLiquid', '0.54', 'w'],
+      ['highlightBright', '0.60', 'w'], ['glassWallGlow', '0.27', 'w'], ['wallWet', 1, 'x'], ['glassOverLiquid', '0.54', 'w'],
       ['freeDamp', '0.8', 'd'], ['freeBounce', '0.20', 'd'], ['meniscusK', '475', 'd'], ['meniscusDamp', '8', 'd'], ['contactDyn', '8.2', 'd'],
       ['capLength', '2.65', 'd'], ['angleTiltGain', '6.5', 'd'], ['angleGyroGain', '0.42', 'd'],
       ['wetFilm', '10.5', 'd'], ['traces', false, 'x'], ['fizz', true, 'x'], ['fizzSize', '1.16', 'd'], ['fizzSpeed', '35', 'd'], ['fizzCount', 48, 'x'], ['glowStrength', '0.07', 'd'],
@@ -405,7 +405,7 @@ const FIXTURES: Fixture[] = [
     d: fdesign('#110b03', REAR24), want: [
       ['viscosity', 'medium', 'x'], ['opacity', 'translucent', 'x'], ['T', '0.47', 'T'],
       ['liquid', [57, 53, 0], 'c'], ['liquidLo', [5, 7, 0], 'c'], ['liquidHi', [192, 189, 164], 'c'], ['residual', '0', 'c'],
-      ['liquidThin', '1.0', 'w'], ['shadeDepth', '0.4', 'w'], ['highlightBright', '0.55', 'w'], ['glassWallGlow', '0.20', 'w'],
+      ['liquidThin', '1.0', 'w'], ['shadeDepth', '0.4', 'w'], ['highlightBright', '0.55', 'w'], ['glassWallGlow', '0.27', 'w'],
       ['glassOverLiquid', '0.5', 'w'],
       ['freeDamp', '3.35', 'd'], ['freeBounce', 0.05, 'x'], ['meniscusK', 200, 'x'], ['meniscusDamp', '20.8', 'd'], ['contactDyn', '47', 'd'],
       ['capLength', '1.85', 'd'], ['angleTiltGain', '3.64', 'd'], ['angleGyroGain', '0.20', 'd'],
@@ -415,7 +415,7 @@ const FIXTURES: Fixture[] = [
     d: fdesign('#0c0703', REAR24), want: [
       ['viscosity', 'viscous', 'x'], ['opacity', 'translucent', 'x'], ['T', '0.27', 'T'],
       ['liquid', [44, 21, 0], 'c'], ['liquidLo', [9, 2, 0], 'c'], ['liquidHi', [199, 184, 161], 'c'], ['residual', '0.6', 'c'],
-      ['liquidThin', '1.0', 'w'], ['shadeDepth', '0.4', 'w'], ['highlightBright', '0.53', 'w'], ['glassWallGlow', '0.15', 'w'],
+      ['liquidThin', '1.0', 'w'], ['shadeDepth', '0.4', 'w'], ['highlightBright', '0.53', 'w'], ['glassWallGlow', '0.27', 'w'],
       ['freeDamp', '8.65', 'd'], ['freeBounce', 0, 'x'], ['meniscusK', '79', 'd'], ['meniscusDamp', '33', 'd'], ['contactDyn', 90, 'x'],
       ['capLength', '2.19', 'd'], ['angleTiltGain', '1.62', 'd'], ['angleGyroGain', '0.07', 'd'],
       ['wetFilm', '28.3', 'd'], ['traces', true, 'x'], ['traceAmount', '1.32', 'd'], ['traceStain', '0.57', 'd'], ['traceFollow', '0.07', 'd'],
@@ -425,7 +425,7 @@ const FIXTURES: Fixture[] = [
     d: fdesign('#000000'), want: [
       ['viscosity', 'metal', 'x'], ['opacity', 'opaque', 'x'], ['wetting', false, 'x'], ['liquidTransparency', 0, 'x'],
       ['liquid', [152, 152, 152], 'c'], ['liquidLo', [65, 65, 65], 'c'], ['liquidHi', [255, 255, 255], 'x'],
-      ['shadeDepth', 0.95, 'x'], ['highlightBright', 1.3, 'x'], ['glassOverLiquid', 1, 'x'],
+      ['shadeDepth', 0.95, 'x'], ['highlightBright', 1.3, 'x'], ['glassWallGlow', '0.27', 'w'], ['glassOverLiquid', 1, 'x'],
       ['freeDamp', 0.8, 'x'], ['freeBounce', '0.51', 'd'], ['meniscusK', 500, 'x'], ['meniscusDamp', 8, 'x'], ['contactDyn', '5.1', 'd'],
       ['capLength', '1.87', 'd'], ['angleTiltGain', 2, 'x'], ['angleGyroGain', 0.4, 'x'],
       ['wetFilm', 0, 'x'], ['traces', false, 'x'], ['fizz', false, 'x'], ['glowStrength', 0, 'x'],
@@ -433,7 +433,7 @@ const FIXTURES: Fixture[] = [
   { name: 'xenon', m: mat({ phase: 1, emissionR: 0.35, emissionG: 0.2, emissionB: 0.9, ior: 1 }),
     d: fdesign('#05020c', { freeLiquid: false, ...REAR24 }), want: [
       ['viscosity', 'plasma', 'x'], ['opacity', 'translucent', 'x'], ['emissive', true, 'x'], ['liquidTransparency', 0.5, 'x'],
-      ['liquid', [123, 95, 187], 'c'], ['liquidLo', [123, 95, 187], 'c'], ['liquidHi', [196, 176, 196], 'c'], ['shadeDepth', 0.85, 'x'], ['glassOverLiquid', 0.4, 'x'],
+      ['liquid', [123, 95, 187], 'c'], ['liquidLo', [123, 95, 187], 'c'], ['liquidHi', [196, 176, 196], 'c'], ['shadeDepth', 0.85, 'x'], ['glassWallGlow', '0.27', 'w'], ['wallWet', 0, 'x'], ['glassOverLiquid', 0.4, 'x'],
       ['freeLiquid', false, 'x'], ['fillK', 260, 'x'], ['fillDamp', 22, 'x'], ['fillSloshGain', 0.5, 'x'], ['angleK', 300, 'x'], ['angleDamp', 26, 'x'],
       ['angleTiltGain', 0.5, 'x'], ['angleMax', 2, 'x'], ['angleGyroGain', 0.03, 'x'], ['contactAngle', 100, 'x'], ['contactHyst', 0, 'x'], ['contactDyn', 0, 'x'],
       ['meniscusK', 400, 'x'], ['meniscusDamp', 30, 'x'], ['meniscusInertia', 0, 'x'],
@@ -457,7 +457,7 @@ const FIXTURES: Fixture[] = [
   { name: 'liquid oxygen', m: mat({ viscosity: 0.19, density: 1141, surfaceTension: 13, ior: 1.22, absorptionR: 0.005, absorptionG: 0.002, absorptionB: 0, contactAngle: 5, contactHysteresis: 3, gasMode: 2, gasLevel: 0.7, bubbleRadius: 0.05, foamStability: 0 }),
     d: fdesign('#000000', REAR24), want: [
       ['viscosity', 'watery', 'x'], ['opacity', 'clear', 'x'], ['T', '0.88', 'T'],
-      ['liquid', [50, 51, 52], 'c'], ['liquidLo', [16, 17, 17], 'c'], ['liquidHi', [190, 190, 190], 'c'], ['shadeDepth', '0.3', 'w'], ['glassWallGlow', '0.27', 'w'], ['glassOverLiquid', '0.63', 'w'],
+      ['liquid', [50, 51, 52], 'c'], ['liquidLo', [16, 17, 17], 'c'], ['liquidHi', [190, 190, 190], 'c'], ['shadeDepth', '0.3', 'w'], ['glassWallGlow', '0.27', 'w'], ['wallWet', '0.99', 'w'], ['glassOverLiquid', '0.63', 'w'],
       ['freeDamp', '0.57', 'd'], ['freeBounce', '0.35', 'd'], ['meniscusK', 400, 'x'], ['meniscusDamp', '4.9', 'd'], ['contactDyn', '8.4', 'd'], ['capLength', '1.05', 'd'],
       ['wetFilm', '10.7', 'd'], ['fizz', true, 'x'], ['fizzSize', 1, 'x'], ['fizzSpeed', '55', 'd'], ['fizzCount', 56, 'x'],
     ] },
@@ -465,7 +465,7 @@ const FIXTURES: Fixture[] = [
     d: fdesign('#070403', REAR24), want: [
       ['viscosity', 'watery', 'x'], ['opacity', 'translucent', 'x'], ['T', '0.32', 'T'],
       ['liquid', [52, 29, 5], 'c'], ['liquidLo', [12, 4, 0], 'c'], ['liquidHi', [196, 184, 170], 'c'], ['residual', '0', 'c'],
-      ['liquidThin', '1', 'w'], ['shadeDepth', '0.4', 'w'], ['glassWallGlow', '0.17', 'w'],
+      ['liquidThin', '1', 'w'], ['shadeDepth', '0.4', 'w'], ['glassWallGlow', '0.27', 'w'],
       ['freeDamp', '0.89', 'd'], ['freeBounce', '0.18', 'd'], ['meniscusK', '418', 'd'], ['meniscusDamp', '8.9', 'd'], ['contactDyn', '9.3', 'd'],
       ['wetFilm', '11.8', 'd'], ['fizz', true, 'x'], ['fizzSize', '1.35', 'd'], ['fizzSpeed', '38', 'd'], ['fizzCount', 42, 'x'],
     ] },

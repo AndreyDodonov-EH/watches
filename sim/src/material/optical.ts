@@ -225,7 +225,7 @@ export interface ColourOutput {
     liquid: string; liquidLo: string; liquidHi: string; liquidTransparency: number; liquidThin: number;
     shadeDepth: number; highlightH: number; highlightBright: number; highlightSharp: number;
     glassHi: string; glassHiBright: number; glassReflect: number; glassRim: number; glassBody: number;
-    glassWallGlow: number; glassOverLiquid: number; bubbleRim: string; bubbleDark: number; rimLight: number;
+    glassWallGlow: number; wallWet: number; glassOverLiquid: number; bubbleRim: string; bubbleDark: number; rimLight: number;
   };
 }
 
@@ -348,8 +348,14 @@ export function colourLaws(c: ColourInput): ColourOutput {
   if (c.emissive) glassOverLiquid = Math.min(0.4, glassOverLiquid);
   if (clear) glassOverLiquid = Math.max(0.5, glassOverLiquid);
   glassOverLiquid = clamp(glassOverLiquid);
-  const glassWallGlow = c.metal || c.plasma ? 0
-    : clamp(0.6 * L.Es * luma3(map3((i) => km(K[i], S, wall.d, 0).Tr)));
+  // The wall band's own light, piped along the glass from the side light. The palette lays it on the dry band
+  // only (a wetted wall frustrates the piping and the liquid fills the band), so the contents do not set it.
+  const glassWallGlow = clamp(0.6 * L.Es);
+  // Wall wetting: a ray at height y reaches contents of index n only if y ≤ n·r (the invariant n·ρ·sinθ, and it must first
+  // reach the bore: n ≤ wallIor), so the contents fill (min(ior, wallIor) − 1)·r of the band's wall thickness, and where
+  // they touch the glass they frustrate its piped glow. A gas (ior 1) leaves the band to the wall; a metal keeps the
+  // liquid look (its surface mirrors rather than refracts).
+  const wallWet = c.metal ? 1 : m.wallThickness > 0 ? clamp((Math.min(m.ior, m.wallIor) - 1) * m.innerRadius / m.wallThickness) : 1;
 
   return {
     Tlum, Tmax, Tup, spread, T, Tsnap, opacity, residual, overexposed,
@@ -360,7 +366,7 @@ export function colourLaws(c: ColourInput): ColourOutput {
       liquidTransparency: Tsnap, liquidThin, shadeDepth,
       highlightH, highlightBright, highlightSharp: 2,
       glassHi: '#dfe6ea', glassHiBright: 0.55 * Lhi, glassReflect: 0.25 * Lhi, glassRim: 0.45 + 0.35 * Lhi,
-      glassBody: 0.4 * m.ambient, glassWallGlow, glassOverLiquid,
+      glassBody: 0.4 * m.ambient, glassWallGlow, wallWet, glassOverLiquid,
       // A bubble's rim totally reflects the light inside the liquid, not the backing behind it: the side light filtered
       // by the liquid on its way in (half the bore), plus the body's own colour. Its centre is a clear window: the
       // only loss is the Fresnel reflection at its two liquid/gas surfaces (the tint over the see-through core).

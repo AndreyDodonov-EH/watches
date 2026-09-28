@@ -438,7 +438,7 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   and design edits can't reintroduce ticks running into digits.
 - Phylactery photo study: local `sim` could not import Playwright; used the saved renderer screenshot as the image-generation reference. Capture a fresh frame when preview dependencies are available.
 - Fizz spring (`fizzSource` 1): the plume is a straight bead line — no lateral wobble/widening as it rises; a
-  few springs (or a spring line) would read more like an aquarium. No preset uses it yet.
+  few springs (or a spring line) would read more like an aquarium. Only Subtle soda (gas `spring-pearls`) uses it.
 - Fizz spring rebirth x: firmware ensureFizz treats "surfaces published" as `fizzLen > 0`, sim as
   `fizzSurf.length === H` — they differ for one frame after a tubeHeight change (stale rows in firmware).
 
@@ -451,3 +451,9 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 
 - Legacy preset → tick loads the physical twin only within the page session (the pick is not persisted; after a reload the tick uses the stored material). `-big` legacy presets have no twin id, so they fall back too.
 - The legacy preset dropdown keeps showing the last pick after a device pull (only reset/import clear it).
+
+## Wall glow dry-only (2026-09-28)
+- `wallWet` < 1 (Xenon) reaches the palette only: rear marks in the band over a gas column still composite through
+  the contents instead of fading by dryT as behind air (Mark path, sim markFn + firmware Mark and sprite fast paths).
+- `wallWet` between 0 and 1 blends the liquid and empty-tube rows; physically the contents' reach edge moves through the band.
+- The glass's glow ignores light an emissive contents pipes into it (plasma, bioluminescent): only the side light `E_s` feeds it.
