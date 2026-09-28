@@ -457,3 +457,7 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   the contents instead of fading by dryT as behind air (Mark path, sim markFn + firmware Mark and sprite fast paths).
 - `wallWet` between 0 and 1 blends the liquid and empty-tube rows; physically the contents' reach edge moves through the band.
 - The glass's glow ignores light an emissive contents pipes into it (plasma, bioluminescent): only the side light `E_s` feeds it.
+
+## Spring fizz covered/dry (2026-09-28)
+- Subtle soda has `freeHomeK` 0: after a slide the slug stays wherever it stopped, so the spring stays dry until the home end is tilted down.
+- SPRING_BACK (3 s) is a constant in both renders, not a param.

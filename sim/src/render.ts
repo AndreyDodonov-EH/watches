@@ -756,7 +756,8 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
   }
 }
 
-/** px in the liquid frame; v = size/speed factor; life ≠ 0 = parked under a surface, |life| s left before it
+/** px in the liquid frame; v = size/speed factor, 0 = waiting at a spring to be released (not drawn, not
+ *  moved); life ≠ 0 = parked under a surface, |life| s left before it
  *  pops: > 0 under the time edge, < 0 under the home edge of a free slug; z = depth in the bore (0 = front
  *  wall, 1 = back wall), drawn at spawn and every recycle (never on a move, park or release). */
 export interface Fizz { x: number; y: number; v: number; life: number; z: number; }
@@ -784,6 +785,22 @@ const fizzExposed = [0, 0];
 // foam behind it at the profile (the liquid wedge climbing the front glass, thinning to nothing at the ring).
 // FOAM_RELAX: packing sweeps per step.
 const FOAM_POP_T = 0.3, FOAM_SLIDE = 0.5, FOAM_FOLLOW = 6, FOAM_CATCH = 2, FOAM_VEIL = 0.7, FOAM_RELAX = 3;
+// A spring is fixed in the tube (mirrored in firmware): `fizzSourceX` of the column as it sits at home. While the
+// liquid covers it, it takes every birth, whatever the tilt; a free slug sliding off it leaves it dry, and every
+// birth goes scattered. Covered again, it takes its births back over SPRING_BACK s (a share ramping to 0), so a
+// slug bouncing at home does not flip the stream. Births only: nothing in flight moves.
+// It emits at a steady rate — the pool over a mean bubble's flight at rest (flat, still) — so a tilt that
+// shortens the path to a wall or surface shows fewer bubbles in flight instead of recycling them faster; a
+// bubble it takes back waits there (v = 0) until the rate releases it.
+const SPRING_BACK = 3;
+/** Per tube: px the liquid frame sits off its home (a free slug that slid away; 0 pinned), set by drawTube. */
+const fizzShift = [0, 0];
+/** Per tube: share of spring births born scattered instead (0 = all at the spring), advanced by stepFizz. */
+const springScatter = [0, 0];
+/** Per tube: bubbles the spring may release now (its rate accrued, at most 1 banked while nothing waits). */
+const springClock = [0, 0];
+/** This birth in tube i comes from the spring (`fizzSource` 1, covered by the liquid). */
+const springBirth = (p: Params, i: number): boolean => p.fizzSource === 1 && (springScatter[i] <= 0 || Math.random() >= springScatter[i]);
 /** Half-height of the surface blick's row tent as a fraction of the tube height (firmware BLICK_H). */
 const BLICK_H = 0.18;
 
@@ -799,7 +816,7 @@ function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
   }
   const H = tubeLayout(p).H;
   while (arr.length < want) {
-    if (p.fizzSource === 1) { const f: Fizz = { x: 0, y: 0, v: 0, life: 0, z: 0 }; springSpawn(f, p, H, fizzSurf[i], fizzSurfL[i], len); arr.push(f); continue; }
+    if (springBirth(p, i)) { arr.push({ x: 0, y: 0, v: 0, life: 0, z: 0 }); continue; }   // waits for the spring's rate
     const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v, life: 0, z: Math.random() });
   }
   if (arr.length > want) arr.length = want;
@@ -820,15 +837,15 @@ function fizzSpawnY(p: Params, H: number, v: number): number {
   return hi <= lo ? H / 2 : lo + Math.random() * (hi - lo);
 }
 /** Spring (`fizzSource` 1): a new size and depth, born at the spring — `fizzSourceY` across the bore (whole
- *  disc inside), `fizzSourceX` along that row's liquid (between the surfaces, as a respawn; the column
- *  0..`len` before drawTube has published them) — each axis jittered by up to ±`fizzSourceSpread` px. */
-function springSpawn(f: Fizz, p: Params, H: number, surf: Float32Array, surfL: Float32Array, len: number): void {
+ *  disc inside), `fizzSourceX` along that row's liquid (between the surfaces, as a respawn) as it sits at home,
+ *  so `shift` px back in a slug that slid away — each axis jittered by up to ±`fizzSourceSpread` px, kept in
+ *  the liquid. */
+function springSpawn(f: Fizz, p: Params, H: number, surf: Float32Array, surfL: Float32Array, shift: number): void {
   f.v = 0.5 + Math.random(); f.z = Math.random(); f.life = 0;
   const r = fizzR(p, f.v), s = p.fizzSourceSpread, lo = fizzWall(p) + r, hi = H - lo;
   f.y = hi <= lo ? H / 2 : Math.max(lo, Math.min(hi, lo + p.fizzSourceY * (hi - lo) + (2 * Math.random() - 1) * s));
-  const xl = surf.length === H ? -discFit(surfL, H, f.y, r, -1) + FOAM_CATCH : 0;
-  const xh = surf.length === H ? discFit(surf, H, f.y, r, 1) - FOAM_CATCH : len;
-  f.x = xh <= xl ? (xl + xh) / 2 : Math.max(xl, Math.min(xh, xl + p.fizzSourceX * (xh - xl) + (2 * Math.random() - 1) * s));
+  const xl = -discFit(surfL, H, f.y, r, -1) + FOAM_CATCH, xh = discFit(surf, H, f.y, r, 1) - FOAM_CATCH;
+  f.x = xh <= xl ? (xl + xh) / 2 : Math.max(xl, Math.min(xh, xl + p.fizzSourceX * (xh - xl) - shift + (2 * Math.random() - 1) * s));
 }
 /** Fizz rises against the in-plane gravity (`along`, `across`) at `fizzSpeed` px/s on both axes:
  *  along-tilt drives it toward the high end (`fizzDriftGain`), across-tilt toward the high edge (`fizzAcrossGain`).
@@ -837,7 +854,9 @@ function springSpawn(f: Fizz, p: Params, H: number, surf: Float32Array, surfL: F
  *  against the far end); shake speeds everything up.
  *  A bubble leaving the liquid on either axis respawns at the low side of that axis — except at an exposed
  *  surface the rise points at: with `fizzFoamLife` > 0 it parks in it (see settleFoam) and pops later.
- *  A spring (`fizzSource` 1) takes every rebirth instead — exit, recycle, pop — so the bubbles rise as a stream. */
+ *  A spring (`fizzSource` 1) takes every rebirth instead — exit, recycle, pop — so the bubbles rise as a stream;
+ *  a slug sliding off the spring leaves it dry, and its births go scattered instead (springScatter). A bubble
+ *  the spring takes back waits there until its steady rate releases it (springClock). */
 export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation = 0): void {
   if (p.remaining) along = -along; // fizz lives in the mirrored liquid frame (see drawTube)
   const speed = p.fizzSpeed * (1 + 3 * agitation);
@@ -849,6 +868,12 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
   for (let i = 0; i < 2; i++) {
     const len = fizzLen[i], surf = fizzSurf[i], surfL = fizzSurfL[i], exposed = fizzExposed[i];
     if (surf.length !== H || len <= 0) continue;   // no surfaces for this height yet (drawTube publishes them)
+    // The spring point: a mean bubble's centre as springSpawn places it (row sy, in the span sxl..sxh), dry once
+    // the slug slides it past its home surface.
+    const sr = fizzR(p, 1), slo = fizzWall(p) + sr, sy = H - slo <= slo ? H / 2 : slo + p.fizzSourceY * (H - 2 * slo);
+    const sxl = spring ? -discFit(surfL, H, sy, sr, -1) + FOAM_CATCH : 0, sxh = spring ? discFit(surf, H, sy, sr, 1) - FOAM_CATCH : 0;
+    const sx = sxl + p.fizzSourceX * Math.max(0, sxh - sxl) - fizzShift[i];
+    if (spring) springScatter[i] = sx <= -foamFront(surfL, H, sy, -1) ? 1 : Math.max(0, springScatter[i] - dt / SPRING_BACK);
     const dir = exposed & 1 ? 1 : exposed & 2 ? -1 : 0;   // +x = the time edge
     const vx = vxTilt + speed * up * p.fizzEdgeRise * dir;
     // The surface the rise heads for, if exposed and foam is on: +1 time edge, -1 home edge, 0 none.
@@ -858,7 +883,12 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
       const r = fizzR(p, f.v), lo = -discFit(surfL, H, f.y, r, -1) + FOAM_CATCH, hi = discFit(surf, H, f.y, r, 1) - FOAM_CATCH;
       f.x = hi <= lo ? (lo + hi) / 2 : at < 0 ? lo + Math.random() * (hi - lo) : at > 0 ? lo : hi;
     };
+    // Scattered birth: a new size and depth anywhere in the liquid.
+    const scatter = (f: Fizz): void => { f.life = 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, -1); f.z = Math.random(); };
+    // Taken back by the spring: waits there for its rate.
+    const wait = (f: Fizz): void => { f.v = 0; f.life = 0; };
     for (const f of fizz[i]) {
+      if (f.v === 0) { if (!spring) scatter(f); continue; }   // waiting: the spring releases it below
       if (f.life !== 0) {
         const was = f.life > 0 ? 1 : -1;
         if (was !== side) {   // the surface tilted away: the foam releases into the flow, from where it is drawn
@@ -868,8 +898,8 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
         else {
           const left = Math.abs(f.life) - dt * (1 + 3 * agitation);   // shaking pops the foam
           if (left > 0) f.life = side * left;
-          else if (spring) springSpawn(f, p, H, surf, surfL, len);
-          else { f.life = 0; f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, -1); f.z = Math.random(); }
+          else if (springBirth(p, i)) wait(f);
+          else scatter(f);
           continue;
         }
       }
@@ -878,7 +908,7 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
       // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
       const hide = fizzHideY(p, f.v);
       if (f.y < hide || f.y >= H - hide) {
-        if (spring) springSpawn(f, p, H, surf, surfL, len);
+        if (springBirth(p, i)) wait(f);
         else { f.v = 0.5 + Math.random(); const h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; respawn(f, -1); f.z = Math.random(); }
         continue;
       }
@@ -891,9 +921,27 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
       const r = fizzR(p, f.v);
       const outR = vx > 0 && f.x > discFit(surf, H, f.y, r, 1) - FOAM_CATCH, outL = vx < 0 && -f.x > discFit(surfL, H, f.y, r, -1) - FOAM_CATCH;
       if ((side > 0 && outR) || (side < 0 && outL) || (side !== 0 && touchesFoam(fizz[i], f, r, p, side))) f.life = side * p.fizzFoamLife * (0.5 + Math.random());
-      else if ((outR || outL) && spring) springSpawn(f, p, H, surf, surfL, len);
+      else if ((outR || outL) && springBirth(p, i)) wait(f);
       else if (outR || outL) { f.v = 0.5 + Math.random(); f.y = fizzSpawnY(p, H, f.v); respawn(f, vx < 0 ? 0 : 1); f.z = Math.random(); }
       else f.x = Math.max(-foamFront(surfL, H, f.y, -1), Math.min(foamFront(surf, H, f.y, 1), f.x));
+    }
+    if (spring) {
+      // Steady rate: the pool over a mean bubble's flight from the spring at rest (flat rise and edge drift) to
+      // the wall band or the surface it heads for; no finite flight = no limit. Dry, nothing waits for it.
+      const hide = fizzHideY(p, 1), vyR = -speed * p.fizzFlatRise, vxR = speed * p.fizzEdgeRise * dir;
+      const x0 = Math.max(sxl, Math.min(Math.max(sxl, sxh), sx));
+      const tRest = Math.min(vyR < 0 ? (sy - hide) / -vyR : vyR > 0 ? (H - hide - sy) / vyR : Infinity,
+        vxR > 0 ? (sxh - x0) / vxR : vxR < 0 ? (x0 - sxl) / -vxR : Infinity);
+      const n = fizz[i].length;
+      springClock[i] += tRest < Infinity ? n * dt / Math.max(dt, tRest) : n;
+      let waiting = 0;
+      for (const f of fizz[i]) {
+        if (f.v !== 0) continue;
+        if (springScatter[i] >= 1) scatter(f);
+        else if (springClock[i] >= 1) { springSpawn(f, p, H, surf, surfL, fizzShift[i]); springClock[i] -= 1; }
+        else waiting++;
+      }
+      if (waiting === 0) springClock[i] = Math.min(1, springClock[i]);   // bank no burst while the pool is short
     }
     if (side !== 0) settleFoam(fizz[i], p, H, speed, side > 0 ? surf : surfL, side, dt);
   }
@@ -1121,6 +1169,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, s.pinHome, s.lineVHome);
   const capK = capScale(len, capR), capKL = capScale(len, capL);
   const hasLiquid = xe - xs >= 0.5;   // an empty column draws nothing, not even an anti-aliased sliver
+  fizzShift[idx] = xs;
   ensureFizz(idx, p, Math.max(0, Math.min(L, xe - xs - 6)), s.agitation);
 
   const softW = p.edgeSoft > 0 ? Math.max(1, Math.round(p.edgeSoft)) : 0;
@@ -1582,6 +1631,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     const yHi = (H - 1) / 2 * (1 - Math.sin((s.light * Math.PI) / 180));
     const lxS = -0.7, lxSign = p.remaining ? -1 : 1;   // light from screen-left; the liquid frame is mirrored under remaining
     for (const f of fizz[idx]) {
+      if (f.v === 0) continue;   // waiting at the spring
       const fy = Math.max(0, Math.min(H - 1, Math.round(f.y)));
       // Centres stay inside this frame's surfaces (the stepper ran on an older one, so a receding surface
       // pushes them back here): whatever touches a surface floats at most half out of it, like the foam.
