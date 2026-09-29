@@ -29,9 +29,13 @@ float lightRest(float along, float across, const Params &p) {
 
 float columnLen(float fillTarget, const Params &p) { return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX; }
 
-ContactLeads contactLeads(const Params &p, float len, float tilt) {
+float boreR(const Params &p) {
   int H = (int)jroundf(p.tubeHeight); H = H < 4 ? 4 : H > TUBE_HEIGHT_MAX ? TUBE_HEIGHT_MAX : H;
-  const float R = (H - 1) / 2.0f, rad = (float)M_PI / 180, PI = (float)M_PI;
+  return fmaxf(1, (H - 1) / 2.0f - fmaxf(0, p.glassWall));
+}
+
+ContactLeads contactLeads(const Params &p, float len, float tilt) {
+  const float R = boreR(p), rad = (float)M_PI / 180, PI = (float)M_PI;
   const float t0 = clampf(p.contactAngle, 0, 180) * rad, hy = fmaxf(0, p.contactHyst) * rad;
   auto lead = [R](float th) { return R * cosf(th) / (1 + sinf(th)); };
   // hydrostatic head, split between the two ends: dcos = R·L·sin(alpha) / (4 lc^2), all in mm

@@ -465,3 +465,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 ## Spring stream held by glass (2026-09-29)
 - Moving the Fizz pools (static, 2 x 4.8 KB internal) to PSRAM in render_init measured +9.8 KB free internal heap on the board (2.2 -> 12 KB, BLE fine).
 - `sim/src/material/model.ts` is generated from spec/material-schema.json; a new design key goes in the schema, then `npm run gen:material`.
+
+## Meniscus on the bore (2026-09-29)
+- `check:meniscus` parity: `marks-blick-moving` fails at (403,34), red off 2 LSB (17/255). Pre-existing: baseline fails the same pixel at cap 2.09–2.36 (and 3 other pixels in a cap sweep) — stacked 565 roundings in the band-over-mark path (sim markFn `inside` branch vs firmware Mark::bandMark). The bore-radius geometry just moved the scene onto it.
+- The wall band clamps to the ring x (vertical cut); the dry band past the ring still gets no film/refraction of its own.
+- Spherical cap assumes bore ≪ capillary length; several presets are outside that regime (flattened, gravity-shaped menisci not modelled).

@@ -50,7 +50,9 @@ float columnLen(float fillTarget, const Params &p);   // liquid column length, p
 uint16_t *traceBuf(int i);                            // static residue buffer of tube i
 
 float lightRest(float along, float across, const Params &p);
-// One meniscus end's wall-ring leads (px the ring leads the surface centre): adv / rec = at θA / θR
+// Bore radius, px in row-centre units: (H - 1)/2 less the glass wall band. See sim boreR.
+float boreR(const Params &p);
+// One meniscus end's wall-ring leads (px the ring leads the surface centre, R = boreR): adv / rec = at θA / θR
 // (adv <= rec), rest = from the hydrostatic head (len = column px, tilt = along follower into this end)
 // held within [adv, rec]. See sim contactLeads.
 struct ContactLeads { float R, rest, adv, rec; };

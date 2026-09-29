@@ -6,7 +6,7 @@ import {
   rgb565, rgb565to888, MM_PER_PX,
 } from '@spec/layout';
 import type { Params } from './params';
-import { columnLen, contactLeads, FILM_FULL_PX_S, TRACE_FULL, type TubeState } from './physics';
+import { boreR, columnLen, contactLeads, FILM_FULL_PX_S, TRACE_FULL, type TubeState } from './physics';
 
 export const fb = new Uint16Array(PANEL_W * PANEL_H);
 const lensScratch = new Uint16Array(PANEL_W * TUBE_HEIGHT_MAX);
@@ -1109,12 +1109,18 @@ export function capShape(p: Params, len = 0, tilt = 0, side = 0, cap = 0, pin = 
   const asym = MENISCUS_SAG_K * (Rmm / lc) ** 2 * side * Math.sign(cosT);
   return { cosT, h: R * cosT / (1 + sinT), asym, cap };
 }
+/** Row coordinate -1..1 across the bore (boreR), as seen through the glass: the wall-band rows clamp
+ *  to ±1 — they see only the wall, wetted up to the contact ring on its inner surface. */
+function boreRow(ry: number, p: Params): number {
+  const yc = (tubeLayout(p).H - 1) / 2;
+  return lensRow(Math.max(-1, Math.min(1, (ry - yc) / boreR(p))), p);
+}
 /** Cap profile: px the surface at tube-row `ry` leads the surface centre, along +x: the spherical
- *  cap of radius R / cos θ through the ring (stable form, exact parabola as θ → 90°), sagged by the
- *  across tilt (clamped at 0: the sag never turns the curvature over), minus the wobble mode u². */
+ *  cap of radius R / cos θ (R = boreR) through the ring (stable form, exact parabola as θ → 90°), sagged
+ *  by the across tilt (clamped at 0: the sag never turns the curvature over), minus the wobble mode u². */
 function edgeCap(ry: number, p: Params, c: CapShape): number {
-  const R = (tubeLayout(p).H - 1) / 2;
-  const d = lensRow((ry - R) / R, p), u2 = d * d;   // -1..1, as seen through the glass
+  const R = boreR(p);
+  const d = boreRow(ry, p), u2 = d * d;   // -1..1, as seen through the glass
   const sphere = c.cosT * R * u2 / (1 + Math.sqrt(Math.max(0, 1 - c.cosT * c.cosT * u2)));
   return sphere * Math.max(0, 1 + c.asym * d) - c.cap * u2;
 }
@@ -1123,8 +1129,7 @@ function edgeCap(ry: number, p: Params, c: CapShape): number {
  *  ring projects to one x per row; the visible surface at a row is the lens between edgeCap (the
  *  mid-depth section) and this. Meets edgeCap at the wall rows, so the lens closes there. */
 function wallCap(ry: number, p: Params, c: CapShape): number {
-  const R = (tubeLayout(p).H - 1) / 2;
-  return c.h * Math.max(0, 1 + c.asym * lensRow((ry - R) / R, p)) - c.cap;
+  return c.h * Math.max(0, 1 + c.asym * boreRow(ry, p)) - c.cap;
 }
 /** Meniscus amplitude limiter for one end: its cap may not reach past half a column `len` px long
  *  (a short slug is a bead, not two crossing scoops). 1 for any column longer than the features. */

@@ -107,13 +107,20 @@ export function columnLen(fillTarget: number, p: Params): number {
   return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX;
 }
 
+/** Bore radius, px in row-centre units: the tube's (H − 1)/2 less the glass wall band. The contact
+ *  ring sits on the bore's inner surface, not the outer silhouette. */
+export function boreR(p: Params): number {
+  const H = Math.max(4, Math.min(TUBE_HEIGHT_MAX, Math.round(p.tubeHeight)));
+  return Math.max(1, (H - 1) / 2 - Math.max(0, p.glassWall));
+}
 /** One meniscus end's wall-ring leads, px the contact ring leads the surface centre (R(1 − sin θ)/cos θ,
+ *  R = boreR,
  *  see render.ts capShape): `adv` / `rec` = at the advancing / receding contact angle (adv <= rec),
  *  `rest` = where the hydrostatic head along the slug puts it (`len` = column px, `tilt` = along follower
  *  into this end), held within [adv, rec] — the pressure's static shape, no history. A line with `pin` px
  *  of centre travel against it shows clamp(rest − pin, adv, rec). */
 export function contactLeads(p: Params, len: number, tilt: number): { R: number; rest: number; adv: number; rec: number } {
-  const R = (Math.max(4, Math.min(TUBE_HEIGHT_MAX, Math.round(p.tubeHeight))) - 1) / 2, rad = Math.PI / 180;
+  const R = boreR(p), rad = Math.PI / 180;
   const t0 = Math.max(0, Math.min(180, p.contactAngle)) * rad, hy = Math.max(0, p.contactHyst) * rad;
   const lead = (th: number): number => R * Math.cos(th) / (1 + Math.sin(th));
   // hydrostatic head, split between the two ends: Δcos θ = R·L·sin α / (4 lc²), all in mm

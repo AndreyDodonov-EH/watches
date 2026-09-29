@@ -529,8 +529,8 @@ struct RowCache {
   int16_t lensSrc[TUBE_HEIGHT_MAX]; bool lensOn; bool lensPos;   // applyLens row map
   float mag[TUBE_HEIGHT_MAX];                                    // lensMagRows (fizz squash)
   int16_t capX0[TUBE_HEIGHT_MAX];                                // rounded-corner mask
-  // edge profile terms (sim edgeCap): d = lensRow(row), u2 = d^2
-  float rowD[TUBE_HEIGHT_MAX], rowU2[TUBE_HEIGHT_MAX];
+  // edge profile terms (sim edgeCap): d = boreRow(row), u2 = d^2; boreR = bore radius (sim boreR)
+  float rowD[TUBE_HEIGHT_MAX], rowU2[TUBE_HEIGHT_MAX], boreR;
   uint16_t hiC;                                                  // front-bright colour
   uint16_t lensC;                                                // concave surface stroke colour (sim lensC)
   uint16_t darkC;                                                // deep liquid colour (sim darkC): dark tone target, unlit stroke shade
@@ -1728,7 +1728,7 @@ CapShape Tube::capShape(const Params &p, float len, float tilt, float side, floa
 // Cap profile: px the surface at row ry leads the surface centre along +x: the spherical cap through
 // the ring (stable form), sagged by the across tilt (clamped at 0), minus the wobble mode u^2. See sim edgeCap.
 inline float Tube::edgeCap(int ry, const CapShape &c) const {
-  const float R = (H - 1) / 2.0f, u2 = rc.rowU2[ry];
+  const float R = rc.boreR, u2 = rc.rowU2[ry];
   float sphere = c.cosT * R * u2 / (1 + sqrtf(fmx(0, 1 - c.cosT * c.cosT * u2)));
   return sphere * fmx(0, 1 + c.asym * rc.rowD[ry]) - c.cap * u2;
 }
@@ -1777,6 +1777,7 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
     }
   }
   const float yc = (H - 1) / 2.0f;
+  rc.boreR = boreR(p);
   for (int ry = 0; ry < H; ry++) {
     int x0 = 0;
     if (p.cornerR > 0) {
@@ -1784,7 +1785,8 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
       if (dy > yc - r) { float k = (dy - (yc - r)) / r; x0 = (int)jround(r - sqrtf(fmx(0, 1 - k * k)) * r); }
     }
     rc.capX0[ry] = x0;
-    float d = lensRow((ry - yc) / yc, p), u = fabsf(d);
+    // across the bore; the wall-band rows clamp to the contact ring (sim boreRow)
+    float d = lensRow(clampf((ry - yc) / rc.boreR, -1, 1), p), u = fabsf(d);
     rc.rowD[ry] = d; rc.rowU2[ry] = u * u;
   }
   RGB hi888 = ambientize(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright), ambientBodyL(p), ambientAmt(p));

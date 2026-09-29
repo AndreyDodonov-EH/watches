@@ -386,7 +386,7 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
     contactAngle: plasma ? 100 : m.contactAngle,
     contactHyst: plasma ? 0 : m.contactHysteresis,
     contactDyn: plasma ? 0 : Math.min(90, Math.cbrt(9 * Ca0 * 9.2) * 180 / Math.PI),
-    capLength: lc * (Rpx * MM_PER_PX) / r,
+    capLength: lc * pxPerMm * MM_PER_PX,   // render px-mm: (boreR·MM_PER_PX / capLength)² = (r / lc)²
     freeDamp: classClamp(jump(x, band, FREE_DAMP), V.freeDamp),
     freeBounce: classClamp(anchored(Math.log10(Oh), FREE_BOUNCE), V.freeBounce),
     meniscusK,
