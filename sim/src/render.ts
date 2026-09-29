@@ -1109,11 +1109,21 @@ export function capShape(p: Params, len = 0, tilt = 0, side = 0, cap = 0, pin = 
   const asym = MENISCUS_SAG_K * (Rmm / lc) ** 2 * side * Math.sign(cosT);
   return { cosT, h: R * cosT / (1 + sinT), asym, cap };
 }
-/** Row coordinate -1..1 across the bore (boreR), as seen through the glass: the wall-band rows clamp
- *  to ±1 — they see only the wall, wetted up to the contact ring on its inner surface. */
+/** Row coordinate -1..1 across the bore (boreR), as seen through the glass. The thick wall smears the
+ *  bore's near-wall fringe over the wall band: from a0 = max(0, 2 − D) (D = outer / bore radius) the
+ *  row eases C1 onto ±1 at the outer edge, u = 1 − δ·g(t/τ) (t = D − a, τ = D − a0, δ = 1 − a0,
+ *  g(1) = 1, g'(1) = n = τ/δ). g has no s² term — g = (4 − n)s³ + (n − 3)s⁴ up to n = 4 (monotone),
+ *  s^n past it — so 1 − u = o(t²) and even a 0° / 180° cap, whose √(1 − u²) would turn a quadratic
+ *  ease back into a finite slope, meets the edge flat. No flat rows inside the band, no cut at the ring. */
 function boreRow(ry: number, p: Params): number {
-  const yc = (tubeLayout(p).H - 1) / 2;
-  return lensRow(Math.max(-1, Math.min(1, (ry - yc) / boreR(p))), p);
+  const yc = (tubeLayout(p).H - 1) / 2, a = Math.abs(ry - yc) / boreR(p), D = yc / boreR(p);
+  const a0 = Math.max(0, 2 - D), dl = 1 - a0, tau = D - a0, n = tau / dl;
+  let u = D <= 1 ? Math.min(1, a) : a;
+  if (D > 1 && a > a0) {
+    const s = Math.max(0, D - a) / tau, s3 = s * s * s;
+    u = 1 - dl * (n <= 4 ? (4 - n) * s3 + (n - 3) * s3 * s : Math.pow(s, n));
+  }
+  return lensRow(ry < yc ? -u : u, p);
 }
 /** Cap profile: px the surface at tube-row `ry` leads the surface centre, along +x: the spherical
  *  cap of radius R / cos θ (R = boreR) through the ring (stable form, exact parabola as θ → 90°), sagged

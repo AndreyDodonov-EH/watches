@@ -1778,6 +1778,10 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
   }
   const float yc = (H - 1) / 2.0f;
   rc.boreR = boreR(p);
+  // wall-band ease (sim boreRow): D = outer / bore radius, eased from a0 onto 1 at the outer edge
+  // with g(s) = (4 - n)s^3 + (n - 3)s^4 (n <= 4) or s^n: no s^2 term, so a 0°/180° cap meets the edge flat
+  const float easeD = yc / rc.boreR, easeA0 = fmx(0, 2 - easeD), easeDl = 1 - easeA0, easeTau = easeD - easeA0;
+  const float easeN = easeTau / easeDl;
   for (int ry = 0; ry < H; ry++) {
     int x0 = 0;
     if (p.cornerR > 0) {
@@ -1785,8 +1789,14 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
       if (dy > yc - r) { float k = (dy - (yc - r)) / r; x0 = (int)jround(r - sqrtf(fmx(0, 1 - k * k)) * r); }
     }
     rc.capX0[ry] = x0;
-    // across the bore; the wall-band rows clamp to the contact ring (sim boreRow)
-    float d = lensRow(clampf((ry - yc) / rc.boreR, -1, 1), p), u = fabsf(d);
+    // across the bore; the wall band eases C1 onto the contact ring at the outer edge (sim boreRow)
+    const float a = fabsf(ry - yc) / rc.boreR;
+    float ua = easeD <= 1 ? fmn(1, a) : a;
+    if (easeD > 1 && a > easeA0) {
+      const float s = fmx(0, easeD - a) / easeTau, s3 = s * s * s;
+      ua = 1 - easeDl * (easeN <= 4 ? (4 - easeN) * s3 + (easeN - 3) * s3 * s : powf(s, easeN));
+    }
+    float d = lensRow(ry < yc ? -ua : ua, p), u = fabsf(d);
     rc.rowD[ry] = d; rc.rowU2[ry] = u * u;
   }
   RGB hi888 = ambientize(scale(hexToRgb(p.liquidHi), p.brightness * p.liquidBright), ambientBodyL(p), ambientAmt(p));

@@ -468,5 +468,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 
 ## Meniscus on the bore (2026-09-29)
 - `check:meniscus` parity: `marks-blick-moving` fails at (403,34), red off 2 LSB (17/255). Pre-existing: baseline fails the same pixel at cap 2.09–2.36 (and 3 other pixels in a cap sweep) — stacked 565 roundings in the band-over-mark path (sim markFn `inside` branch vs firmware Mark::bandMark). The bore-radius geometry just moved the scene onto it.
-- The wall band clamps to the ring x (vertical cut); the dry band past the ring still gets no film/refraction of its own.
+- Wall band now eases the cap C1 onto the ring at the outer edge (was a vertical cut); the dry band past the ring still gets no film/refraction of its own.
 - Spherical cap assumes bore ≪ capillary length; several presets are outside that regime (flattened, gravity-shaped menisci not modelled).
+
+## Meniscus help text (2026-09-29)
+- `PARAM_META` help is stale vs derive: `contactDyn` says "honey 180°" (derive clamps to 90); `capLength` says "water 2.7, oils ~1.9" (derived display-scaled values are 2.17 / 1.5–1.8 since the bore-radius change).
