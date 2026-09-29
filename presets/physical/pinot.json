@@ -83,6 +83,7 @@
   "fizzSourceX": 0.2,
   "fizzSourceY": 1,
   "fizzSourceSpread": 1.5,
+  "fizzSourceRate": 5,
   "fizzSpeed": 27.92864440081224,
   "ticksH": true,
   "tickStepH": 1,

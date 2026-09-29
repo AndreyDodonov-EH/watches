@@ -461,3 +461,7 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 ## Spring fizz covered/dry (2026-09-28)
 - Subtle soda has `freeHomeK` 0: after a slide the slug stays wherever it stopped, so the spring stays dry until the home end is tilted down.
 - SPRING_BACK (3 s) is a constant in both renders, not a param.
+
+## Spring stream held by glass (2026-09-29)
+- Moving the Fizz pools (static, 2 x 4.8 KB internal) to PSRAM in render_init measured +9.8 KB free internal heap on the board (2.2 -> 12 KB, BLE fine).
+- `sim/src/material/model.ts` is generated from spec/material-schema.json; a new design key goes in the schema, then `npm run gen:material`.

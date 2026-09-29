@@ -489,10 +489,11 @@ struct Warp {
 // per-tube render context
 // ---------------------------------------------------------------------------------------------
 // Bubbles per tube (sim FIZZ_MAX): the sliders' worst case, fizzCount 120 doubled by full agitation (<= 1). A
-// count pushed past the sliders over serial is capped and reported (fizzOverflow), not silently dropped.
+// count pushed past the sliders over serial (or a spring needing more) is capped and reported (fizzOverflow), not
+// silently dropped.
 #define MAX_FIZZ 240
 static int fizzOverflowPeak = 0;   // largest count requested past MAX_FIZZ (0 = everything fitted), see fizzOverflow()
-// px in the liquid frame; v = size/speed factor, 0 = waiting at a spring to be released (not drawn, not moved);
+// px in the liquid frame; v = size/speed factor, 0 = an idle slot (a spring's pool: not drawn, not moved);
 // life != 0 = parked under a surface, |life| s left before it pops: > 0 under the time edge, < 0 under the home
 // edge of a free slug.
 struct Fizz { float x, y, v, life, z; };   // z: depth in the bore (0 front wall, 1 back), drawn at spawn and every recycle
@@ -511,9 +512,14 @@ struct Fizz { float x, y, v, life, z; };   // z: depth in the bore (0 front wall
 // liquid covers it, it takes every birth, whatever the tilt; a free slug sliding off it leaves it dry, and every
 // birth goes scattered. Covered again, it takes its births back over SPRING_BACK s (a share ramping to 0), so a
 // slug bouncing at home does not flip the stream. Births only: nothing in flight moves.
-// It emits at a steady rate — the pool over a mean bubble's flight at rest (flat, still) — so a tilt that shortens
-// the path to a wall or surface shows fewer bubbles in flight instead of recycling them faster; a bubble it takes
-// back waits there (v = 0) until the rate releases it.
+// It emits at a steady cadence, fizzSourceRate bubbles/s, into idle slots of the pool (fizzCount does not apply):
+// how many are in flight follows from their path, so a tilt that shortens it shows fewer.
+// Glass holds the gas a spring's rise carries into it (fizzFoamLife > 0), so the stream bends along the glass
+// instead of ending there: at the bore wall a bubble stays against the glass and slides along it with the along
+// drive (one pace for all, so a train keeps its gaps) until it lets go — at random, on average after fizzFoamLife
+// s, sooner when shaken — and slips behind the wall band; one arriving onto a bubble already held there coalesces
+// into it. At a closed end (the tube's end glass, not a surface) it parks as foam does, slides along the glass
+// with the across rise and pops after its life.
 #define SPRING_BACK 3.0f
 
 // Everything that depends only on (params, H): rebuilt when the generation counter moves.
@@ -561,7 +567,7 @@ struct Tube {
   uint8_t fizzExposed = 0;                                    // bit 1 = time edge short of the far end, bit 2 = home edge of a free slug off the near end
   float fizzShift = 0;                                        // px the liquid frame sits off its home (a free slug that slid away; 0 pinned), set by drawTube
   float springScatter = 0;                                    // share of spring births born scattered instead (0 = all at the spring), advanced by stepFizz
-  float springClock = 0;                                      // bubbles the spring may release now (its rate accrued, at most 1 banked while nothing waits)
+  float springClock = 0;                                      // bubbles the spring may release now (its cadence accrued)
   uint16_t traceA[TUBE_LENGTH_PX];                            // dried-trace residue alpha per column, 1/256 with headroom (traceAmount > 1)
   uint16_t traceRaw[TUBE_LENGTH_PX];                          // render-frame residue copy, input to the taper blur
 
@@ -1446,43 +1452,44 @@ static void springSpawn(const Tube &t, const Params &p, Fizz &f) {
 static void fizzScatter(const Tube &t, const Params &p, Fizz &f) {
   f.life = 0; f.v = 0.5f + frand(); f.y = fizzSpawnY(p, t.H, f.v); fizzRespawnX(t, p, f, -1); f.z = frand();
 }
-// Taken back by the spring: waits there for its rate.
-static inline void fizzWait(Fizz &f) { f.v = 0; f.life = 0; }
-// This birth in tube t comes from the spring (fizzSource 1, covered by the liquid). See sim springBirth.
-static inline bool springBirth(const Tube &t, const Params &p) { return p.fizzSource == 1 && (t.springScatter <= 0 || frand() >= t.springScatter); }
+// A spring's bubble leaving or popping: its slot goes idle until the cadence fills it.
+static inline void fizzFree(Fizz &f) { f.v = 0; f.life = 0; }
+// This spring birth in tube t comes from the spring itself (covered by the liquid), not scattered. See sim springBirth.
+static inline bool springBirth(const Tube &t) { return t.springScatter <= 0 || frand() >= t.springScatter; }
+// A spring's pool is sized by its cadence instead (stepFizz).
 void Tube::ensureFizz(const Params &p, float len, float agitation) {
   fizzLen = len;
+  if (p.fizzSource == 1) return;
   int want = (int)ffloor(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want < 0) want = 0;
   if (want > MAX_FIZZ) { if (want > fizzOverflowPeak) fizzOverflowPeak = want; want = MAX_FIZZ; }
-  while (fizzN < want) {
-    if (springBirth(*this, p)) { fizz[fizzN++] = { 0, 0, 0, 0, 0 }; continue; }   // waits for the spring's rate
-    float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v, 0, frand() };
-  }
+  while (fizzN < want) { float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v, 0, frand() }; }
   fizzN = want;
 }
 // Parked bubbles: sit centred on the surface front — foam floats half out of the liquid — lagging behind an
 // advance (and gliding on after being caught) no faster than the rise, pushed back by a recession; slide along
 // the meniscus toward the higher contact line (the corners: the foam ring) and pack, late arrivals filling the
-// meniscus from its front backward. Works in u = side * x, so the home edge (side -1) is the time edge mirrored.
-// See sim settleFoam.
+// meniscus from its front backward. Against a closed end (glass: glassVy = the across rise px/s) the whole disc
+// stays inside and the bubbles slide along the glass with the rise instead. Works in u = side * x, so the home
+// edge (side -1) is the time edge mirrored. See sim settleFoam.
 static int16_t foamOrder[MAX_FIZZ];   // the packing sweep order (parked, front first); one tube at a time
-static void settleFoam(Tube &t, const Params &p, float speed, const float *surf, int side, float dt) {
+static void settleFoam(Tube &t, const Params &p, float speed, const float *surf, int side, float dt, bool glass, float glassVy) {
   const int H = t.H; const float wall = fizzWall(p), follow = fmn(1, FOAM_FOLLOW * dt);
+  auto front = [&](float y, float r) { return glass ? discFit(surf, H, y, r, side) : foamFront(surf, H, y, side); };
   auto place = [&](Fizz &f, float u, float y) {   // in the bore and not past the front of its row
-    const float lo = wall + fizzR(p, f.v), hi = H - lo;
+    const float r = fizzR(p, f.v), lo = wall + r, hi = H - lo;
     f.y = hi <= lo ? H / 2.0f : clampf(y, lo, hi);
-    f.x = side * fmn(u, foamFront(surf, H, f.y, side));
+    f.x = side * fmn(u, front(f.y, r));
   };
   for (int i = 0; i < t.fizzN; i++) {
     Fizz &f = t.fizz[i];
     if (f.life == 0) continue;
     const float r = fizzR(p, f.v);
     const int fy = (int)clampf(jround(f.y), 0, H - 1);
-    const float tu = foamFront(surf, H, f.y, side);
+    const float tu = front(f.y, r);
     float u = side * f.x;
     u = u < tu ? u + fmn((tu - u) * follow, speed * dt) : tu;   // buoyancy: no faster than the rise
     const float slope = side * (surf[fy + 1 < H ? fy + 1 : H - 1] - surf[fy > 0 ? fy - 1 : 0]) / 2;   // px per row
-    float slide = FOAM_SLIDE * speed * clampf(2 * slope, -1, 1) * dt;
+    float slide = glass ? glassVy * dt : FOAM_SLIDE * speed * clampf(2 * slope, -1, 1) * dt;
     for (int j = 0; j < t.fizzN; j++) {   // touching a neighbour on the slide side: line up along the surface
       const Fizz &g = t.fizz[j];
       if (j == i || g.life == 0 || slide * (g.y - f.y) <= 0) continue;
@@ -1524,9 +1531,9 @@ static void settleFoam(Tube &t, const Params &p, float speed, const float *surf,
 // toward the exposed surface (the time edge, or the home edge of a free slug whose time edge sits against
 // the far end). While the rise points at an exposed surface and fizzFoamLife > 0, a bubble reaching it parks
 // in its meniscus (settleFoam) and pops later; otherwise it respawns at the far side. A spring (fizzSource 1)
-// takes every rebirth instead — exit, recycle, pop — so the bubbles rise as a stream; a slug sliding off the spring
-// leaves it dry, and its births go scattered instead (springScatter). A bubble the spring takes back waits there
-// until its steady rate releases it (springClock). See sim stepFizz.
+// takes every birth instead, at its cadence (springClock), so the bubbles rise as a stream; a bubble leaving or
+// popping frees its slot. A slug sliding off the spring leaves it dry, and its births go scattered instead
+// (springScatter). The glass holds a spring's bubbles (see SPRING_BACK). See sim stepFizz.
 int fizzOverflow() { return fizzOverflowPeak; }
 
 void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
@@ -1536,7 +1543,9 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   const float a = clampf(across * p.fizzAcrossGain, -1, 1);
   const float vy = -speed * ((1 - fabsf(a)) * up * p.fizzFlatRise + a);
   const float vxTilt = -speed * clampf(along * p.fizzDriftGain, -1, 1);
-  const bool spring = p.fizzSource == 1;
+  const bool spring = p.fizzSource == 1; const float wall = fizzWall(p);
+  const bool hold = spring && p.fizzFoamLife > 0 && vy != 0;   // the bore wall the rise points at holds the stream
+  const float letGo = hold ? dt * (1 + 3 * agitation) / p.fizzFoamLife : 0;   // per-step chance a held bubble lets go
   for (int i = 0; i < 2; i++) {
     Tube &t = tubes[i]; const float len = t.fizzLen; const int H = t.H; const int exposed = t.fizzExposed;
     if (len <= 0) continue;   // no liquid drawn yet: no surfaces
@@ -1548,11 +1557,16 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
     if (spring) t.springScatter = sx <= -foamFront(t.fizzSurfL, H, sy, -1) ? 1 : fmx(0, t.springScatter - dt / SPRING_BACK);
     const int dir = exposed & 1 ? 1 : exposed & 2 ? -1 : 0;   // +x = the time edge
     const float vx = vxTilt + speed * up * p.fizzEdgeRise * dir;
-    // The surface the rise heads for, if exposed and foam is on: +1 time edge, -1 home edge, 0 none.
-    const int side = p.fizzFoamLife <= 0 ? 0 : vx > 0 && (exposed & 1) ? 1 : vx < 0 && (exposed & 2) ? -1 : 0;
+    // The surface the rise heads for, if exposed and foam is on: +1 time edge, -1 home edge, 0 none; a spring's
+    // foam also parks against a closed end (glass).
+    const int side = p.fizzFoamLife <= 0 ? 0 : vx > 0 && (spring || (exposed & 1)) ? 1 : vx < 0 && (spring || (exposed & 2)) ? -1 : 0;
+    const bool glass = side != 0 && !(exposed & (side > 0 ? 1 : 2));
+    // On the bore wall the rise points at (row wallY: the disc touching the glass), held by it.
+    auto wallY = [&](const Fizz &g) { return vy < 0 ? wall + fizzR(p, g.v) : H - wall - fizzR(p, g.v); };
+    auto held = [&](const Fizz &g) { return g.v != 0 && g.life == 0 && fabsf(g.y - wallY(g)) < 1e-3f; };
     for (int k = 0; k < t.fizzN; k++) {
       Fizz &f = t.fizz[k];
-      if (f.v == 0) { if (!spring) fizzScatter(t, p, f); continue; }   // waiting: the spring releases it below
+      if (f.v == 0) { if (!spring) fizzScatter(t, p, f); continue; }   // idle: the spring's cadence fills it below
       if (f.life != 0) {
         const int was = f.life > 0 ? 1 : -1;
         if (was != side) {   // the surface tilted away: the foam releases into the flow, from where it is drawn
@@ -1562,17 +1576,33 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
         else {
           const float left = fabsf(f.life) - dt * (1 + 3 * agitation);   // shaking pops the foam
           if (left > 0) f.life = side * left;
-          else if (springBirth(t, p)) fizzWait(f);
+          else if (spring) fizzFree(f);
           else fizzScatter(t, p, f);
           continue;
         }
       }
-      f.y += vy * f.v * dt;
-      f.x += vx * f.v * dt;
+      const float r = fizzR(p, f.v), wlo = wall + r, whi = H - wlo; const bool grip = hold && whi > wlo;
+      if (grip && held(f) && frand() >= letGo) f.x += vx * dt;   // held by the glass: slides along it
+      else {
+        const bool inBore = f.y > wlo && f.y < whi;   // not one letting go, already on the glass row
+        f.y += vy * f.v * dt;
+        f.x += vx * f.v * dt;
+        if (grip && inBore && (vy < 0 ? f.y < wlo : f.y > whi)) {   // carried into the glass: held, or coalesces into a held bubble
+          f.y = vy < 0 ? wlo : whi;
+          bool merge = false;
+          for (int j = 0; j < t.fizzN; j++) {
+            const Fizz &g = t.fizz[j];
+            if (j == k || !held(g)) continue;
+            const float m = r + fizzR(p, g.v) + 0.5f, dx = g.x - f.x, dy = g.y - f.y;
+            if (dx * dx + dy * dy < m * m) { merge = true; break; }
+          }
+          if (merge) { fizzFree(f); continue; }
+        }
+      }
       // Vertical exit: once fully behind the wall band, respawn fully behind the opposite one and rise out of it.
       const float hide = fizzHideY(p, f.v);
       if (f.y < hide || f.y >= H - hide) {
-        if (springBirth(t, p)) fizzWait(f);
+        if (spring) fizzFree(f);
         else { f.v = 0.5f + frand(); const float h = fizzHideY(p, f.v); f.y = vy <= 0 ? H - h : h; fizzRespawnX(t, p, f, -1); f.z = frand(); }
         continue;
       }
@@ -1580,33 +1610,30 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
       // through), or into the foam already there (it joins at the back): at the surface the rise heads for it
       // parks (settleFoam); anywhere else it is recycled at the side the flow comes from. A bubble the flow does
       // not carry into a surface only rides it, centre held inside, floating half out like the foam.
-      const float r = fizzR(p, f.v);
       const bool outR = vx > 0 && f.x > discFit(t.fizzSurf, H, f.y, r, 1) - FOAM_CATCH, outL = vx < 0 && -f.x > discFit(t.fizzSurfL, H, f.y, r, -1) - FOAM_CATCH;
       if ((side > 0 && outR) || (side < 0 && outL) || (side != 0 && touchesFoam(t, f, r, p, side))) f.life = side * p.fizzFoamLife * (0.5f + frand());
-      else if ((outR || outL) && springBirth(t, p)) fizzWait(f);
+      else if ((outR || outL) && spring) fizzFree(f);
       else if (outR || outL) { f.v = 0.5f + frand(); f.y = fizzSpawnY(p, H, f.v); fizzRespawnX(t, p, f, vx < 0 ? 0 : 1); f.z = frand(); }
       else f.x = fmx(-foamFront(t.fizzSurfL, H, f.y, -1), fmn(foamFront(t.fizzSurf, H, f.y, 1), f.x));
     }
     if (spring) {
-      // Steady rate: the pool over a mean bubble's flight from the spring at rest (flat rise and edge drift) to the
-      // wall band or the surface it heads for; no finite flight = no limit. Dry, nothing waits for it. See sim.
-      const float hide = fizzHideY(p, 1), vyR = -speed * p.fizzFlatRise, vxR = speed * p.fizzEdgeRise * dir;
-      const float x0 = clampf(sx, sxl, fmx(sxl, sxh));
-      const float tRest = fmn(vyR < 0 ? (sy - hide) / -vyR : vyR > 0 ? (H - hide - sy) / vyR : INFINITY,
-                              vxR > 0 ? (sxh - x0) / vxR : vxR < 0 ? (x0 - sxl) / -vxR : INFINITY);
-      const int n = t.fizzN;
-      t.springClock += tRest < INFINITY ? n * dt / fmx(dt, tRest) : n;
-      int waiting = 0;
-      for (int k = 0; k < n; k++) {
-        Fizz &f = t.fizz[k];
-        if (f.v != 0) continue;
-        if (t.springScatter >= 1) fizzScatter(t, p, f);
-        else if (t.springClock >= 1) { springSpawn(t, p, f); t.springClock -= 1; }
-        else waiting++;
+      // Cadence: fizzSourceRate bubbles/s (shaking nucleates up to twice as many), each into an idle slot (the first,
+      // else a new one up to MAX_FIZZ — past it the birth waits and is reported); idle slots at the end are dropped,
+      // so the loops stay as short as the bubbles in flight. See sim.
+      t.springClock += fmx(0, p.fizzSourceRate) * (1 + (agitation < 0.05f ? 0 : agitation)) * dt;
+      int slot = 0;
+      while (t.springClock >= 1) {
+        while (slot < t.fizzN && t.fizz[slot].v != 0) slot++;
+        if (slot == t.fizzN) {
+          if (t.fizzN >= MAX_FIZZ) { if (MAX_FIZZ + 1 > fizzOverflowPeak) fizzOverflowPeak = MAX_FIZZ + 1; t.springClock = 1; break; }
+          t.fizz[t.fizzN++] = { 0, 0, 0, 0, 0 };
+        }
+        if (springBirth(t)) springSpawn(t, p, t.fizz[slot]); else fizzScatter(t, p, t.fizz[slot]);
+        t.springClock -= 1;
       }
-      if (waiting == 0) t.springClock = fmn(1, t.springClock);   // bank no burst while the pool is short
+      while (t.fizzN > 0 && t.fizz[t.fizzN - 1].v == 0) t.fizzN--;
     }
-    if (side != 0) settleFoam(t, p, speed, side > 0 ? t.fizzSurf : t.fizzSurfL, side, dt);
+    if (side != 0) settleFoam(t, p, speed, side > 0 ? t.fizzSurf : t.fizzSurfL, side, dt, glass, vy);
   }
 }
 
@@ -2218,7 +2245,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     const float invHalfH = 2.0f / H;   // one division per tube, not per bubble
     for (int k = 0; k < fizzN; k++) {
       const Fizz &f = fizz[k];
-      if (f.v == 0) continue;   // waiting at the spring
+      if (f.v == 0) continue;   // idle slot
       int fy = (int)clampf(jround(f.y), 0, H - 1);
       // Centres stay inside this frame's surfaces (the stepper ran on an older one, so a receding surface pushes
       // them back here): whatever touches a surface floats at most half out of it, like the foam.

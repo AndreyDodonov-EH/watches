@@ -93,6 +93,7 @@ export interface Params {
   fizzSourceX: number;    // 0..1 spring position along the liquid column (0 = home end, 1 = surface)
   fizzSourceY: number;    // 0..1 spring position across the bore (0 = top wall, 1 = bottom wall)
   fizzSourceSpread: number; // px, ± jitter around the spring point on both axes
+  fizzSourceRate: number;  // bubbles/s the spring releases (its pool follows; fizzCount does not apply)
   // --- ticks, hours tube (units = hours) ---
   ticksH: boolean;
   tickStepH: number;       // minor tick every N hours
@@ -281,6 +282,7 @@ export const DEFAULT_PARAMS: Params = {
   fizzSourceX: 0.2,
   fizzSourceY: 1,
   fizzSourceSpread: 1.5,
+  fizzSourceRate: 5,
   fizzSpeed: 14,
   ticksH: true, tickStepH: 1, tickMajorEveryH: 3, tickMinorHeightH: 27, tickMajorHeightH: 13, tickMinorWidthH: 1, tickMajorWidthH: 2, tickColorH: '#303030', tickMajorColorH: '#303030', tickPosH: 2,
   ticksM: true, tickStepM: 5, tickMajorEveryM: 3, tickMinorHeightM: 27, tickMajorHeightM: 16, tickMinorWidthM: 1, tickMajorWidthM: 2, tickColorM: '#303030', tickMajorColorM: '#303030', tickPosM: 2,
@@ -929,7 +931,7 @@ const PRESET_TIDE: Partial<Params> = {
 export const GAS_KEYS = [
   'fizz', 'fizzCount', 'fizzSize', 'fizzSizeVar', 'fizzShadeOff', 'fizzSpeed', 'fizzDriftGain', 'fizzAcrossGain',
   'fizzFlatRise', 'fizzSquash', 'fizzEdgeRise', 'fizzFoamLife', 'fizzDepth', 'fizzBlick',
-  'fizzSource', 'fizzSourceX', 'fizzSourceY', 'fizzSourceSpread',
+  'fizzSource', 'fizzSourceX', 'fizzSourceY', 'fizzSourceSpread', 'fizzSourceRate',
 ] as const satisfies readonly (keyof Params)[];
 export type GasKey = (typeof GAS_KEYS)[number];
 
@@ -963,7 +965,7 @@ export const GAS_MODELS: readonly GasModel[] = [
   { id: 'sparks', name: 'Plankton sparks', note: 'tiny bright specks drifting, no foam (bioluminescent tide)',
     p: { fizz: true, fizzCount: 55, fizzSize: 1.5, fizzSizeVar: 0.6, fizzShadeOff: 0, fizzSpeed: 9, fizzDriftGain: 1.6, fizzAcrossGain: 1.05, fizzFlatRise: 0.3, fizzSquash: 1, fizzEdgeRise: 0.1, fizzFoamLife: 0 } },
   { id: 'spring-pearls', name: 'Spring pearls', note: 'one spring at the home end sending a sparse line of large pearls across the bore (subtle soda)',
-    p: { fizz: true, fizzCount: 12, fizzSize: 5.5, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 48, fizzDriftGain: 1, fizzAcrossGain: 1, fizzFlatRise: 0.45, fizzSquash: 1.2, fizzEdgeRise: 0.5, fizzFoamLife: 1.5, fizzSource: 1, fizzSourceX: 0, fizzSourceY: 0.5, fizzSourceSpread: 1.5 } },
+    p: { fizz: true, fizzCount: 12, fizzSize: 5.5, fizzSizeVar: 0.5, fizzShadeOff: 0.3, fizzSpeed: 48, fizzDriftGain: 1, fizzAcrossGain: 1, fizzFlatRise: 0.45, fizzSquash: 1.2, fizzEdgeRise: 0.5, fizzFoamLife: 1.5, fizzSource: 1, fizzSourceX: 0, fizzSourceY: 0.5, fizzSourceSpread: 1.5, fizzSourceRate: 5 } },
 ];
 export type GasId = string;
 
@@ -1646,7 +1648,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   bubbleRollGain: { help: 'Bubble rise toward the high wall per g of across-tilt. 1 = follows the wall.', group: 'Bubble', label: 'bubble rise vs across tilt', min: 0, max: 2, step: 0.05 },
   bubbleTiltGain: { help: 'Bubble slides toward the high end per g of along-tilt, px.', group: 'Bubble', label: 'bubble slides to high end px/g', min: 0, max: 80, step: 1 },
   fizz: { help: 'Small drifting bubbles.', group: 'Bubble' },
-  fizzCount: { help: 'Number of fizz bubbles in a full tube.', group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 120, step: 1 },
+  fizzCount: { help: 'Number of fizz bubbles in a full tube. A spring does not use it: its rate sets how many are in flight.', group: 'Bubble', label: 'fizz count (full tube)', min: 0, max: 120, step: 1 },
   fizzSize: { help: 'Fizz bubble size, px.', group: 'Bubble', min: 1, max: 16, step: 0.5 },
   fizzSizeVar: { help: 'Per-bubble size spread. 0 = all equal; 1 = 0.5x..1.5x. Bigger bubbles rise faster.', group: 'Bubble', label: 'fizz size spread', min: 0, max: 1, step: 0.05 },
   fizzShadeOff: { help: 'Shift of the see-through interior away from the light (direction from the highlight angle, magnitude here), as a fraction of radius, at most radius − 1. The ring is 1 px at its thinnest; the shift thickens it on the lit side and can open it on the shaded side (a lit crescent).', group: 'Bubble', label: 'fizz shade offset', min: 0, max: 1, step: 0.05 },
@@ -1656,13 +1658,14 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   fizzFlatRise: { help: 'On-screen rise speed when the face points up (bubbles rise toward the viewer).', group: 'Bubble', label: 'fizz rise when face up', min: 0, max: 1, step: 0.05 },
   fizzSquash: { help: 'Extra vertical pre-squash on fizz discs at mid-height (fades to none at top/bottom), on top of lens + topLens compensation. >1 flattens the center on screen so the stronger glass magnification there rounds them.', group: 'Bubble', label: 'fizz squash', min: 0.5, max: 2, step: 0.05 },
   fizzEdgeRise: { help: 'Face-up rise toward the fill edge (the liquid surface) as a fraction of fizz speed, so bubbles reach the surface at rest. 0 = they only rise toward the viewer.', group: 'Bubble', label: 'fizz rise to surface', min: 0, max: 1, step: 0.05 },
-  fizzFoamLife: { help: 'Bubbles reaching the surface park under it (following the meniscus, sliding to its corners and packing into a foam ring) and pop after this many seconds on average (each ±50 %). Shaking pops them faster; tilting the surface down releases them. 0 = respawn at the far end as before.', group: 'Bubble', label: 'foam life s', min: 0, max: 30, step: 0.5 },
+  fizzFoamLife: { help: 'Bubbles reaching the surface park under it (following the meniscus, sliding to its corners and packing into a foam ring) and pop after this many seconds on average (each ±50 %). Shaking pops them faster; tilting the surface down releases them. A spring\'s bubbles also stay on the glass they rise into for about this long (see fizz source). 0 = respawn at the far end as before.', group: 'Bubble', label: 'foam life s', min: 0, max: 30, step: 0.5 },
   fizzDepth: { help: 'Each bubble sits at a random depth in the bore; a deeper one is seen through more liquid and fades toward it by this much (at the back wall). Scaled by 1 − liquidTransparency: an opaque liquid shows only the front bubbles, a clear one shows all alike. 0 = every bubble at full strength.', group: 'Bubble', label: 'fizz depth fade', min: 0, max: 1, step: 0.05 },
   fizzBlick: { help: 'Specular pinpoint on the lit side of bubbles of 2.5 px radius and up: neutral white room light (dimmed by brightness only), placed where the lit rim meets the dark core. 0 = none.', group: 'Bubble', label: 'fizz blick', min: 0, max: 1, step: 0.05 },
-  fizzSource: { help: 'Where bubbles are born. Scattered: anywhere in the liquid, recycled at the side the flow comes from. Spring: every bubble is born (and reborn after leaving the liquid or popping) at one point, so they rise as a stream, like an aquarium airstone or an underwater spring. The spring is fixed in the tube and works at any tilt while the liquid covers it, at a steady rate: a tilt that shortens the path of the bubbles (sideways, toward a wall) shows fewer of them rather than a faster stream; when a free slug slides off it, new bubbles are born scattered instead, and once the liquid is back over it the spring takes its births back over about 3 s. Bubbles already rising keep their paths.', group: 'Bubble', label: 'fizz source', min: 0, max: 1, step: 1, options: ['scattered', 'spring'] },
+  fizzSource: { help: 'Where bubbles are born. Scattered: anywhere in the liquid, recycled at the side the flow comes from. Spring: every bubble is born at one point, so they rise as a stream, like an aquarium airstone or an underwater spring. The spring is fixed in the tube and works at any tilt while the liquid covers it, at a steady rate (spring rate): a tilt that shortens the path of the bubbles shows fewer of them rather than a faster stream. With foam life > 0 the glass holds the gas the stream carries into it: at the bore wall the bubbles slide along the glass (one arriving onto another joins it) and let go after about foam life s, so the stream bends along the wall instead of ending there; at a closed end they gather as foam. When a free slug slides off the spring, new bubbles are born scattered instead, and once the liquid is back over it the spring takes its births back over about 3 s. Bubbles already rising keep their paths.', group: 'Bubble', label: 'fizz source', min: 0, max: 1, step: 1, options: ['scattered', 'spring'] },
   fizzSourceX: { help: 'Spring: position along the liquid column as it sits at home, 0 = home end, 1 = the surface (a fraction of the liquid, so it stays submerged as the column changes; a free slug sliding away leaves it behind).', group: 'Bubble', label: '· spring along', min: 0, max: 1, step: 0.01 },
   fizzSourceY: { help: 'Spring: position across the bore, 0 = top wall, 1 = bottom wall (the whole bubble stays inside).', group: 'Bubble', label: '· spring across', min: 0, max: 1, step: 0.01 },
   fizzSourceSpread: { help: 'Spring: ± px a bubble is born away from the spring point on both axes. 0 = a single point (one bead line).', group: 'Bubble', label: '· spring spread px', min: 0, max: 20, step: 0.5 },
+  fizzSourceRate: { help: 'Spring: bubbles born per second, a steady cadence whatever the tilt; shaking nucleates up to twice as many. How many are in flight follows from it and their path (fizz count does not apply).', group: 'Bubble', label: '· spring rate /s', min: 0.5, max: 20, step: 0.5 },
   ticksOnTop: { help: 'Off: rear/bottom surface. On: opaque front/top surface. Both follow the cylinder and whole-tube lens.', group: 'Ticks', label: 'ticks on top' },
   tickLens: { help: 'Cylinder depth warp for ticks before the whole-tube lens.', group: 'Ticks', label: 'cylinder lens', min: 0, max: 1, step: 0.05 },
   tickDryLens: { help: 'Cylinder warp for rear ticks where the tube is empty. Liquid magnifies the middle; air barely lenses, and negative stretches the edges instead, so the scale visibly jumps at the fill edge. Rear parallax is liquid-only.', group: 'Ticks', label: 'dry-side lens', min: -1, max: 1, step: 0.05 },
