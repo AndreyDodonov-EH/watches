@@ -18,4 +18,6 @@ export interface WatchTransport {
   setParams(patch: Partial<Params>): Promise<void>;
   setTime(epochMs: number, tzOffsetMin: number): Promise<void>;
   setDemoSpeed(speed: number): Promise<void>;
+  /** Minutes sweep: seconds per empty→full→empty cycle, 0 = off. Persists on the device. */
+  setSweep(period: number): Promise<void>;
 }

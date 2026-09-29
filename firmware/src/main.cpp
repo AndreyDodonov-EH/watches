@@ -3,6 +3,7 @@
 //   l  liquid face (default)          c  calibration face        h  hello / orientation test
 //   f  live fps + frame timing        i  toggle IMU stream (50 Hz CSV)
 //   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze; persists in NVS)
+//   w<N>  minutes sweep: the minutes tube runs empty→full→empty every N s, hours keep the clock (w0 = off; persists in NVS)
 //   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p contactAngle=140)
 //   p?  dump params as JSON           p!  reset params to the built-in preset (and erase NVS copy)
 //   params persist in NVS (autosave 2 s after last p write)
@@ -98,6 +99,16 @@ static void demoLoad() {
   if (demoSpeed != 1) out.printf("demo: x%g restored from nvs\n", demoSpeed);
 }
 static void demoSave() { if (prefs.getFloat("demo", 1) != demoSpeed) prefs.putFloat("demo", demoSpeed); }
+// Minutes sweep (w<N>): the minutes fill ignores the clock and runs a triangle wave, one empty→full→empty
+// cycle per sweepPeriod seconds. NVS key "sweep". The phase steps with the physics clock, so d0 does not stop it.
+static float sweepPeriod = 0;        // seconds per cycle, 0 = off
+static double sweepPhase = 0;        // 0..1 through the cycle
+static void sweepLoad() {
+  float v = prefs.getFloat("sweep", 0);
+  if (isfinite(v) && v >= 0 && v <= 3600) sweepPeriod = v;
+  if (sweepPeriod > 0) out.printf("sweep: %gs restored from nvs\n", sweepPeriod);
+}
+static void sweepSave() { if (prefs.getFloat("sweep", 0) != sweepPeriod) prefs.putFloat("sweep", sweepPeriod); }
 static double clockSec = 0;          // local seconds since midnight, refreshed every physics step
 static const time_t CLOCK_EPOCH_MIN = 86400L * 365;  // below this = never set since power-on
 static void setClockLocal(time_t localSec) { timeval tv = { localSec, 0 }; settimeofday(&tv, nullptr); demoOffset = 0; }
@@ -111,7 +122,7 @@ static void updateTimeTargets() {
   double minutes = fmod(clockSec / 60.0, 60.0);
   double hours = fmod(clockSec / 3600.0, 12.0);
   tubeH.fillTarget = (float)(hours / 12.0);
-  tubeM.fillTarget = (float)(minutes / 60.0);
+  tubeM.fillTarget = sweepPeriod > 0 ? (float)(1.0 - fabs(2.0 * sweepPhase - 1.0)) : (float)(minutes / 60.0);
 }
 static uint32_t lastPhysUs = 0, frames = 0, fpsT0 = 0;
 static float fps = 0;
@@ -259,6 +270,7 @@ static void liquid_tick() {
   while ((int32_t)(now - lastPhysUs) >= (int32_t)(1000000 / PHYS_HZ) && steps < 5) {
     lastPhysUs += 1000000 / PHYS_HZ; steps++;
     demoOffset += PHYS_DT * (demoSpeed - 1);
+    if (sweepPeriod > 0) sweepPhase = fmod(sweepPhase + PHYS_DT / sweepPeriod, 1.0);
     updateTimeTargets();
     TiltInput in = have_imu ? imuFilter.step(rawTilt, params) : TiltInput{0, 0, 0, 0};
     stepTube(tubeH, in, params);
@@ -361,6 +373,12 @@ static void handleLine(char *line) {
       else out.println("usage: T <epoch_s> <tz_min>");
       break; }
     case 'd': demoSpeed = atof(arg); demoSave(); out.printf("demo speed x%g\n", demoSpeed); break;
+    case 'w': {
+      float v = atof(arg);
+      if (!(isfinite(v) && v >= 0 && v <= 3600) || (v > 0 && v < 1)) { out.println("usage: w<seconds 1..3600> | w0"); break; }
+      sweepPeriod = v; sweepPhase = 0; sweepSave();
+      if (v > 0) out.printf("sweep %gs\n", v); else out.println("sweep off");
+      break; }
     case 'p': {
       if (arg[0] == '?') dumpParams();
       else if (arg[0] == '!') { params = PRESET_DEFAULT; paramsGen++; paramsErase(); out.println("params reset"); }
@@ -397,7 +415,7 @@ static void handleLine(char *line) {
                  rawTilt.along, rawTilt.across, rawTilt.gyroAcross, tubeH.fillTarget, tubeM.fillTarget,
                  ESP.getFreeHeap(), (unsigned)workerStackFree); break;
     case 'r': ESP.restart(); break;
-    case '?': out.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> p<name>=<v> p? p! x r"); break;
+    case '?': out.println("cmds: l c h f i s b<0-255> t HH:MM T <epoch> <tz> d<N> w<N> p<name>=<v> p? p! x r"); break;
     default: out.println("error unknown command"); break;
   }
 }
@@ -426,6 +444,7 @@ void setup() {
 #endif
   paramsLoad();
   demoLoad();
+  sweepLoad();
   out.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);
   if (time(nullptr) < CLOCK_EPOCH_MIN) setClockLocal(CLOCK_EPOCH_MIN + 10 * 3600 + 9 * 60 + 30);

@@ -20,12 +20,15 @@ export interface ViewState {
   paused: boolean;
   timeMode: 'real' | 'demo' | 'set';
   demoSpeed: number;
+  /** Minutes sweep: the minutes tube runs empty→full→empty every `sweepPeriod` s instead of telling time. */
+  sweep: boolean;
+  sweepPeriod: number;
   setClock: { h: number; m: number };
   manual: { along: number; across: number };
   overlay: OverlayOpts;
 }
 export const DEFAULT_VIEW: ViewState = {
-  scale: 0.5, showGrid: false, paused: false, timeMode: 'real', demoSpeed: 60,
+  scale: 0.5, showGrid: false, paused: false, timeMode: 'real', demoSpeed: 60, sweep: false, sweepPeriod: 10,
   setClock: { h: 10, m: 9 }, manual: { along: 0, across: 0 }, overlay: { ...DEFAULT_OVERLAY },
 };
 /** Physical-material mode (material/ui.ts): in 'material' mode `params` is derive(material, design).

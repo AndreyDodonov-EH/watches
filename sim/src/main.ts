@@ -25,7 +25,8 @@ const matState = session.material;              // physical-material mode: param
 const overlay = session.view.overlay;
 const manual = session.view.manual;             // sliders / drag
 const setClock = session.view.setClock;
-let { scale, showGrid, paused, timeMode, demoSpeed } = session.view;  // demoSpeed = demo s per real s
+let { scale, showGrid, paused, timeMode, demoSpeed, sweep, sweepPeriod } = session.view;  // demoSpeed = demo s per real s
+let sweepPhase = 0;   // 0..1 through the minutes sweep cycle
 const hours = newTube(), minutes = newTube();
 const input: TiltInput = { along: 0, across: 0, gyroAlong: 0, gyroAcross: 0 };
 const imuFilter = new ImuFilter();
@@ -64,8 +65,9 @@ app.innerHTML = `
         <label><input type="radio" id="tm-real" name="tm" value="real" checked> real</label>
         <label><input type="radio" id="tm-demo" name="tm" value="demo"> demo ×<input type="number" id="demospeed" value="60" min="1" max="3600" style="width:5em"></label>
         <label><input type="radio" id="tm-set" name="tm" value="set"> set <input type="number" id="seth" value="10" min="0" max="23" style="width:3.5em">:<input type="number" id="setm" value="9" min="0" max="59" style="width:3.5em"></label>
+        <label title="Minutes tube runs empty→full→empty instead of telling time; sent to the device live and kept there across resets"><input type="checkbox" id="sweep"> minutes sweep, period <input type="number" id="sweepperiod" value="10" min="1" max="3600" style="width:4.5em"> s</label>
         <span id="clock"></span>
-        <button id="settime" title="Send this time and mode to the device: real, demo speed, or frozen selected time">send sim time</button>
+        <button id="settime" title="Send this time and mode to the device: real, demo speed, or frozen selected time, plus the minutes sweep">send sim time</button>
       </fieldset>
       <fieldset><legend>Tilt input</legend>
         <label><input type="radio" name="src" value="manual" checked> sliders / drag on panel</label>
@@ -104,7 +106,7 @@ applyOverlay(ovlDom, overlay, tubeLayout(params));
 // ---------- persistence ----------
 // One delegated listener covers every control on the page (top bar, time, tilt, params panel);
 // programmatic changes (presets, import, drag-tilt, reset) call save() explicitly.
-const save = (): void => saveSession({ params, view: { scale, showGrid, paused, timeMode, demoSpeed, setClock, manual, overlay }, material: matState });
+const save = (): void => saveSession({ params, view: { scale, showGrid, paused, timeMode, demoSpeed, sweep, sweepPeriod, setClock, manual, overlay }, material: matState });
 app.addEventListener('input', save);
 app.addEventListener('change', save);
 
@@ -144,11 +146,23 @@ function selectTimeMode(mode: typeof timeMode): void {
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name=tm]')) r.oninput = () => selectTimeMode(r.value as typeof timeMode);
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name=src]')) r.oninput = () => { inputSource = r.value as any; if (inputSource === 'device') askOrientation(); };
 $('demospeed').oninput = (e) => { demoSpeed = +(e.target as HTMLInputElement).value; selectTimeMode('demo'); };
+const sweepValue = (): number => (sweep ? sweepPeriod : 0);
+async function pushSweep(): Promise<void> {
+  if (!transport.connected) return;
+  try { await transport.setSweep(sweepValue()); $('serialst').textContent = sweep ? `sweep ${sweepPeriod}s sent` : 'sweep off sent'; }
+  catch (e) { $('serialst').textContent = String(e); }
+}
+$('sweep').oninput = (e) => { sweep = (e.target as HTMLInputElement).checked; sweepPhase = 0; pushSweep(); };
+$('sweepperiod').onchange = (e) => {
+  const v = +(e.target as HTMLInputElement).value;
+  if (!(v >= 1 && v <= 3600)) { (e.target as HTMLInputElement).value = String(sweepPeriod); return; }
+  sweepPeriod = v; sweepPhase = 0; if (sweep) pushSweep();
+};
 $('seth').oninput = (e) => { setClock.h = +(e.target as HTMLInputElement).value; selectTimeMode('set'); };
 $('setm').oninput = (e) => { setClock.m = +(e.target as HTMLInputElement).value; selectTimeMode('set'); };
 $('resetview').onclick = () => {
   Object.assign(overlay, DEFAULT_OVERLAY); Object.assign(manual, DEFAULT_VIEW.manual); Object.assign(setClock, DEFAULT_VIEW.setClock);
-  ({ scale, showGrid, paused, timeMode, demoSpeed } = DEFAULT_VIEW);
+  ({ scale, showGrid, paused, timeMode, demoSpeed, sweep, sweepPeriod } = DEFAULT_VIEW);
   syncView(); save();
 };
 const alongS = $<HTMLInputElement>('along'), acrossS = $<HTMLInputElement>('across');
@@ -171,6 +185,8 @@ function syncView(): void {
   $<HTMLInputElement>('grid').checked = showGrid;
   $<HTMLInputElement>('pause').checked = paused;
   $<HTMLInputElement>('demospeed').value = String(demoSpeed);
+  $<HTMLInputElement>('sweep').checked = sweep;
+  $<HTMLInputElement>('sweepperiod').value = String(sweepPeriod);
   $<HTMLInputElement>('seth').value = String(setClock.h);
   $<HTMLInputElement>('setm').value = String(setClock.m);
   $<HTMLInputElement>(`tm-${timeMode}`).checked = true;
@@ -284,7 +300,8 @@ async function pushTime(): Promise<void> {
        !Number.isInteger(setClock.m) || setClock.m < 0 || setClock.m > 59))) throw new Error('invalid time');
     await transport.setDemoSpeed(speed);
     await transport.setTime(d.getTime(), -d.getTimezoneOffset());
-    const mode = speed === 0 ? 'frozen' : speed === 1 ? 'real speed' : `demo ×${speed}`;
+    await transport.setSweep(sweepValue());
+    const mode = (speed === 0 ? 'frozen' : speed === 1 ? 'real speed' : `demo ×${speed}`) + (sweep ? `, minutes sweep ${sweepPeriod}s` : '');
     $('serialst').textContent = `${d.toTimeString().slice(0, 8)} sent (${mode})`;
   } catch (e) { $('serialst').textContent = String(e); }
   finally { button.disabled = false; }
@@ -463,7 +480,8 @@ function physics(dt: number) {
   scopePush(raw, input);
   if (timeMode === 'demo') demoClock += dt * 1000 * demoSpeed;
   const f = fillLevels(currentDate());
-  hours.fillTarget = f.hours; minutes.fillTarget = f.minutes;
+  if (sweep) sweepPhase = (sweepPhase + dt / sweepPeriod) % 1;
+  hours.fillTarget = f.hours; minutes.fillTarget = sweep ? 1 - Math.abs(2 * sweepPhase - 1) : f.minutes;
   stepTube(hours, input, params, dt);
   stepTube(minutes, input, params, dt);
   stepFizz(params, dt, input.along, input.across, hours.agitation);

@@ -92,6 +92,12 @@ export abstract class LineTransport implements WatchTransport {
       throw new Error(`demo speed not accepted: ${reply || 'no reply'}`);
   }
 
+  async setSweep(period: number): Promise<void> {
+    if (!Number.isFinite(period) || (period !== 0 && (period < 1 || period > 3600))) throw new Error('invalid sweep period (0 or 1–3600 s)');
+    const reply = await this.request(`w${period}`, (l) => l.startsWith('sweep ') || l.startsWith('usage: w'));
+    if (reply !== (period ? `sweep ${period}s` : 'sweep off')) throw new Error(`sweep not accepted: ${reply || 'no reply'}`);
+  }
+
   protected setStatus(s: TransportStatus, detail?: string): void { this.status = s; this.onStatus(s, detail); }
 
   /** Incoming bytes; lines may span chunks. */
