@@ -49,7 +49,7 @@ Baseline @ f0a3de7: **20.6 fps, render 44.4 ms**, digits 20.7 ms of it; parity ~
   whether all had fizz on (a fizz-only change: all on, and `--no-fizz` byte-identical).
 - `tools/compare-device.py` — device strips vs `sim/tools/render-ref.ts`; writes `.compare/{device,ref,diff}.png`.
   Read `diff.png` when mismatches grow (yellow = >12/255).
-- `tools/flash.sh` / `flash-win.sh` — app-only flash, NVS-tuned params survive; the clock resets to 10:09:30.
+- `tools/flash.sh` / `flash-win.sh` — app-only flash, NVS-tuned params survive; the clock resets to the last saved sim time (NVS, saved on `T` + each minute), else 10:09:30.
 - `python.exe "$(wslpath -w tools/ble-session.py)" s f` — same protocol over BLE from the Windows radio.
 
 ## Rules

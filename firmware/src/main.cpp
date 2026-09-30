@@ -3,6 +3,7 @@
 //   l  liquid face (default)          c  calibration face        h  hello / orientation test
 //   f  live fps + frame timing        i  toggle IMU stream (50 Hz CSV)
 //   t HH:MM[:SS]  set clock           d<N>  demo time speed ×N (d1 = real time, d0 = freeze; persists in NVS)
+//   T <epoch_s> <tz_min>  set clock from the sim (persists in NVS, re-saved each minute; power-on resumes from it)
 //   w<N>  minutes sweep: the minutes tube runs empty→full→empty every N s, hours keep the clock (w0 = off; persists in NVS)
 //   p<name>=<value>  set a param (e.g. p liquid=#39ff14, p fizz=0, p contactAngle=140)
 //   p?  dump params as JSON           p!  reset params to the built-in preset (and erase NVS copy)
@@ -87,7 +88,7 @@ static ImuFilter imuFilter;
 static TiltInput rawTilt = {0, 0, 0, 0};
 static float demoSpeed = 1;          // time multiplier (d<N>); NVS key "demo", so demo mode survives resets and power loss
 // Wall clock lives in the RTC-backed system time (settimeofday): survives the USB-CDC DTR/RTS reset
-// that every host port open/close triggers. Power-on starts at 0 → default 10:09:30 until `t`/`T`.
+// that every host port open/close triggers. Power-on starts at 0 → last saved sim time from NVS, else 10:09:30.
 // demoOffset sits in RTC memory next to it so a running demo clock survives that reset too.
 RTC_NOINIT_ATTR static double demoOffset;         // seconds added by demo speed on top of real time
 RTC_NOINIT_ATTR static uint32_t demoOffsetMagic;  // demoOffset valid (RTC memory is garbage after power-on)
@@ -111,7 +112,26 @@ static void sweepLoad() {
 static void sweepSave() { if (prefs.getFloat("sweep", 0) != sweepPeriod) prefs.putFloat("sweep", sweepPeriod); }
 static double clockSec = 0;          // local seconds since midnight, refreshed every physics step
 static const time_t CLOCK_EPOCH_MIN = 86400L * 365;  // below this = never set since power-on
-static void setClockLocal(time_t localSec) { timeval tv = { localSec, 0 }; settimeofday(&tv, nullptr); demoOffset = 0; }
+// Real time from the sim (`T`) persists in NVS key "clk": saved on `T` and then once a minute, so power-on
+// resumes where the clock stopped (stale by the time spent off, no RTC battery). A `t` pin (bench scenes)
+// stops the minute saves until the next `T`. clockFromSim sits in RTC memory to survive the soft resets.
+RTC_NOINIT_ATTR static uint32_t clockFromSim;     // CLOCK_SIM_MAGIC while system time is sim-derived
+static const uint32_t CLOCK_SIM_MAGIC = 0x73696d74;
+static const uint32_t CLOCK_SAVE_MS = 60000;
+static uint32_t clockSavedAt = 0;
+static void setClockLocal(time_t localSec, bool fromSim) {
+  timeval tv = { localSec, 0 }; settimeofday(&tv, nullptr); demoOffset = 0;
+  clockFromSim = fromSim ? CLOCK_SIM_MAGIC : 0;
+}
+static void clockSave() { if (clockFromSim == CLOCK_SIM_MAGIC) prefs.putLong64("clk", time(nullptr)); clockSavedAt = millis(); }
+static void clockSaveTick() { if (millis() - clockSavedAt >= CLOCK_SAVE_MS) clockSave(); }
+static void clockRestore() {
+  clockSavedAt = millis();
+  if (time(nullptr) >= CLOCK_EPOCH_MIN) return;   // system time (and clockFromSim) survived the reset
+  int64_t v = prefs.getLong64("clk", 0);
+  if (v >= CLOCK_EPOCH_MIN) { setClockLocal((time_t)v, true); out.println("clock: last sim time restored from nvs"); }
+  else setClockLocal(CLOCK_EPOCH_MIN + 10 * 3600 + 9 * 60 + 30, false);
+}
 static double clockNow() {
   timeval tv; gettimeofday(&tv, nullptr);
   double s = fmod((double)(tv.tv_sec % 86400) + tv.tv_usec * 1e-6 + demoOffset, 86400.0);
@@ -366,10 +386,10 @@ static void handleLine(char *line) {
     case 'i': imu_stream = !imu_stream; out.printf("imu stream %s\n", imu_stream ? "on (t_ms,ax,ay,az,gx,gy,gz)" : "off"); break;
     case 'b': { int v = atoi(arg); display_set_brightness(constrain(v, 0, 255)); out.printf("brightness %d\n", v); break; }
     case 'H': { bool on = atoi(arg) != 0; display_set_hbm(on); out.printf("hbm %s\n", on ? "on" : "off"); break; }   // experiment only: tints cyan, browns out the board
-    case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { setClockLocal(CLOCK_EPOCH_MIN + hh * 3600 + mm * 60 + ss); out.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else out.println("usage: t HH:MM[:SS]"); break; }
+    case 't': { int hh = 0, mm = 0, ss = 0; if (sscanf(arg, "%d:%d:%d", &hh, &mm, &ss) >= 2) { setClockLocal(CLOCK_EPOCH_MIN + hh * 3600 + mm * 60 + ss, false); out.printf("time %02d:%02d:%02d\n", hh, mm, ss); } else out.println("usage: t HH:MM[:SS]"); break; }
     case 'T': {  // T <epoch_s> <tz_offset_min>: local time = epoch + tz
       long long ep = 0; int tz = 0;
-      if (sscanf(arg, "%lld %d", &ep, &tz) >= 1) { setClockLocal((time_t)(ep + tz * 60L)); clockSec = clockNow(); out.printf("time %02d:%02d:%02d\n", (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60); }
+      if (sscanf(arg, "%lld %d", &ep, &tz) >= 1) { setClockLocal((time_t)(ep + tz * 60L), true); clockSave(); clockSec = clockNow(); out.printf("time %02d:%02d:%02d\n", (int)clockSec / 3600, ((int)clockSec / 60) % 60, (int)clockSec % 60); }
       else out.println("usage: T <epoch_s> <tz_min>");
       break; }
     case 'd': demoSpeed = atof(arg); demoSave(); out.printf("demo speed x%g\n", demoSpeed); break;
@@ -447,7 +467,7 @@ void setup() {
   sweepLoad();
   out.printf("imu: %s\n", have_imu ? "ok" : "NOT FOUND");
   show(BOOT_MODE);
-  if (time(nullptr) < CLOCK_EPOCH_MIN) setClockLocal(CLOCK_EPOCH_MIN + 10 * 3600 + 9 * 60 + 30);
+  clockRestore();
   clockSec = clockNow();
   ble_init("liquid-watch");
   out.println("ready. ? for commands");
@@ -466,5 +486,6 @@ void loop() {
   for (int c; (c = ble_read()) >= 0;) feedByte((char)c);
   imu_poll();
   paramsFlush();
+  clockSaveTick();
   if (mode == 'l') liquid_tick(); else delay(1);
 }

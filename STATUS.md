@@ -349,7 +349,7 @@ RTC: the demos contain no external RTC driver — assume ESP32-S3 internal RTC o
 `firmware/` @ this commit. Boots into the **liquid face** (`l`) = 1:1 port of the sim renderer + physics
 with `presets/1.json` baked in, driven by the live IMU at 50 Hz; **~40 fps**. Serial commands @115200
 (newline-terminated): `l` liquid, `c` calibration face, `h` hello, `f` fps bench, `s` status line,
-`i` IMU CSV stream, `t HH:MM[:SS]` set clock (no RTC battery — defaults to 10:09:30 at boot),
+`i` IMU CSV stream, `t HH:MM[:SS]` set clock (no RTC battery — power-on resumes from the sim time saved to NVS on `T` and each minute, else 10:09:30),
 `d<N>` demo speed (×N, `d0` freeze, `d1` real), `w<N>` minutes sweep (minutes tube empty→full→empty every N s, `w0` off; NVS), `p<name>=<value>` set ANY param live by its sim name
 (`pliquid=#39ff14`, `pfizz=0`, `pcontactAngle=140`), `p?` dump params as JSON (sim-importable), `p!` reset
 to the preset, `b<0-255>` panel dimmer, `r` reboot, `?` help. Same protocol over **BLE** (Nordic UART Service,
