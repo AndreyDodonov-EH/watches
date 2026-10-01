@@ -1568,9 +1568,11 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
   if (mirrored(p)) along = -along;   // fizz lives in the mirrored liquid frame (see drawTube)
   const float speed = p.fizzSpeed * (1 + 3 * agitation);
   const float up = sqrtf(fmx(0.0f, 1 - along * along - across * across));
-  const float a = clampf(across * p.fizzAcrossGain, -1, 1);
-  const float vy = -speed * ((1 - fabsf(a)) * up * p.fizzFlatRise + a);
-  const float vxTilt = -speed * clampf(along * p.fizzDriftGain, -1, 1);
+  const float a = clampf(across * p.fizzAcrossGain, -1, 1), al = clampf(along * p.fizzDriftGain, -1, 1);
+  // Vertical watch: the viewer's up is the tube's top end (+x), so the face-up rise goes along the tube, not across it.
+  const float flat = up * p.fizzFlatRise; const bool V = p.vertical;
+  const float vy = -speed * ((V ? 0 : (1 - fabsf(a)) * flat) + a);
+  const float vxTilt = -speed * (al - (V ? (1 - fabsf(al)) * flat : 0));
   const bool spring = p.fizzSource == 1; const float wall = fizzWall(p);
   const bool hold = spring && p.fizzFoamLife > 0 && vy != 0;   // the bore wall the rise points at holds the stream
   const float letGo = hold ? dt * (1 + 3 * agitation) / p.fizzFoamLife : 0;   // per-step chance a held bubble lets go

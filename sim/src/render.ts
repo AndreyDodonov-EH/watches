@@ -889,7 +889,7 @@ function springSpawn(f: Fizz, p: Params, H: number, surf: Float32Array, surfL: F
 }
 /** Fizz rises against the in-plane gravity (`along`, `across`) at `fizzSpeed` px/s on both axes:
  *  along-tilt drives it toward the high end (`fizzDriftGain`), across-tilt toward the high edge (`fizzAcrossGain`).
- *  Out-of-plane gravity (face up) reads as a slow screen-up rise (`fizzFlatRise`) plus a drift toward the
+ *  Out-of-plane gravity (face up) reads as a slow screen-up rise (`fizzFlatRise`: -y, or +x on a vertical watch) plus a drift toward the
  *  exposed surface (`fizzEdgeRise`: the time edge, or the home edge of a free slug whose time edge sits
  *  against the far end); shake speeds everything up.
  *  A bubble leaving the liquid on either axis respawns at the low side of that axis — except at an exposed
@@ -901,9 +901,11 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
   if (mirrored(p)) along = -along; // fizz lives in the mirrored liquid frame (see drawTube)
   const speed = p.fizzSpeed * (1 + 3 * agitation);
   const up = Math.sqrt(Math.max(0, 1 - along * along - across * across));
-  const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain));
-  const vy = -speed * ((1 - Math.abs(a)) * up * p.fizzFlatRise + a);   // screen up = -y
-  const vxTilt = -speed * Math.max(-1, Math.min(1, along * p.fizzDriftGain));
+  const a = Math.max(-1, Math.min(1, across * p.fizzAcrossGain)), al = Math.max(-1, Math.min(1, along * p.fizzDriftGain));
+  // Vertical watch: the viewer's up is the tube's top end (+x), so the face-up rise goes along the tube, not across it.
+  const flat = up * p.fizzFlatRise, V = p.vertical;
+  const vy = -speed * ((V ? 0 : (1 - Math.abs(a)) * flat) + a);   // screen up = -y
+  const vxTilt = -speed * (al - (V ? (1 - Math.abs(al)) * flat : 0));
   const H = tubeLayout(p).H, spring = p.fizzSource === 1, wall = fizzWall(p);
   const hold = spring && p.fizzFoamLife > 0 && vy !== 0;   // the bore wall the rise points at holds the stream
   const letGo = hold ? dt * (1 + 3 * agitation) / p.fizzFoamLife : 0;   // per-step chance a held bubble lets go
