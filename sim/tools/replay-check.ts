@@ -209,6 +209,41 @@ for (const [name, samples] of scenarios) {
   }
   console.log('ok  automatic liquid: tilt → read → hold 60 s → tilt, both directions and fill extremes');
 
+  // Vertical watch: upright (bottom end down) is the reading pose and a true rest — no bounce, no film, no slosh;
+  // the surface stays level against a sideways tilt whatever the material; turned over, a free slug lets go.
+  for (const freeLiquid of [false, true]) for (const remaining of [false, true]) for (const viscous of [false, true]) {
+    const pp = { ...DEFAULT_PARAMS, vertical: true, freeLiquid, remaining, ...(viscous ? { angleTiltGain: 1.5, angleMax: 3 } : {}) };
+    const tube = newTube(); tube.fillTarget = 0.3;
+    const travel = TUBE_LENGTH_PX - columnLen(0.3, pp), filt = new ImuFilter();
+    const tag = `vertical (free=${freeLiquid}, remaining=${remaining}, viscous=${viscous})`;
+    const step = (along: number, across: number, n: number) => { for (let i = 0; i < n; i++) stepTube(tube, filt.step({ along, across, gyroAlong: 0, gyroAcross: 0 }, pp), pp); };
+    const still = () => Math.abs(tube.slugPos) < 0.01 && tube.slugVel === 0 && tube.filmHome < 0.01 && Math.abs(tube.fillPos) < 0.01;
+    step(-1, 0, 500);
+    if (tube.reading < 0.99 || !still() || Math.abs(tube.angle) > 0.5 || Math.abs(tube.edgeLight) > 0.01)
+      fail(`${tag}: upright is not a rest (reading ${tube.reading}, slug ${tube.slugPos} @ ${tube.slugVel}, film ${tube.filmHome}, slosh ${tube.fillPos}, angle ${tube.angle})`);
+    step(-0.866, 0.5, 500);
+    if (Math.abs(tube.angle - 30) > 1 || !still()) fail(`${tag}: 30° sideways: angle ${tube.angle}, slug ${tube.slugPos} @ ${tube.slugVel}`);
+    step(-0.866, -0.5, 500);
+    if (Math.abs(tube.angle + 30) > 1 || !still()) fail(`${tag}: -30° sideways: angle ${tube.angle}, slug ${tube.slugPos} @ ${tube.slugVel}`);
+    // turned over and tilted sideways: the level surface slopes the other way; on its side: no slope, no flipping
+    for (const side of [0.5, -0.5]) {
+      step(0.866, side, 500);
+      if (Math.abs(tube.angle + Math.sign(side) * 30) > 1) fail(`${tag}: inverted, across ${side}: angle ${tube.angle}`);
+    }
+    step(0, 1, 500);
+    if (Math.abs(tube.angle) > 0.5) fail(`${tag}: on its side: angle ${tube.angle}`);
+    step(-1, 0, 500);
+    step(0, 0, 500);
+    if (Math.abs(tube.angle) > 0.5 || tube.reading < 0.99 || Math.abs(tube.slugPos) > 0.01 || Math.abs(tube.slugVel) > 0.01 || Math.abs(tube.fillPos) > 0.01) fail(`${tag}: flat: angle ${tube.angle}, reading ${tube.reading}`);
+    if (freeLiquid) {
+      step(0.9, 0, 250);
+      if (tube.reading > 0.01 || tube.slugPos < travel - 5 || tube.slugVel !== 0) fail(`${tag}: turned over: reading ${tube.reading}, slug ${tube.slugPos} @ ${tube.slugVel} of ${travel}`);
+      step(-1, 0, 500);
+      if (tube.reading < 0.99 || Math.abs(tube.slugPos) > 0.01 || Math.abs(tube.slugVel) > 0.01) fail(`${tag}: did not return upright (reading ${tube.reading}, slug ${tube.slugPos})`);
+    }
+  }
+  console.log('ok  vertical watch: upright rest, level surface at ±30° upright and inverted, on its side, flat, turned over and back');
+
   // Both axes and diagonals use the physical angle, independent of artistic input gain/deadzone.
   for (const inputGain of [0.1, 1, 2]) for (const axis of ['along', 'across', 'diagonal']) {
     const pp = { ...pf, inputGain, deadzone: 0.2 };

@@ -24,7 +24,9 @@ static inline uint32_t traceUneven(uint32_t n) {
 float lightRest(float along, float across, const Params &p) {
   float n = sqrtf(fmaxf(0, 1 - along * along - across * across));
   float phys = atan2f(across, n) * 180 / (float)M_PI / 2;
-  return p.lightAngle + (phys - p.lightAngle) * p.lightPhys;
+  // Vertical watch held upright: almost no gravity in the cross-section, the angle is noise — fade to the style angle.
+  const float w = p.vertical ? fminf(1, 2 * sqrtf(across * across + n * n)) : 1;
+  return p.lightAngle + (phys - p.lightAngle) * p.lightPhys * w;
 }
 
 float columnLen(float fillTarget, const Params &p) { return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX; }
@@ -71,7 +73,9 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
       s.playWindow = PLAY_REVERSAL_S;
     }
   }
-  const float tilt = asinf(fminf(1, sqrtf(in.along * in.along + in.across * in.across) / gain)) * 180 / (float)M_PI;
+  // Vertical watch: upright (bottom end down) is the reading pose; gravity toward the bottom end is no tilt. See sim.
+  const float tiltAlong = p.vertical ? fmaxf(0, in.along) : in.along;
+  const float tilt = asinf(fminf(1, sqrtf(tiltAlong * tiltAlong + in.across * in.across) / gain)) * 180 / (float)M_PI;
   const float start = clampf(p.readTiltStart, 0, 89);
   const float end = fmaxf(start + 1, fminf(90, p.readTiltEnd));
   const float t = clampf((tilt - start) / (end - start), 0, 1);
@@ -79,7 +83,10 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   s.reading += (readTarget - s.reading) * fminf(1, 4 * dt);
   const float flow = p.freeLiquid ? 1 - s.reading : 1;
 
-  const float fillRest = clampf(along * p.fillSloshGain * flow, -FILL_SLOSH_MAX_PX, FILL_SLOSH_MAX_PX);
+  // Vertical watch: the along axis carries gravity itself, taken by the tube's closed bottom end — no tilt offset
+  // for the edge or its light (the slug, the light angle and the film's drying still feel it). See sim.
+  const float sloshAlong = p.vertical ? 0 : along;
+  const float fillRest = clampf(sloshAlong * p.fillSloshGain * flow, -FILL_SLOSH_MAX_PX, FILL_SLOSH_MAX_PX);
   const float fillKick = in.gyroAcross * p.angleGyroGain * 4 * flow;
   const float fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
   const float fill0 = s.fillPos;
@@ -90,7 +97,8 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
 
   // Free liquid: slug slides under along-gravity with drag, bounces at the ends, parked home while reading.
   const float travel = fmaxf(0, TUBE_LENGTH_PX - columnLen(s.fillTarget, p));
-  const float home = p.remaining ? travel : 0;
+  const bool mir = mirrored(p);
+  const float home = mir ? travel : 0;
   float slugAcc = 0, slugStep = 0;   // px the slug really moved this tick (a wall stops it, whatever slugVel says)
   if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
   else {
@@ -100,10 +108,13 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
     s.slugVel += slugAcc * dt;
     s.slugPos += s.slugVel * dt;
     if (s.slugPos <= 0 || s.slugPos >= travel) {   // wall carries the load; the hit is an impulse
+      const float wall = s.slugPos <= 0 ? 0 : travel;
       const bool hit = s.slugPos <= 0 ? s.slugVel < 0 : s.slugVel > 0;
-      s.slugPos = s.slugPos <= 0 ? 0 : travel;
-      if (hit) s.slugVel = -s.slugVel * p.freeBounce;
-      slugAcc = hit ? (s.slugVel - v0) / dt * 0.25f : 0;
+      const bool resting = hit && fabsf(x0 - wall) < 0.01f;   // pressed into the wall it already sat on: no impact
+      s.slugPos = wall;
+      if (resting) s.slugVel = 0;
+      else if (hit) s.slugVel = -s.slugVel * p.freeBounce;
+      slugAcc = hit && !resting ? (s.slugVel - v0) / dt * 0.25f : 0;
     }
     slugStep = s.slugPos - x0;
   }
@@ -118,7 +129,7 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   if (s.cap < -CAP_DYN_MAX_PX) { s.cap = -CAP_DYN_MAX_PX; s.capVel = fmaxf(0, s.capVel); }
 
   // Wet film: fast attack while an edge recedes, slow drain.
-  const float recede = p.remaining ? 1 : -1;
+  const float recede = mir ? 1 : -1;
   auto filmT = [](float v) { return clampf(v / FILM_FULL_PX_S, 0, 1); };
   auto follow = [dt](float cur, float target) { return cur + (target - cur) * fminf(1, (target > cur ? 15 : 2) * dt); };
   s.filmFree = follow(s.filmFree, filmT(recede * edgeVel));
@@ -131,8 +142,8 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   if (p.traces && s.trace) {
     const float len = columnLen(s.fillTarget, p);
     const float fp = clampf(s.fillPos, -len, len);
-    const float xt = p.remaining ? s.slugPos + fp : (p.freeLiquid ? s.slugPos : 0.0f) + len + fp;
-    const float xh = p.remaining ? len + s.slugPos : (p.freeLiquid ? s.slugPos : 0.0f);
+    const float xt = mir ? s.slugPos + fp : (p.freeLiquid ? s.slugPos : 0.0f) + len + fp;
+    const float xh = mir ? len + s.slugPos : (p.freeLiquid ? s.slugPos : 0.0f);
     if (!s.traceInit) s.traceInit = true;
     else {
       // deposit thins with edge speed (traceThin): a fast sweep stretches the film, so the residue
@@ -144,8 +155,8 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
         for (int x = lo; x < hi; x++) s.trace[x] = v;
         if (hi > lo) { if (lo < s.traceLo) s.traceLo = (int16_t)lo; if (hi > s.traceHi) s.traceHi = (int16_t)hi; }
       };
-      if (p.remaining) dep(s.xtPrev, xt); else dep(xt, s.xtPrev);
-      if (p.freeLiquid) { if (p.remaining) dep(xh, s.xhPrev); else dep(s.xhPrev, xh); }
+      if (mir) dep(s.xtPrev, xt); else dep(xt, s.xtPrev);
+      if (p.freeLiquid) { if (mir) dep(xh, s.xhPrev); else dep(s.xhPrev, xh); }
     }
     s.xtPrev = xt; s.xhPrev = xh;
     // Linearised rates (dt·rate ≪ 1: caps below). floorf, not round-to-nearest — with a slow
@@ -177,8 +188,13 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
     s.traceLo = TUBE_LENGTH_PX; s.traceHi = 0;
   }
 
-  const float aMax = fminf(p.angleMax, ANGLE_HARD_MAX_DEG);
-  const float angleRest = clampf(across * p.angleTiltGain, -aMax, aMax);   // in-plane gravity only (see sim physics.ts)
+  // Vertical watch: the surface stays level — the front settles at the tube's in-plane tilt from the vertical,
+  // faded out as the panel's plane loses gravity; turned over the slope is the other way, the sign crossing over
+  // a ±0.15 g band of along (see sim).
+  const float aMax = p.vertical ? ANGLE_VERTICAL_MAX_DEG : fminf(p.angleMax, ANGLE_HARD_MAX_DEG);
+  const float angleRest = clampf(p.vertical
+    ? fminf(1, 2 * sqrtf(poseAlong * poseAlong + poseAcross * poseAcross)) * clampf(-poseAlong / 0.15f, -1, 1) * atan2f(poseAcross, fabsf(poseAlong)) * 180 / (float)M_PI
+    : across * p.angleTiltGain, -aMax, aMax);   // in-plane gravity only (see sim physics.ts)
   const float angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel;
   s.angleVel += angleAcc * dt;
   s.angle += s.angleVel * dt;
@@ -194,7 +210,7 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
 
   const float shake = fminf(1, ((fabsf(in.gyroAcross) + fabsf(in.gyroAlong)) / 200) * p.shakeGain);
   s.agitation += (shake - s.agitation) * fminf(1, (shake > s.agitation ? 20 : 2) * dt);
-  s.edgeLight += (clampf(along, -1, 1) - s.edgeLight) * fminf(1, 5 * dt);
+  s.edgeLight += (clampf(sloshAlong, -1, 1) - s.edgeLight) * fminf(1, 5 * dt);
   s.acrossTilt += (clampf(across, -1, 1) - s.acrossTilt) * fminf(1, 5 * dt);
 
   // Pinned contact lines: the tilt pressure moves each end's static lead (a held line that would end up

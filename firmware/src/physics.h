@@ -9,6 +9,7 @@
 #define PLAY_REVERSAL_S 2.0f     // opposite strokes inside this window count as play
 #define FILL_SLOSH_MAX_PX 30.0f   // structural caps — params only tighten, never widen
 #define ANGLE_HARD_MAX_DEG 20.0f
+#define ANGLE_VERTICAL_MAX_DEG 45.0f   // vertical watch: the surface stays level against the tilted tube
 #define LIGHT_MAX_DEG 85.0f
 #define CAP_DYN_MAX_PX 12.0f      // |cap| cap: dynamic meniscus bulge / hollow
 #define PIN_RELAX_S 3.0f          // a held contact line creeps back to the static shape (wrist micro-motion), s
@@ -47,6 +48,9 @@ struct TubeState {
 };
 
 float columnLen(float fillTarget, const Params &p);   // liquid column length, px
+// Column drawn from the right end (mirrored frame). A vertical watch keeps the liquid at the bottom (left end):
+// there `remaining` only flips the scale and the column length. See sim mirrored().
+inline bool mirrored(const Params &p) { return p.remaining && !p.vertical; }
 uint16_t *traceBuf(int i);                            // static residue buffer of tube i
 
 float lightRest(float along, float across, const Params &p);

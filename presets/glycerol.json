@@ -4,6 +4,7 @@
   "hoursY": 0,
   "minutesY": 185,
   "remaining": true,
+  "vertical": false,
   "liquid": "#878787",
   "liquidHi": "#878787",
   "liquidLo": "#575757",

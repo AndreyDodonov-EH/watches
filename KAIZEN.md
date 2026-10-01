@@ -473,3 +473,12 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 
 ## Meniscus help text (2026-09-29)
 - `PARAM_META` help is stale vs derive: `contactDyn` says "honey 180°" (derive clamps to 90); `capLength` says "water 2.7, oils ~1.9" (derived display-scaled values are 2.17 / 1.5–1.8 since the bore-radius change).
+
+## Vertical watch mode (2026-10-01)
+- `check_meniscus.py` fails at HEAD on `marks-blick-moving` (403,34): 17/255 > 12, and aborts before the later scenes — report all failing scenes instead of raising on the first.
+- `npm run check:imu` fails at HEAD: 14 presets "reading did not settle (160.8)".
+- Vertical: fizz core/pinpoint light still comes from panel-left (= from below as worn); `lxS` could follow the pose.
+- Vertical: phone "device orientation" input is mapped for landscape only.
+- Vertical: leather overlay lighting/gloss just rotates with the panel; calibration / hello faces on the board stay landscape.
+- Vertical: labels are centred across the tube with no offset knob (`digitBottom*` unused); two-digit labels can sit on long ticks or clip in narrow tubes.
+- Vertical mode could switch by itself from the IMU pose (auto / hysteresis) instead of a param.

@@ -22,6 +22,7 @@ export interface TiltInput {
 // can ever make the liquid run off the end of the tube. Ported to firmware as-is.
 export const FILL_SLOSH_MAX_PX = 30;  // |fillPos| cap
 export const ANGLE_HARD_MAX_DEG = 20; // |angle| cap (params.angleMax tightens it, never widens)
+export const ANGLE_VERTICAL_MAX_DEG = 45; // |angle| cap of a vertical watch, whose surface stays level against the tilted tube
 export const LIGHT_MAX_DEG = 85;      // |light| cap
 export const CAP_DYN_MAX_PX = 12;     // |cap| cap: dynamic meniscus bulge / hollow
 export const PIN_RELAX_S = 3;         // a held contact line creeps back to the static shape (wrist micro-motion), s
@@ -102,6 +103,12 @@ function traceUneven(n: number): number {
   return h >>> 0;
 }
 
+/** Whether the column is drawn from the right end (the mirrored frame). A vertical watch keeps the liquid at
+ *  the bottom (left end) whatever `remaining` says: there the flag only flips the scale and the column length. */
+export function mirrored(p: Params): boolean {
+  return p.remaining && !p.vertical;
+}
+
 /** Length of the liquid column, px. */
 export function columnLen(fillTarget: number, p: Params): number {
   return (p.remaining ? 1 - fillTarget : fillTarget) * TUBE_LENGTH_PX;
@@ -137,7 +144,10 @@ export function contactLeads(p: Params, len: number, tilt: number): { R: number;
 export function lightRest(along: number, across: number, p: Params): number {
   const n = Math.sqrt(Math.max(0, 1 - along * along - across * across));
   const phys = (Math.atan2(across, n) * 180) / Math.PI / 2;
-  return p.lightAngle + (phys - p.lightAngle) * p.lightPhys;
+  // Vertical watch: held upright the cross-section sees almost no gravity and the angle is noise — fade to the
+  // style angle as that component vanishes (full weight from 0.5 g).
+  const w = p.vertical ? Math.min(1, 2 * Math.hypot(across, n)) : 1;
+  return p.lightAngle + (phys - p.lightAngle) * p.lightPhys * w;
 }
 
 function dz(v: number, d: number): number {
@@ -172,7 +182,9 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
       s.playWindow = PLAY_REVERSAL_S;
     }
   }
-  const tilt = Math.asin(Math.min(1, Math.hypot(inp.along, inp.across) / gain)) * 180 / Math.PI;
+  // Vertical watch: the reading pose is upright, bottom end down — gravity toward the bottom end is no tilt; what
+  // counts is gravity toward the top end (turned over) or across the tube (laid on its side).
+  const tilt = Math.asin(Math.min(1, Math.hypot(p.vertical ? Math.max(0, inp.along) : inp.along, inp.across) / gain)) * 180 / Math.PI;
   const start = Math.max(0, Math.min(89, p.readTiltStart));
   const end = Math.max(start + 1, Math.min(90, p.readTiltEnd));
   const t = Math.max(0, Math.min(1, (tilt - start) / (end - start)));
@@ -181,7 +193,10 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   const flow = p.freeLiquid ? 1 - s.reading : 1;
 
   // Fill-edge slosh: static offset proportional to along-tilt; spring returns to rest.
-  const fillRest = Math.max(-FILL_SLOSH_MAX_PX, Math.min(FILL_SLOSH_MAX_PX, along * p.fillSloshGain * flow));
+  // Vertical watch: the along axis carries gravity itself, which the tube's closed bottom end takes — it is no
+  // tilt offset for the edge or its light (the slug, the light angle and the film's drying still feel it).
+  const sloshAlong = p.vertical ? 0 : along;
+  const fillRest = Math.max(-FILL_SLOSH_MAX_PX, Math.min(FILL_SLOSH_MAX_PX, sloshAlong * p.fillSloshGain * flow));
   const fillKick = inp.gyroAcross * p.angleGyroGain * 4 * flow; // quick flicks kick the edge
   const fillAcc = -p.fillK * (s.fillPos - fillRest) - p.fillDamp * s.fillVel + fillKick;
   const fill0 = s.fillPos;
@@ -193,7 +208,8 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   // Free liquid: the slug slides under the along component of gravity with viscous drag and
   // bounces off the tube ends; while reading, a critically damped pull parks it at its home end.
   const travel = Math.max(0, TUBE_LENGTH_PX - columnLen(s.fillTarget, p));
-  const home = p.remaining ? travel : 0;
+  const mir = mirrored(p);
+  const home = mir ? travel : 0;
   let slugAcc = 0, slugStep = 0;   // px the slug really moved this tick (a wall stops it, whatever slugVel says)
   if (!p.freeLiquid) { s.slugPos = home; s.slugVel = 0; }
   else {
@@ -204,10 +220,14 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
     s.slugPos += s.slugVel * dt;
     // At an end the wall carries the load (no forcing on the surface); the hit itself is an impulse.
     if (s.slugPos <= 0 || s.slugPos >= travel) {
+      const wall = s.slugPos <= 0 ? 0 : travel;
       const hit = s.slugPos <= 0 ? s.slugVel < 0 : s.slugVel > 0;
-      s.slugPos = s.slugPos <= 0 ? 0 : travel;
-      if (hit) s.slugVel = -s.slugVel * p.freeBounce;
-      slugAcc = hit ? (s.slugVel - v0) / dt * 0.25 : 0;
+      // Pressed into the wall it already sat on: resting contact, not an impact — no rebound, no speed.
+      const resting = hit && Math.abs(x0 - wall) < 0.01;
+      s.slugPos = wall;
+      if (resting) s.slugVel = 0;
+      else if (hit) s.slugVel = -s.slugVel * p.freeBounce;
+      slugAcc = hit && !resting ? (s.slugVel - v0) / dt * 0.25 : 0;
     }
     slugStep = s.slugPos - x0;
   }
@@ -224,7 +244,7 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   if (s.cap < -CAP_DYN_MAX_PX) { s.cap = -CAP_DYN_MAX_PX; s.capVel = Math.max(0, s.capVel); }
 
   // Wet film: fast attack while an edge recedes (moves toward the liquid), slow drain.
-  const recede = p.remaining ? 1 : -1;   // panel-frame direction the time edge moves when receding
+  const recede = mir ? 1 : -1;   // panel-frame direction the time edge moves when receding
   const filmT = (v: number): number => Math.max(0, Math.min(1, v / FILM_FULL_PX_S));
   const follow = (cur: number, target: number): number => cur + (target - cur) * Math.min(1, (target > cur ? 15 : 2) * dt);
   s.filmFree = follow(s.filmFree, filmT(recede * edgeVel));
@@ -240,8 +260,8 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   if (p.traces) {
     const len = columnLen(s.fillTarget, p);
     const fp = Math.max(-len, Math.min(len, s.fillPos));
-    const xt = p.remaining ? s.slugPos + fp : (p.freeLiquid ? s.slugPos : 0) + len + fp;
-    const xh = p.remaining ? len + s.slugPos : p.freeLiquid ? s.slugPos : 0;
+    const xt = mir ? s.slugPos + fp : (p.freeLiquid ? s.slugPos : 0) + len + fp;
+    const xh = mir ? len + s.slugPos : p.freeLiquid ? s.slugPos : 0;
     if (!s.traceInit) s.traceInit = true;
     else {
       // the time edge recedes toward -x when filling (!remaining), toward +x when draining;
@@ -256,8 +276,8 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
         for (let x = lo; x < hi; x++) s.trace[x] = v;
         if (hi > lo) { if (lo < s.traceLo) s.traceLo = lo; if (hi > s.traceHi) s.traceHi = hi; }
       };
-      if (p.remaining) dep(s.xtPrev, xt); else dep(xt, s.xtPrev);
-      if (p.freeLiquid) { if (p.remaining) dep(xh, s.xhPrev); else dep(s.xhPrev, xh); }
+      if (mir) dep(s.xtPrev, xt); else dep(xt, s.xtPrev);
+      if (p.freeLiquid) { if (mir) dep(xh, s.xhPrev); else dep(s.xhPrev, xh); }
     }
     s.xtPrev = xt; s.xhPrev = xh;
     // Linearised rates (dt·rate ≪ 1 always: caps below). Math.floor, not round-to-nearest — with a
@@ -287,8 +307,15 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
 
   // Front skew: the screen is the tube's cross-section plane, so only the across component of
   // gravity (the one fizz rises against) tilts the front on screen. Along-tilt is out of plane.
-  const aMax = Math.min(p.angleMax, ANGLE_HARD_MAX_DEG);
-  const angleRest = Math.max(-aMax, Math.min(aMax, across * p.angleTiltGain));
+  // Vertical watch: the surface of an upright column stays level, so the front settles at the tube's own in-plane
+  // tilt from the vertical (whatever the material: viscosity only sets how fast, angleK / angleDamp), faded out
+  // as the plane of the panel loses gravity (lying flat: no in-plane direction, only noise). Turned over, the slope
+  // is the other way; the sign crosses over a ±0.15 g band of along, so a watch on its side (along ≈ 0, where the
+  // level surface would run along the tube) rests at 0 instead of flipping between the caps on noise.
+  const aMax = p.vertical ? ANGLE_VERTICAL_MAX_DEG : Math.min(p.angleMax, ANGLE_HARD_MAX_DEG);
+  const angleRest = Math.max(-aMax, Math.min(aMax, p.vertical
+    ? Math.min(1, 2 * Math.hypot(poseAlong, poseAcross)) * Math.max(-1, Math.min(1, -poseAlong / 0.15)) * Math.atan2(poseAcross, Math.abs(poseAlong)) * 180 / Math.PI
+    : across * p.angleTiltGain));
   const angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel;
   s.angleVel += angleAcc * dt;
   s.angle += s.angleVel * dt;
@@ -310,7 +337,7 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
 
   // Edge light: slow follower of along-tilt. +1 = gravity presses the liquid into the right
   // end (edge glows brighter), -1 = drains away from it (edge dims). Consumed by the renderer.
-  s.edgeLight += (Math.max(-1, Math.min(1, along)) - s.edgeLight) * Math.min(1, 5 * dt);
+  s.edgeLight += (Math.max(-1, Math.min(1, sloshAlong)) - s.edgeLight) * Math.min(1, 5 * dt);
   s.acrossTilt += (Math.max(-1, Math.min(1, across)) - s.acrossTilt) * Math.min(1, 5 * dt);
 
   // Pinned contact lines (contact-angle hysteresis): the tilt pressure moves each end's static lead — a

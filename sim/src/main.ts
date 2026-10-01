@@ -111,10 +111,18 @@ app.addEventListener('input', save);
 app.addEventListener('change', save);
 
 const viewport = $('viewport');
+let shownVertical = params.vertical;
 const setScale = () => {
   const padX = overlay.enabled ? LEATHER_PAD_X : 0, padY = overlay.enabled ? LEATHER_PAD_Y : 0;
-  viewport.style.width = `${(PANEL_W + 2 * padX) * scale}px`; viewport.style.height = `${(PANEL_H + 2 * padY) * scale}px`;
-  wrap.style.transform = `translate(${padX * scale}px, ${padY * scale}px) scale(${scale})`;
+  // Vertical watch: the panel is shown as worn, turned a quarter counter-clockwise (USB end down, hours tube left).
+  // a manual input still at the old resting pose follows the watch to its new one (never on the first call: no change yet)
+  if (params.vertical !== shownVertical && manual.along === restAlong(shownVertical) && manual.across === 0) { manual.along = restAlong(params.vertical); syncSliders(); }
+  shownVertical = params.vertical;
+  const w = (PANEL_W + 2 * padX) * scale, h = (PANEL_H + 2 * padY) * scale;
+  viewport.style.width = `${shownVertical ? h : w}px`; viewport.style.height = `${shownVertical ? w : h}px`;
+  wrap.style.transform = shownVertical
+    ? `translate(${padY * scale}px, ${(PANEL_W + padX) * scale}px) rotate(-90deg) scale(${scale})`
+    : `translate(${padX * scale}px, ${padY * scale}px) scale(${scale})`;
   wrap.classList.toggle('smooth', scale < 2); // pixelated upscale only at ≥2; bilinear when shrinking
   // Below 1: canvas backing store at on-screen size, CSS size stays 536x240 so the wrap transform maps 1:1.
   const ss = Math.min(1, scale);
@@ -169,7 +177,9 @@ const alongS = $<HTMLInputElement>('along'), acrossS = $<HTMLInputElement>('acro
 const syncSliders = () => { alongS.value = String(manual.along); acrossS.value = String(manual.across); $('alongv').textContent = manual.along.toFixed(2); $('acrossv').textContent = manual.across.toFixed(2); };
 alongS.oninput = () => { manual.along = +alongS.value; syncSliders(); };
 acrossS.oninput = () => { manual.across = +acrossS.value; syncSliders(); };
-$('center').onclick = () => { manual.along = 0; manual.across = 0; syncSliders(); save(); };
+// Resting pose of the manual input: flat on the table, or upright (bottom end down) for a vertical watch.
+const restAlong = (vertical: boolean): number => vertical ? -1 : 0;
+$('center').onclick = () => { manual.along = restAlong(params.vertical); manual.across = 0; syncSliders(); save(); };
 
 /** Push the whole view state into the DOM + derived layers. Inverse of what `save()` collects. */
 function syncView(): void {
@@ -200,7 +210,9 @@ let shakeT = 0;
 const SHAKE_T = 2.5;
 $('shake').onclick = () => { shakeT = SHAKE_T; };
 let wristT = 0;   // wrist turn: 0.5 s roll burst about the tube axis, then the reading pose on the sliders
-$('wrist').onclick = () => { wristT = 0.5; manual.along = 0; manual.across = 0.2; syncSliders(); save(); };
+$('wrist').onclick = () => {   // vertical: upright with the face leaned back toward the eyes
+  wristT = 0.5; manual.along = params.vertical ? -0.87 : 0; manual.across = params.vertical ? 0 : 0.2; syncSliders(); save();
+};
 
 // drag on panel = tilt
 let dragging = false;
@@ -209,8 +221,9 @@ wrap.addEventListener('pointerup', () => { dragging = false; save(); });
 wrap.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   const r = wrap.getBoundingClientRect();
-  manual.along = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width) * 2 - 1));
-  manual.across = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height) * 2 - 1));
+  const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;   // shown turned when vertical: panel x runs up the screen
+  manual.along = Math.max(-1, Math.min(1, (shownVertical ? 1 - fy : fx) * 2 - 1));
+  manual.across = Math.max(-1, Math.min(1, (shownVertical ? fx : fy) * 2 - 1));
   syncSliders();
 });
 
@@ -490,6 +503,7 @@ function frame(now: number) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.25, (now - last) / 1000); last = now;
   if (!paused) { acc += dt; while (acc >= PHYS_DT) { physics(PHYS_DT); acc -= PHYS_DT; } }
+  if (params.vertical !== shownVertical) setScale();
   renderFrame(hours, minutes, params, true, overlay.lensSmooth);
   blit(img); fullctx.putImageData(img, 0, 0);
   fbctx.imageSmoothingEnabled = scale < 1; fbctx.drawImage(fullc, 0, 0);

@@ -31,6 +31,7 @@ export interface Params {
   minutesY: number;      // top row of the minutes tube
   // --- shape ---
   remaining: boolean;    // true = liquid at the right end, draining as time passes; false = fills from the left
+  vertical: boolean;     // watch worn upright, USB end down: liquid always at the bottom (left end), digits rotated to read upright; `remaining` then only flips the scale (1 at the top, the liquid shows what is left)
   highlightH: number;    // px, height of highlight strip at top of column
   highlightInset: number;
   highlightBright: number; // 0..1.5 strength of the specular band
@@ -203,6 +204,7 @@ export const DEFAULT_PARAMS: Params = {
   hoursY: 0,
   minutesY: 168,
   remaining: false,
+  vertical: false,
   liquid: '#346a2a',
   liquidHi: '#b6ffa0',
   liquidLo: '#1e7515',
@@ -1605,6 +1607,7 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   hoursY: { help: 'Top row of the hours tube, px.', group: 'Layout', label: 'hours tube y', min: 0, max: 224, step: 1 },
   minutesY: { help: 'Top row of the minutes tube, px.', group: 'Layout', label: 'minutes tube y', min: 0, max: 224, step: 1 },
   remaining: { help: 'On: liquid sits at the right end and drains as time passes. Off: fills from the left.', group: 'Shape', label: 'liquid = remaining' },
+  vertical: { help: 'Watch worn upright, USB end down (hours tube on the left). The liquid always rests at the bottom and the digits are rotated to read upright. "liquid = remaining" then only flips the scale: off = digits run bottom to top and the liquid shows the time passed, on = digits run top to bottom and the liquid shows what is left. Digits are centred across the tube (digit bottom offsets do not apply). Digit scale X / Y swap roles (X stays along the tube).', group: 'Shape', label: 'vertical watch' },
   highlightH: { help: 'Height of the specular strip at the top of the column, px.', group: 'Shape', min: 0, max: 30, step: 1 },
   highlightInset: { help: 'Inset of the highlight from the fill edge, px.', group: 'Shape', min: 0, max: 40, step: 1 },
   highlightBright: { help: 'Strength of the specular band.', group: 'Shape', min: 0, max: 1.5, step: 0.05 },

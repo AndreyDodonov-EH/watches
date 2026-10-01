@@ -29,6 +29,7 @@ struct Params {
   float lensCurve;
   uint32_t bubbleRim;
   bool remaining;
+  bool vertical;
   float highlightH;
   float highlightInset;
   float highlightBright;
@@ -182,8 +183,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 176
-#define PARAMS_SCHEMA_CRC 0xba1c35f0u  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 177
+#define PARAMS_SCHEMA_CRC 0x27565efeu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -213,6 +214,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"lensCurve", 'f', (uint16_t)offsetof(Params, lensCurve)},
   {"bubbleRim", 'c', (uint16_t)offsetof(Params, bubbleRim)},
   {"remaining", 'b', (uint16_t)offsetof(Params, remaining)},
+  {"vertical", 'b', (uint16_t)offsetof(Params, vertical)},
   {"highlightH", 'f', (uint16_t)offsetof(Params, highlightH)},
   {"highlightInset", 'f', (uint16_t)offsetof(Params, highlightInset)},
   {"highlightBright", 'f', (uint16_t)offsetof(Params, highlightBright)},
@@ -393,6 +395,7 @@ static const Params PRESET_1 = {
   1.0f, // lensCurve
   0xB0C7A9, // bubbleRim
   false, // remaining
+  false, // vertical
   11.0f, // highlightH
   0.0f, // highlightInset
   1.0f, // highlightBright

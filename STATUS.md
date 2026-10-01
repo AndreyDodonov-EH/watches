@@ -1,6 +1,29 @@
 # Liquid Watch — STATUS
 
-_Last update: 2026-09-25 (physical materials: derived liquids, params v24 rim light, standalone physical renderer retired)_
+_Last update: 2026-10-01 (vertical watch mode)_
+
+## Vertical watch mode (2026-10-01)
+
+Param `vertical` (bool, Shape group, design key; default off): the watch worn upright, USB end down, hours tube on the left.
+- **Liquid** always rests at the bottom (panel left end): the render/physics mirror is `mirrored(p) = remaining && !vertical`.
+  `remaining` then only flips the scale and the column length: off = digits 1..11 / 5..55 bottom to top, liquid = time
+  passed; on = digits top to bottom, liquid = time left.
+- **Digits** are turned a quarter to read upright; a label's digits advance across the tube, centred on the tube's axis
+  (`digitBottom*` unused; starting at the near wall if too wide) and on the tick along the tube. Scale X stays the
+  along-tube scale (glyph height), Y the across one (glyph width). Sprite planes are baked already turned (same pool,
+  no new buffers); bitmap fonts turn in the sampler; the shadow stays down-right as read.
+- **Physics**: along-gravity is carried by the tube's bottom end — no static edge offset or edge light from it; the
+  free slug, film drying and the light angle still feel it; the light angle fades to `lightAngle` when the
+  cross-section sees no gravity.
+- **Pose**: upright (bottom end down) is the reading pose — only gravity toward the top end or across the tube counts
+  as tilt. The front settles at the tube's in-plane tilt from the vertical (level surface, sign following which end is down, cap 45°, `angleTiltGain` /
+  `angleMax` unused; `angleK` / `angleDamp` still set the speed). A slug pressed into the wall it rests on has no
+  rebound (both modes): no residual `slugVel` / film.
+- **Sim**: the panel is shown turned (drag-tilt remapped); manual input rests upright (along -1), "centre" and
+  "raise wrist" follow. `?p.vertical=1`. `check:imu` has a vertical block (upright rest, ±30°, flat, turned over).
+- Verified: landscape byte-identical to the previous renderer (`check_render_frames.py`, 9136 strips); 8 new vertical
+  parity scenes in `check-meniscus.cjs` (sim vs native firmware, max 9/255); `pio run` builds. Params schema CRC
+  changed (the board drops its saved blob once). Not flashed / not seen on the board yet.
 
 ## Physical materials: liquids derived from physical properties (2026-09-25, astra-loop)
 
