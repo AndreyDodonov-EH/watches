@@ -1531,12 +1531,18 @@ static void fizzScatter(const Tube &t, const Params &p, Fizz &f) {
 static inline void fizzFree(Fizz &f) { f.v = 0; f.life = 0; }
 // This spring birth in tube t comes from the spring itself (covered by the liquid), not scattered. See sim springBirth.
 static inline bool springBirth(const Tube &t) { return t.springScatter <= 0 || frand() >= t.springScatter; }
-// A spring's pool is sized by its cadence instead (stepFizz).
+// Bubbles a column of `len` px holds: fizzCount is a full tube's, up to doubled by shaking; past the fixed pool it
+// is capped and reported (fizzOverflow). See sim fizzWant.
+static int fizzWant(const Params &p, float len, float agitation) {
+  int want = (int)ffloor(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want < 0) want = 0;
+  if (want > MAX_FIZZ) { if (want > fizzOverflowPeak) fizzOverflowPeak = want; want = MAX_FIZZ; }
+  return want;
+}
+// A spring fills its pool at its cadence instead, up to the same count (stepFizz).
 void Tube::ensureFizz(const Params &p, float len, float agitation) {
   fizzLen = len;
   if (p.fizzSource == 1) return;
-  int want = (int)ffloor(p.fizzCount * (len / L) * (1 + (agitation < 0.05f ? 0 : agitation))); if (want < 0) want = 0;
-  if (want > MAX_FIZZ) { if (want > fizzOverflowPeak) fizzOverflowPeak = want; want = MAX_FIZZ; }
+  const int want = fizzWant(p, len, agitation);
   while (fizzN < want) { float v = 0.5f + frand(); fizz[fizzN++] = { frand() * len, fizzSpawnY(p, H, v), v, 0, frand() }; }
   fizzN = want;
 }
@@ -1610,6 +1616,11 @@ static void settleFoam(Tube &t, const Params &p, float speed, const float *surf,
 // popping frees its slot. A slug sliding off the spring leaves it dry, and its births go scattered instead
 // (springScatter). The glass holds a spring's bubbles (see SPRING_BACK). See sim stepFizz.
 int fizzOverflow() { return fizzOverflowPeak; }
+int fizzCounts(int idx, int &foam, int &slots) {
+  const Tube &t = tubes[idx & 1]; int live = 0; foam = 0; slots = t.fizzN;
+  for (int i = 0; i < t.fizzN; i++) { if (t.fizz[i].v != 0) live++; if (t.fizz[i].life != 0) foam++; }
+  return live;
+}
 
 void stepFizz(const Params &p, float dt, float along, float across, float agitation) {
   if (mirrored(p)) along = -along;   // fizz lives in the mirrored liquid frame (see drawTube)
@@ -1695,18 +1706,22 @@ void stepFizz(const Params &p, float dt, float along, float across, float agitat
     }
     if (spring) {
       // Cadence: fizzSourceRate bubbles/s (shaking nucleates up to twice as many), each into an idle slot (the first,
-      // else a new one up to MAX_FIZZ — past it the birth waits and is reported); idle slots at the end are dropped,
-      // so the loops stay as short as the bubbles in flight. See sim.
+      // else a new one); idle slots at the end are dropped, so the loops stay as short as the bubbles in flight.
+      // The tube holds at most its fizzCount share (fizzWant, foam included): at it a birth waits for a bubble to
+      // leave, keeping one birth of credit and no more, so a stream the tilt keeps in the liquid (a drift that
+      // stalls or keeps reversing) thins out instead of filling the pool, and no burst follows. Bubbles already
+      // over a count that dropped (a shorter column) live on. See sim.
+      const int cap = fizzWant(p, len, agitation);   // <= MAX_FIZZ: a slot is always there below it
+      int live = 0;
+      for (int k = 0; k < t.fizzN; k++) if (t.fizz[k].v != 0) live++;
       t.springClock += fmx(0, p.fizzSourceRate) * (1 + (agitation < 0.05f ? 0 : agitation)) * dt;
       int slot = 0;
       while (t.springClock >= 1) {
+        if (live >= cap) { t.springClock = 1; break; }
         while (slot < t.fizzN && t.fizz[slot].v != 0) slot++;
-        if (slot == t.fizzN) {
-          if (t.fizzN >= MAX_FIZZ) { if (MAX_FIZZ + 1 > fizzOverflowPeak) fizzOverflowPeak = MAX_FIZZ + 1; t.springClock = 1; break; }
-          t.fizz[t.fizzN++] = { 0, 0, 0, 0, 0 };
-        }
+        if (slot == t.fizzN) t.fizz[t.fizzN++] = { 0, 0, 0, 0, 0 };
         if (springBirth(t)) springSpawn(t, p, t.fizz[slot]); else fizzScatter(t, p, t.fizz[slot]);
-        t.springClock -= 1;
+        t.springClock -= 1; live++;
       }
       while (t.fizzN > 0 && t.fizz[t.fizzN - 1].v == 0) t.fizzN--;
     }

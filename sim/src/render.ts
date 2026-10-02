@@ -885,8 +885,9 @@ const FOAM_POP_T = 0.3, FOAM_SLIDE = 0.5, FOAM_FOLLOW = 6, FOAM_CATCH = 2, FOAM_
 // liquid covers it, it takes every birth, whatever the tilt; a free slug sliding off it leaves it dry, and every
 // birth goes scattered. Covered again, it takes its births back over SPRING_BACK s (a share ramping to 0), so a
 // slug bouncing at home does not flip the stream. Births only: nothing in flight moves.
-// It emits at a steady cadence, `fizzSourceRate` bubbles/s, into idle slots of the pool (`fizzCount` does not
-// apply): how many are in flight follows from their path, so a tilt that shortens it shows fewer.
+// It emits at a steady cadence, `fizzSourceRate` bubbles/s, into idle slots of the pool: how many are in flight
+// follows from their path, so a tilt that shortens it shows fewer — up to the tube's `fizzCount` share (fizzWant),
+// where a birth waits for a bubble to leave: a tilt that keeps the stream in the liquid thins it out.
 // Glass holds the gas a spring's rise carries into it (with `fizzFoamLife` > 0), so the stream bends along the
 // glass instead of ending there: at the bore wall a bubble stays against the glass and slides along it with the
 // along drive (one pace for all, so a train keeps its gaps) until it lets go — at random, on average after
@@ -905,18 +906,23 @@ const springBirth = (i: number): boolean => springScatter[i] <= 0 || Math.random
 /** Half-height of the surface blick's row tent as a fraction of the tube height (firmware BLICK_H). */
 const BLICK_H = 0.18;
 
-/** `fizzCount` is the count for a full tube; density stays constant as the column shortens.
- *  Shake nucleates bubbles: up to 2x with agitation, shrinking back as it decays.
- *  A spring's pool is sized by its cadence instead (stepFizz). */
-function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
-  const arr = fizz[i];
-  fizzLen[i] = len;
-  if (p.fizzSource === 1) return;
-  let want = Math.floor(p.fizzCount * (len / TUBE_LENGTH_PX) * (1 + (agitation < 0.05 ? 0 : agitation)));
+/** Bubbles a column of `len` px holds: `fizzCount` is the count for a full tube; density stays constant as the
+ *  column shortens. Shake nucleates bubbles: up to 2x with agitation, shrinking back as it decays. Past the
+ *  fixed pool it is capped and reported. */
+function fizzWant(p: Params, len: number, agitation: number): number {
+  let want = Math.max(0, Math.floor(p.fizzCount * (len / TUBE_LENGTH_PX) * (1 + (agitation < 0.05 ? 0 : agitation))));
   if (want > FIZZ_MAX) {
     if (want > fizzOverflowPeak) { fizzOverflowPeak = want; console.warn(`fizz pool: ${want} bubbles requested, ${FIZZ_MAX} fit`); }
     want = FIZZ_MAX;
   }
+  return want;
+}
+/** A spring fills its pool at its cadence instead, up to the same count (stepFizz). */
+function ensureFizz(i: number, p: Params, len: number, agitation = 0): void {
+  const arr = fizz[i];
+  fizzLen[i] = len;
+  if (p.fizzSource === 1) return;
+  const want = fizzWant(p, len, agitation);
   const H = tubeLayout(p).H;
   while (arr.length < want) {
     const v = 0.5 + Math.random(); arr.push({ x: Math.random() * len, y: fizzSpawnY(p, H, v), v, life: 0, z: Math.random() });
@@ -1052,22 +1058,23 @@ export function stepFizz(p: Params, dt: number, along = 0, across = 0, agitation
     }
     if (spring) {
       // Cadence: fizzSourceRate bubbles/s (shaking nucleates up to twice as many), each into an idle slot (the
-      // first, else a new one up to FIZZ_MAX — past it the birth waits and is reported); idle slots at the end
-      // are dropped, so the loops stay as short as the bubbles in flight.
+      // first, else a new one); idle slots at the end are dropped, so the loops stay as short as the bubbles
+      // in flight. The tube holds at most its fizzCount share (fizzWant, foam included): at it a birth waits for
+      // a bubble to leave, keeping one birth of credit and no more, so a stream the tilt keeps in the liquid (a
+      // drift that stalls or keeps reversing) thins out instead of filling the pool, and no burst follows.
+      // Bubbles already over a count that dropped (a shorter column) live on.
       const arr = fizz[i];
+      const cap = fizzWant(p, len, agitation);   // <= FIZZ_MAX
+      let live = 0;
+      for (const f of arr) if (f.v !== 0) live++;
       springClock[i] += Math.max(0, p.fizzSourceRate) * (1 + (agitation < 0.05 ? 0 : agitation)) * dt;
       let slot = 0;
       while (springClock[i] >= 1) {
+        if (live >= cap) { springClock[i] = 1; break; }
         while (slot < arr.length && arr[slot].v !== 0) slot++;
-        if (slot === arr.length) {
-          if (arr.length >= FIZZ_MAX) {
-            if (FIZZ_MAX + 1 > fizzOverflowPeak) { fizzOverflowPeak = FIZZ_MAX + 1; console.warn(`fizz pool: spring needs more than ${FIZZ_MAX} bubbles`); }
-            springClock[i] = 1; break;
-          }
-          arr.push({ x: 0, y: 0, v: 0, life: 0, z: 0 });
-        }
+        if (slot === arr.length) arr.push({ x: 0, y: 0, v: 0, life: 0, z: 0 });
         if (springBirth(i)) springSpawn(arr[slot], p, H, surf, surfL, fizzShift[i]); else scatter(arr[slot]);
-        springClock[i] -= 1;
+        springClock[i] -= 1; live++;
       }
       while (arr.length > 0 && arr[arr.length - 1].v === 0) arr.pop();
     }

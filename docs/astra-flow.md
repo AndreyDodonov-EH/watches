@@ -17,6 +17,10 @@ name: `claude-*` → the proxy's Claude OAuth, `gpt-6-*` → its Codex OAuth.
 |----------------------------------------|-----------------------------------------------|
 | `.claude/agents/astra.md` (`model: gpt-6-astra`, tools Read/Grep/Glob/Bash) | `~/cli-proxy/` — binary, config, auth files |
 | `.claude/skills/astra-loop/SKILL.md` (the protocol) | `~/.local/bin/claude-proxy` — launcher |
+|                                        | `~/.claude/agents/{astra,sol}.md`, `~/.claude/skills/astra-loop/` — generic copies for every directory (repo files above override them here) |
+
+`sol` is `model: gpt-6.1-sol` with edit tools — an implementer the loop can route bulk or
+well-specified points to.
 
 ## Setup
 

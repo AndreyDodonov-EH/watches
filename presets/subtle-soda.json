@@ -68,7 +68,7 @@
   "bubbleTiltGain": 0,
   "bubbleDark": 0,
   "fizz": true,
-  "fizzCount": 12,
+  "fizzCount": 64,
   "fizzSize": 5.5,
   "fizzSizeVar": 0.5,
   "fizzShadeOff": 0.3,

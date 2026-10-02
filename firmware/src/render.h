@@ -9,6 +9,8 @@
 void stepFizz(const Params &p, float dt, float along = 0, float across = 0, float agitation = 0);
 // Largest fizz count requested past the fixed pool since boot (0 = everything fitted); main reports it.
 int fizzOverflow();
+// Live bubbles of tube idx; foam = how many of them are parked foam, slots = pool slots the per-step loops run over.
+int fizzCounts(int idx, int &foam, int &slots);
 // Tube geometry from params, clamped to the panel and the strip buffer (sim: tubeLayout).
 struct TubeLayout { int H, yH, yM; bool operator!=(const TubeLayout &o) const { return H != o.H || yH != o.yH || yM != o.yM; } };
 TubeLayout tubeLayout(const Params &p);

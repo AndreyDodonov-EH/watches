@@ -68,7 +68,7 @@
   writes with physics steps) reproduces push-all sequences without the board; worth keeping in tools/.
 - Existing `scaledGlyphs()` silently drops glyphs when `GLYPH_POOL_PX` overflows; report the unsupported
   size visibly instead of leaving missing digits. Found during the physical-renderer planning audit.
-- `f` now includes whole-frame p95; physics, IMU I2C and serial poll still lack separate cost figures.
+- `f` now includes whole-frame p95 and the physics / fizz step, strip push and loop-rest costs; IMU I2C and serial poll are still lumped in `rest`.
 - Fixed clock (`d0` + `t`/`T`) can sit milliseconds before the requested second because demo offset
   advances on fixed physics ticks; at a minute boundary `s` can consequently show the preceding minute.
 - COM6 bridge reopen reverted the (now retired) volatile physical mode to legacy during testing. Audit the Windows driver's close/open reset behavior separately.
@@ -496,3 +496,14 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Landscape: `tickLens` ≠ `bottomLens` (or the dry pair) can still slide ticks onto labels behind liquid only; same one-wall remap would fix it but changes existing presets' look.
 - Vertical: a tick takes one wet share (its centre column) while a label takes one per column; under a steep meniscus the two can sit a share apart over a wide label.
 - Rear tick ends are whole rows: across the meniscus an end travelling N rows (strong lenses: 6 at H=37) moves in N one-row steps, the first as early as share 1/256 when the dry end sits on a row centre (2.9 % of a sweep). Not a table→remap seam (remap at share 0 = dry table, checked). Sub-row coverage on the end row would smooth it — both modes, changes the dry look.
+
+## Fizz fps collapse (2026-10-02)
+- Fixed: spring births wait at the tube's `fizzCount` share (sim + firmware). Worst case on the board (pitching, across ~0, `fizzCount 120`) is now 21-25 fps, was 5-10; left over at ~210 live bubbles: render +10 ms, fizz step 3-4 ms x 2.2 steps.
+- `liquid_tick` runs `stepFizz` once per 50 Hz catch-up step (up to 5 a frame): a slow step feeds back into itself. Fizz is cosmetic — one call per frame with the summed dt would break the loop.
+- `settleFoam` packs pairwise over all parked bubbles (3 sweeps, `discFit` + `sqrtf` per placement): ~8 ms a step at 124 parked, 20-30 ms at 200. The sweep is sorted front to back, so it can stop at the first pair farther apart than two max radii.
+- `stepFizz` free bubbles cost ~15 us each per step (`discFit` = a `sqrtf` per disc row, `touchesFoam` scans every slot).
+- `stepFizz` runs with `fizz=0` too (measured 1.4 ms a step, bubbles keep accumulating), so bench.py's `fizz=0` stage only sees the draw cost.
+- One long-lived bubble in a high slot keeps `fizzN` at its high-water mark (seen: 45 live in 226 slots); every per-step loop walks the idle slots.
+- `display_push_strip_async` blocks ~6.2 ms a frame (each band's window command waits for the band before it); it is in neither `render` nor `push-wait`.
+- `tools/tilt.py` swings are open-loop host timing (serial round trip per pose); a firmware-side pose script would give repeatable phases.
+- No check exercises `stepFizz` on either side (compare-device turns fizz off, check_render_frames never steps it, replay-check only `stepTube`): a host/sim population check under a reversing tilt would catch a spring-block divergence.

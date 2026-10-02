@@ -27,6 +27,11 @@ Baseline @ f0a3de7: **20.6 fps, render 44.4 ms**, digits 20.7 ms of it; parity ~
 
 ## Pieces
 - `tools/device.py CMD…` — one-off serial (`f` fps, `s` status, `p?` params, `pname=v`, `t HH:MM`, `d0` freeze, `r` reboot).
+  `f` also reports `phys N steps x (tube + fizz ms per step, max)`, `push`, `rest` and per tube `fizz live (foam, slots)`:
+  fps = 1000 / (render + push + rest + steps x step cost), steps = frame / 20 ms capped at 5.
+- `tools/tilt.py [--hold S] POSE…` — poses without touching the board, via the firmware's `g <along> <across>` tilt override
+  (`g` alone = back to the IMU; not persisted). `-1,0` = vertical watch upright, `0,0` = face up, `a1,c1>a2,c2@T` = swing with
+  period T. One compact `f` line per 2 s. `tools/tilt.py --hold 60 '-1,0>0.6,0@3'` = worst case for spring fizz (pool at its `fizzCount` share).
   Auto-detects `/dev/ttyACM*` (usbipd-attached) or Windows COMx. Prints `BOARD REBOOTED (<reason>)` if a
   boot banner shows up — reasons: poweron/sw/panic/task-wdt/brownout/usb.
 - `tools/bench.py [--stages [LIST]] [--stage name=v] [--quick] [--samples N] [--preset FILE] [--runs N] [--live-imu] [--allow-dead-imu] [--json]`
