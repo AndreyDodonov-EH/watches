@@ -489,18 +489,61 @@ interface Labels {
 /** Panel x of scale value i of n. A vertical watch in `remaining` mode runs the scale from the top (right) end. */
 const scaleFlip = (p: Params): boolean => p.vertical && p.remaining;
 
-/** Destination tube row to source row for independently warped marks. */
-function markSourceRows(H: number, lens: number, curve = 1): Int16Array {
-  const out = new Int16Array(H), strength = Math.abs(Math.max(-1, Math.min(1, lens)));
+/** Cylinder warp of an independently warped mark: |row offset from the axis| 0..1 → the source's. */
+function markWarp(lens: number, curve = 1): (u: number) => number {
+  const strength = Math.abs(Math.max(-1, Math.min(1, lens)));
   const signedCurve = lens < 0 ? -Math.max(-3, Math.min(3, curve)) : Math.max(-3, Math.min(3, curve));
   const exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  return (u) => signedCurve === 0 ? u : (1 - strength) * u + strength * Math.pow(u, exponent);
+}
+/** Destination tube row to source row for independently warped marks. */
+export function markSourceRows(H: number, lens: number, curve = 1): Int16Array {
+  const out = new Int16Array(H), warp = markWarp(lens, curve);
   for (let yd = 0; yd < H; yd++) {
-    const d = (yd + 0.5 - H / 2) / (H / 2), u = Math.abs(d);
-    const warped = signedCurve === 0 ? u : (1 - strength) * u + strength * Math.pow(u, exponent);
-    const s = Math.sign(d) * warped;
+    const d = (yd + 0.5 - H / 2) / (H / 2);
+    const s = Math.sign(d) * warp(Math.abs(d));
     out[yd] = Math.max(0, Math.min(H - 1, Math.floor(H / 2 + s * H / 2)));
   }
   return out;
+}
+/** markSourceRows before it is rounded to rows: the source's offset from the tube axis, in rows. */
+function markSourceOffsets(H: number, lens: number): Float64Array {
+  const out = new Float64Array(H), warp = markWarp(lens);
+  for (let yd = 0; yd < H; yd++) {
+    const d = (yd + 0.5 - H / 2) / (H / 2);
+    out[yd] = Math.sign(d) * warp(Math.abs(d)) * H / 2;
+  }
+  return out;
+}
+/** The markSourceRows row of such an offset. */
+const offsetRow = (H: number, off: number): number => Math.max(0, Math.min(H - 1, Math.floor(H / 2 + off)));
+/** Inverse of a markWarp (monotone on 0..1), by bisection. */
+function markUnwarp(warp: (u: number) => number, w: number): number {
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 32; i++) { const m = (lo + hi) / 2; if (warp(m) < w) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
+
+/** Vertical watch, rear ticks under rear digits: both lie on one wall and on one axis across the tube, so the
+ *  liquid moves them by ONE remap — the digits' (behind air → behind liquid, `digitDryLens` → `bottomLens`), and
+ *  a tick clear of a label behind air stays clear of it behind liquid, at every wet share of the meniscus.
+ *  Behind air the tick is its own `tickDryLens` image; `tickLens` has no say. Where a column is wet, a row is
+ *  tick when the digit source position it shows (`dry` → `wet` by the share; offsets from the axis, in rows)
+ *  lies wallward of the one under the dry tick's end (`edge`) — through the unrounded maps, as rounded rows
+ *  would smear the end over every row a strong lens folds onto one source row — and its digit source ROW (the
+ *  labels' own rounding) does too. */
+export interface TickFollow { dry: Float64Array; wet: Float64Array; edge: (h: number) => number; }
+const rearTicksFollowDigits = (p: Params): boolean => p.vertical && p.digits && !p.digitsOnTop && !p.ticksOnTop;
+export function tickFollow(p: Params, H: number): TickFollow {
+  const tick = markWarp(p.tickDryLens), digit = markWarp(p.digitDryLens);
+  return {
+    dry: markSourceOffsets(H, p.digitDryLens), wet: markSourceOffsets(H, p.bottomLens),
+    /** Digit source offset under the inner end of a dry tick `h` source rows long, the one from the near wall. */
+    edge: (h) => {
+      const t = Math.max(-1, Math.min(1, (h - H / 2) / (H / 2)));
+      return Math.sign(t) * digit(markUnwarp(tick, Math.abs(t))) * H / 2;
+    },
+  };
 }
 
 /** Measure (but do not draw) the labels of one tube. Returns null when digits are off. */
@@ -598,6 +641,21 @@ function buildWetShare(e: Edges, H: number): void {
 const shareAt = (x: number): number => (x < 0 || x >= PANEL_W ? 0 : wetShare[x]);
 /** Source row for wet share k (1/256): the behind-air row `dry` moved toward the behind-liquid row `wet`. */
 const blendRow = (dry: number, wet: number, k: number): number => dry + (((wet - dry) * k + 128) >> 8);
+/** Rows of a tick ending at `edge` (TickFollow) in a column of wet share `share` (1/256): [0, b] from the near
+ *  wall (`top`) or [a, H - 1] from the far one; [H, -1] = none. */
+export function tickFollowRange(f: TickFollow, H: number, edge: number, share: number, top: boolean): [number, number] {
+  const k = share / 256, E = H / 2 + edge;
+  const row = (ry: number): number => blendRow(offsetRow(H, f.dry[ry]), offsetRow(H, f.wet[ry]), share);
+  const off = (ry: number): number => f.dry[ry] + (f.wet[ry] - f.dry[ry]) * k;
+  if (top) {
+    const last = Math.ceil(E) - 1; let b = -1;
+    while (b + 1 < H && off(b + 1) < edge && row(b + 1) <= last) b++;
+    return [b < 0 ? H : 0, b];
+  }
+  const first = Math.floor(H - E); let a = H;
+  while (a > 0 && off(a - 1) > -edge && row(a - 1) >= first) a--;
+  return [a, a < H ? H - 1 : -1];
+}
 /** Wet share of a column (see wetShare); 256 everywhere for digits on top. */
 type WarpFn = (x: number) => number;
 /** Coverage (0..255) and colour of glyph pixel (cx, cy); both only defined inside w x h. */
@@ -723,9 +781,10 @@ const tickRows = new Int16Array(TUBE_HEIGHT_MAX);   // a tick's source rows acro
  *  when the minor step changes. */
 /** `wetRows`/`dryRows`: source-row tables for ticks behind liquid vs behind air (a liquid-filled
  *  cylinder lenses far more than an empty one); a tick takes its column's wet share of both (wetShare, set
- *  for these edges by drawTube). `edges` null = every tick uses `wetRows` and full parallax. */
+ *  for these edges by drawTube). `edges` null = every tick uses `wetRows` and full parallax. `follow`: where
+ *  wet, the ticks follow the digits' remap instead of `wetRows` (see TickFollow). */
 function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, dryRows: Int16Array,
-  edges: Edges | null, mark: MarkFn, dxFull = 0, dyFull = 0): void {
+  edges: Edges | null, mark: MarkFn, dxFull = 0, dyFull = 0, follow: TickFollow | null = null): void {
   const minutes = ticksN === 60;
   if (!(minutes ? p.ticksM : p.ticksH)) return;
   const H = tubeLayout(p).H, L = TUBE_LENGTH_PX;
@@ -775,6 +834,7 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
     }
   };
   const flip = scaleFlip(p);
+  const edgeMin = follow ? follow.edge(hMin) : 0, edgeMaj = follow ? follow.edge(hMaj) : 0;
   for (let i = step; i < ticksN; i += step) {
     const xc = flip ? L - Math.round((i * L) / ticksN) : Math.round((i * L) / ticksN);
     const major = majorEvery > 0 && i % majorEvery === 0;
@@ -784,7 +844,9 @@ function drawTicks(y0: number, p: Params, ticksN: number, wetRows: Int16Array, d
     let rows = share === 256 ? wetRows : dryRows;
     if (share > 0 && share < 256) { for (let ry = 0; ry < H; ry++) tickRows[ry] = blendRow(dryRows[ry], wetRows[ry], share); rows = tickRows; }
     const k = share / 256;   // air refracts nothing: the parallax grows with the wet share
-    const topRange = warpedRange(rows, 0, h - 1), botRange = warpedRange(rows, H - h, H - 1);
+    const wet = follow !== null && share > 0, edge = major ? edgeMaj : edgeMin;
+    const topRange = wet ? tickFollowRange(follow, H, edge, share, true) : warpedRange(rows, 0, h - 1);
+    const botRange = wet ? tickFollowRange(follow, H, edge, share, false) : warpedRange(rows, H - h, H - 1);
     if (pos !== 1) drawSegment(x0, w, c, topRange, true, k);
     if (pos !== 0) drawSegment(x0, w, c, botRange, false, k);
   }
@@ -1692,7 +1754,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       const dx = onTop ? 0 : -state.edgeLight * p.tickParallax;
       const dy = onTop ? 0 : state.acrossTilt * p.tickParallax;
       drawTicks(y0, p, ticksN, wetRows, dryRows, onTop ? null : bounds,
-        markFn(y0, bounds, p, onTop, p.markContrast * p.tickBright, onTop ? null : pal.dryT), dx, dy);
+        markFn(y0, bounds, p, onTop, p.markContrast * p.tickBright, onTop ? null : pal.dryT), dx, dy,
+        !onTop && rearTicksFollowDigits(p) ? tickFollow(p, H) : null);
     }
   };
   const drawDigitLayer = (onTop: boolean): void => {

@@ -223,10 +223,51 @@ for (const digitFont of [0, 6]) for (const slugPos of [120, 127, 134]) for (cons
 for (const digitFont of [0, 6]) for (const slugPos of [120, 134]) for (const remaining of [false, true])
   render(`marks-vertical-${digitFont}-${slugPos}-${remaining}`, { digitFont, remaining, vertical: true, digitScaleX: 2.5, digitScaleY: 2, digitBottom: 3 },
     { slugPos, edgeLight: 0.4, acrossTilt: 0.3, angle: 2 }, across);
+// Vertical, ticks and digits with different lenses: behind liquid the ticks follow the digits' remap (tickLens unused).
+for (const slugPos of [120, 134])
+  render(`marks-vertical-lenses-${slugPos}`, { digitFont: 6, vertical: true, digitScaleX: 2.5, digitScaleY: 2, tickMinorHeightH: 14,
+    tickLens: 0.85, tickDryLens: 1, bottomLens: 0.45, digitDryLens: 0.1 }, { slugPos, edgeLight: 0.4, acrossTilt: 0.3, angle: 2 }, across);
 // The contrast floor on sprite digits with a baked shadow (Mark::wetColourT): light numerals over a dark liquid,
 // no surface band, the slug over whole labels and across two.
 const floorScene = { ...across, liquid: '#102030', liquidHi: '#406080', liquidLo: '#081018', markContrast: 60, surfaceBand: 0,
   ticksH: false, digitFont: 6, digitShadowColor: '#000000', digitColor: '#e0e0e0' };
 for (const slugPos of [120, 134]) render(`marks-floor-${slugPos}`, {}, { slugPos, edgeLight: 0.4, acrossTilt: 0.3 }, floorScene);
+// Vertical, rear ticks under rear digits (TickFollow), on the row tables: a tick and a centred label `labelW`
+// source rows wide, per wet share 0..256 — the tick's inner ends from either wall and the label's rows.
+function tickAndLabel(H, lenses, h, labelW) {
+  const p = { ...base, vertical: true, digits: true, digitsOnTop: false, ticksOnTop: false, ...lenses };
+  const f = R.tickFollow(p, H), edge = f.edge(h), tick = R.markSourceRows(H, p.tickDryLens);
+  const dry = R.markSourceRows(H, p.digitDryLens), wet = R.markSourceRows(H, p.bottomLens);
+  const a = (H - labelW) >> 1, b = a + labelW - 1, shares = [];
+  for (let share = 0; share <= 256; share++) {
+    let top = -1, bot = H, lo = H, hi = -1;
+    if (share) { top = R.tickFollowRange(f, H, edge, share, true)[1]; bot = R.tickFollowRange(f, H, edge, share, false)[0]; }
+    else for (let ry = 0; ry < H; ry++) { if (tick[ry] <= h - 1) top = ry; if (tick[ry] >= H - h && bot === H) bot = ry; }
+    for (let ry = 0; ry < H; ry++) {
+      const row = dry[ry] + (((wet[ry] - dry[ry]) * share + 128) >> 8);
+      if (row >= a && row <= b) { lo = Math.min(lo, ry); hi = Math.max(hi, ry); }
+    }
+    // No seam where the dry row table hands over to the remap: at share 0 the remap gives the table's ends.
+    if (!share) assert.deepEqual([R.tickFollowRange(f, H, edge, 0, true)[1], R.tickFollowRange(f, H, edge, 0, false)[0]], [top, bot], `remap at share 0 is not the dry tick ${JSON.stringify({ H, lenses, h })}`);
+    shares.push({ top, bot, lo, hi });
+  }
+  return shares;
+}
+// Liquid that lenses like the air moves nothing, however many rows share a source row.
+for (const s of tickAndLabel(80, { digitDryLens: 1, bottomLens: 1, tickDryLens: 0 }, 30, 20)) assert.deepEqual([s.top, s.bot], [29, 50], 'tick moved behind liquid with identical wet/dry optics');
+// A tick one clear row short of its label behind air stays off it at every wet share of the meniscus.
+let followCases = 0;
+for (const H of [37, 46, 60, 61, 80]) for (const digitDryLens of [-1, -0.4, 0, 0.1, 0.5, 1]) for (const bottomLens of [0, 0.45, 0.6, 1])
+  for (const tickDryLens of [-1, -0.4, 0, 0.35, 1]) for (let h = 2; h <= H >> 1; h += 3) for (const labelW of [5, 11, 21, 29]) {
+    if (labelW >= H) continue;
+    const shares = tickAndLabel(H, { digitDryLens, bottomLens, tickDryLens }, h, labelW), d = shares[0];
+    const where = JSON.stringify({ H, digitDryLens, bottomLens, tickDryLens, h, labelW });
+    if (digitDryLens === bottomLens) for (const s of shares) assert.deepEqual([s.top, s.bot], [d.top, d.bot], `tick moved with identical optics ${where}`);
+    if (d.hi < 0 || d.lo - d.top < 2 || d.bot - d.hi < 2) continue;
+    followCases++;
+    shares.forEach((s, share) => assert.ok(s.hi < 0 || (s.top < s.lo && s.bot > s.hi), `tick on its label at share ${share}: ${JSON.stringify(s)} ${where}`));
+  }
+assert.ok(followCases > 1000, `tick/label clearance cases: ${followCases}`);
+assert.ok(tickAndLabel(37, { digitDryLens: -1, bottomLens: 0.6, tickDryLens: 0 }, 14, 21)[0].lo - 13 === 2, 'the review case has one clear dry row');
 fs.writeFileSync(path.join(out, 'jobs.json'), JSON.stringify(jobs));
 console.log(`Meniscus: symmetry, subpixel motion, flattening, residue, receding edge, gradient passed; ${jobs.length} parity scenes.`);

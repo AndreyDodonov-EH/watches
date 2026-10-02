@@ -12,6 +12,12 @@ Param `vertical` (bool, Shape group, design key; default off): the watch worn up
   (`digitBottom*` unused; starting at the near wall if too wide) and on the tick along the tube. Scale X stays the
   along-tube scale (glyph height), Y the across one (glyph width). Sprite planes are baked already turned (same pool,
   no new buffers); bitmap fonts turn in the sampler; the shadow stays down-right as read.
+- **Rear ticks under rear digits** share the wall and the axis across the tube, so the liquid moves both by one remap,
+  the digits' (`digitDryLens` → `bottomLens`): where a column is wet, a row is tick when the digit source position it
+  shows lies wallward of the one under the dry tick's end — unrounded maps (axis-relative float offsets), evaluated at
+  the column's wet share, plus the labels' own row rounding as a bound (`TickFollow`, sim + firmware). `tickLens` is
+  unused in this case; on-top ticks/digits and landscape unchanged. A tick one clear row short of a label behind air
+  stays off it behind liquid and across the meniscus. Firmware: 2 x 80 floats per tube, PSRAM from `render_init`.
 - **Physics**: along-gravity is carried by the tube's bottom end — no static edge offset or edge light from it; the
   free slug, film drying and the light angle still feel it; the light angle fades to `lightAngle` when the
   cross-section sees no gravity.
@@ -24,6 +30,10 @@ Param `vertical` (bool, Shape group, design key; default off): the watch worn up
 - Verified: landscape byte-identical to the previous renderer (`check_render_frames.py`, 9136 strips); 8 new vertical
   parity scenes in `check-meniscus.cjs` (sim vs native firmware, max 9/255); `pio run` builds. Params schema CRC
   changed (the board drops its saved blob once). Not flashed / not seen on the board yet.
+- 2026-10-02, ticks follow the digits' remap: landscape still byte-identical (9136 strips); 10 vertical parity scenes
+  (2 with different tick / digit lenses) within 12/255; `check-meniscus.cjs` table checks — identical wet/dry optics
+  move no tick (plateau case H=80, lens 1), and a lens/height/label sweep keeps one-row dry clearance at every wet
+  share 0..256; `pio run` builds. Not flashed.
 
 ## Physical materials: liquids derived from physical properties (2026-09-25, astra-loop)
 

@@ -482,3 +482,7 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Vertical: leather overlay lighting/gloss just rotates with the panel; calibration / hello faces on the board stay landscape.
 - Vertical: labels are centred across the tube with no offset knob (`digitBottom*` unused); two-digit labels can sit on long ticks or clip in narrow tubes.
 - Vertical mode could switch by itself from the IMU pose (auto / hysteresis) instead of a param.
+- Vertical: rear ticks and digits still have separate parallax (`tickParallax` depth-scaled in panel rows, `digitParallax` in source rows): a hard across-tilt can close the tick–label gap by a pixel or two.
+- Landscape: `tickLens` ≠ `bottomLens` (or the dry pair) can still slide ticks onto labels behind liquid only; same one-wall remap would fix it but changes existing presets' look.
+- Vertical: a tick takes one wet share (its centre column) while a label takes one per column; under a steep meniscus the two can sit a share apart over a wide label.
+- Rear tick ends are whole rows: across the meniscus an end travelling N rows (strong lenses: 6 at H=37) moves in N one-row steps, the first as early as share 1/256 when the dry end sits on a row centre (2.9 % of a sweep). Not a table→remap seam (remap at share 0 = dry table, checked). Sub-row coverage on the end row would smooth it — both modes, changes the dry look.

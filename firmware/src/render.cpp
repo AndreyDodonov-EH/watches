@@ -445,17 +445,44 @@ struct Labels {
   uint32_t gen = 0; int H = 0, bottomOff = 0, first = -1, keyWetDy = 0; bool valid = false, have = false;
 };
 
+// Cylinder warp of an independently warped mark (sim markWarp): |row offset from the axis| 0..1 -> the source's.
+struct MarkWarp {
+  float strength, signedCurve, exponent;
+  MarkWarp(float lens, float curve = 1) {
+    strength = fabsf(clampf(lens, -1, 1));
+    signedCurve = lens < 0 ? -clampf(curve, -3, 3) : clampf(curve, -3, 3);
+    exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  }
+  inline float at(float u) const { return signedCurve == 0 ? u : (1 - strength) * u + strength * powf(u, exponent); }
+  float inv(float w) const {   // monotone on 0..1: bisection (sim markUnwarp)
+    float lo = 0, hi = 1;
+    for (int i = 0; i < 32; i++) { float m = (lo + hi) / 2; if (at(m) < w) lo = m; else hi = m; }
+    return (lo + hi) / 2;
+  }
+};
 static void markSourceRows(int height, float lens, int16_t *out, float curve = 1) {
-  float strength = fabsf(clampf(lens, -1, 1));
-  float signedCurve = lens < 0 ? -clampf(curve, -3, 3) : clampf(curve, -3, 3);
-  float exponent = signedCurve > 0 ? 1 + signedCurve * 2 : 1 / (1 - signedCurve * 2);
+  const MarkWarp warp(lens, curve);
   for (int yd = 0; yd < height; yd++) {
-    float d = (yd + 0.5f - height / 2.0f) / (height / 2.0f), u = fabsf(d);
-    float warped = signedCurve == 0 ? u : (1 - strength) * u + strength * powf(u, exponent);
-    float s = (d < 0 ? -1 : 1) * warped;
+    float d = (yd + 0.5f - height / 2.0f) / (height / 2.0f);
+    float s = (d < 0 ? -1 : 1) * warp.at(fabsf(d));
     out[yd] = (int16_t)clampf(ffloor(height / 2.0f + s * height / 2.0f), 0, height - 1);
   }
 }
+// markSourceRows before it is rounded to rows: the source's offset from the tube axis, in rows (sim
+// markSourceOffsets); offsetRow = its markSourceRows row.
+static void markSourceOffsets(int height, float lens, float *out) {
+  const MarkWarp warp(lens);
+  for (int yd = 0; yd < height; yd++) {
+    float d = (yd + 0.5f - height / 2.0f) / (height / 2.0f);
+    float s = (d < 0 ? -1 : 1) * warp.at(fabsf(d));
+    out[yd] = s * height / 2.0f;
+  }
+}
+static inline int offsetRow(int height, float off) { return (int)clampf(ffloor(height / 2.0f + off), 0, height - 1); }
+// Vertical watch, rear ticks under rear digits: one wall, one axis across the tube, so the liquid moves both by
+// the digits' remap (digitDryLens -> bottomLens) and a tick clear of a label behind air stays clear of it behind
+// liquid, at every wet share (sim TickFollow; tickLens has no say).
+static inline bool rearTicksFollowDigits(const Params &p) { return p.vertical && p.digits && !p.digitsOnTop && !p.ticksOnTop; }
 
 static void digitRowColors(const Params &p, int bh, uint16_t *out) {
   int n = bh < 1 ? 1 : bh; if (n > 96) n = 96;
@@ -531,6 +558,7 @@ struct Fizz { float x, y, v, life, z; };   // z: depth in the bore (0 front wall
 struct RowCache {
   uint32_t gen = 0; int H = 0; bool valid = false;
   int16_t tickWet[TUBE_HEIGHT_MAX], tickDry[TUBE_HEIGHT_MAX];   // tick source-row warps
+  bool tickFollow; float tickEdge[2][2];                         // sim TickFollow: on, and edge(h) per [minutes][major]
   int16_t lensSrc[TUBE_HEIGHT_MAX]; bool lensOn; bool lensPos;   // applyLens row map
   float mag[TUBE_HEIGHT_MAX];                                    // lensMagRows (fizz squash)
   int16_t capX0[TUBE_HEIGHT_MAX];                                // rounded-corner mask
@@ -563,6 +591,9 @@ struct Tube {
   // rear-mark wet share per panel column (buildWetShare) + its scratch: PANEL_W / PANEL_W + 1 entries, PSRAM,
   // allocated once by render_init (internal RAM is ~2.7 KB from full once BLE is up; 4.3 KB here hung its init)
   uint16_t *wetShare = nullptr; int16_t *wetRun = nullptr;
+  // digit source offset from the axis per row behind air, then behind liquid (sim TickFollow dry / wet):
+  // 2 x TUBE_HEIGHT_MAX, PSRAM, allocated once by render_init
+  float *digitOff = nullptr;
   float boundLo[TUBE_HEIGHT_MAX], boundHi[TUBE_HEIGHT_MAX];   // panel-frame bounds for the mark compositor (edges + surface stroke)
   float strokeR[TUBE_HEIGHT_MAX], strokeL[TUBE_HEIGHT_MAX];   // outward extent of the concave surface stroke per edge (sim strokeR/L)
   float bandFill[2][TUBE_HEIGHT_MAX], bandBlick[2][TUBE_HEIGHT_MAX], bandRim[2][TUBE_HEIGHT_MAX];   // its layer weights per row, 0 = time edge, 1 = home: rear-mark compositor (sim BandInfo)
@@ -1396,11 +1427,26 @@ void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows
       if (baseY == inner) break;
     }
   };
+  // Where wet, the ticks follow the digits' remap (sim tickFollowRange): rows of a tick ending at `edge` in a
+  // column of wet share `share`, [0, topB] from the near wall and [botA, H - 1] from the far one.
+  const bool follow = edges && rc.tickFollow;
+  auto followRange = [&](float edge, int share, int &topA, int &topB, int &botA, int &botB) {
+    const float *dry = digitOff, *wet = digitOff + TUBE_HEIGHT_MAX;
+    const float k = share * (1 / 256.0f), E = H / 2.0f + edge;
+    const int last = (int)fceil(E) - 1, first = (int)ffloor(H - E);
+    auto off = [&](int ry) { return dry[ry] + (wet[ry] - dry[ry]) * k; };
+    auto row = [&](int ry) { return blendRow(offsetRow(H, dry[ry]), offsetRow(H, wet[ry]), share); };
+    int b = -1, a = H;
+    while (b + 1 < H && off(b + 1) < edge && row(b + 1) <= last) b++;
+    while (a > 0 && off(a - 1) > -edge && row(a - 1) >= first) a--;
+    topA = b < 0 ? H : 0; topB = b; botA = a; botB = a < H ? H - 1 : -1;
+  };
   // Warped row ranges depend only on (wet/dry table, minor/major height): 8 ranges, computed once.
   int rng[2][2][4];   // [wet][major][topA, topB, botA, botB]
   for (int wi = 0; wi < 2; wi++) for (int mj = 0; mj < 2; mj++) {
     const int16_t *rows = wi ? wetRows : dryRows; int h = mj ? hMaj : hMin;
     if (h <= 0) continue;
+    if (wi && follow) { followRange(rc.tickEdge[minutes][mj], 256, rng[wi][mj][0], rng[wi][mj][1], rng[wi][mj][2], rng[wi][mj][3]); continue; }
     warpedRange(rows, 0, h - 1, rng[wi][mj][0], rng[wi][mj][1]); warpedRange(rows, H - h, H - 1, rng[wi][mj][2], rng[wi][mj][3]);
   }
   const bool flip = p.vertical && p.remaining;   // the scale runs from the top (right) end
@@ -1412,6 +1458,7 @@ void Tube::drawTicks(int y0, const Params &p, int ticksN, const int16_t *wetRows
     const int share = Warp(edges ? wetShare : nullptr)(xc);
     int topA, topB, botA, botB;
     if (share == 0 || share == 256) { const int *R = rng[share ? 1 : 0][major ? 1 : 0]; topA = R[0]; topB = R[1]; botA = R[2]; botB = R[3]; }
+    else if (follow) followRange(rc.tickEdge[minutes][major], share, topA, topB, botA, botB);
     else {   // across the meniscus: the tick's own source rows (sim drawTicks)
       int16_t rows[TUBE_HEIGHT_MAX];
       for (int ry = 0; ry < H; ry++) rows[ry] = (int16_t)blendRow(dryRows[ry], wetRows[ry], share);
@@ -1794,6 +1841,16 @@ void Tube::buildRowCache(const Params &p, uint32_t gen) {
   rc.valid = true; rc.gen = gen; rc.H = H;
   markSourceRows(H, p.tickLens, rc.tickWet);
   markSourceRows(H, p.tickDryLens, rc.tickDry);
+  rc.tickFollow = rearTicksFollowDigits(p);
+  if (rc.tickFollow) {
+    markSourceOffsets(H, p.digitDryLens, digitOff); markSourceOffsets(H, p.bottomLens, digitOff + TUBE_HEIGHT_MAX);
+    const MarkWarp tick(p.tickDryLens), digit(p.digitDryLens);
+    const float heights[2][2] = {{p.tickMinorHeightH, p.tickMajorHeightH}, {p.tickMinorHeightM, p.tickMajorHeightM}};
+    for (int m = 0; m < 2; m++) for (int j = 0; j < 2; j++) {
+      const float h = fmx(0, jround(heights[m][j])), t = clampf((h - H / 2.0f) / (H / 2.0f), -1, 1), u = tick.inv(fabsf(t));
+      rc.tickEdge[m][j] = (t < 0 ? -1 : t > 0 ? 1 : 0) * digit.at(u) * H / 2.0f;
+    }
+  }
   lensMagRows(p, rc.mag);
   {
     float lens = clampf(p.lens, -1, 1), curve = clampf(p.lensCurve, -3, 3);
@@ -2366,7 +2423,8 @@ bool render_init() {
     tubes[i].set.poolS = (uint8_t *)heap_caps_malloc(GLYPH_SPAN_BYTES, MALLOC_CAP_SPIRAM);
     tubes[i].wetShare = (uint16_t *)heap_caps_malloc(PANEL_W * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
     tubes[i].wetRun = (int16_t *)heap_caps_malloc((PANEL_W + 1) * sizeof(int16_t), MALLOC_CAP_SPIRAM);
-    ok = ok && tubes[i].set.poolC && tubes[i].set.poolA && tubes[i].set.poolS && tubes[i].wetShare && tubes[i].wetRun;
+    tubes[i].digitOff = (float *)heap_caps_malloc(2 * TUBE_HEIGHT_MAX * sizeof(float), MALLOC_CAP_SPIRAM);
+    ok = ok && tubes[i].set.poolC && tubes[i].set.poolA && tubes[i].set.poolS && tubes[i].wetShare && tubes[i].wetRun && tubes[i].digitOff;
   }
   return ok;
 }
