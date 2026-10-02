@@ -685,25 +685,29 @@ function drawGlyph(s: GlyphSampler, x: number, yTop: number, lb: Labels, warp: W
   // watch's down is the panel's left), pass 1 = body
   for (let pass = withShadow ? 0 : 1; pass < 2; pass++) {
     const shadow = pass === 0, off = shadow ? lb.shadowOff : 0, xg = x + (lb.vertical ? -off : off), sourceTop = yTop - lb.y0 + off;
-    const gain = (shadow ? lb.shadowA : 1) / 255;
+    // Coverage of glyph alpha a (0..255) in the firmware's 1/256 steps, the shadow copy at its own opacity
+    // (also 1/256): a float coverage lands a blend on the other side of a rounding step now and then, and the
+    // shadow and body passes on one pixel stack that into two 565 steps between the renderers.
+    const alphaT = (t: number): number => Math.floor(t * 256 + 0.5), shadowT = alphaT(lb.shadowA);
+    const cov = (a: number): number => (shadow ? (alphaT(a / 255) * shadowT) >> 8 : alphaT(a / 255)) / 256;
     /** Destination column xd at shift (sx, sy) px: its rows `rows(ry)` (source row before the vertical shift)
      *  sample source (cx - fx, cy - fy), taps at columns cx / cx-1, rows cy / cy-1. */
     const shifted = (xd: number, sx: number, sy: number, ry0: number, ry1: number, rows: (ry: number) => number): void => {
       const ix = Math.floor(sx), fx = sx - ix, iy = Math.floor(sy), fy = sy - iy, cx = xd - xg - ix;
       if (cx < 0 || cx > s.w) return;
-      // The colour comes from the heaviest tap. The firmware weighs the taps in 1/256 steps; use the same
-      // weights for that choice so near-ties resolve alike (a baked shadow puts a dark texel right next to a
-      // bright one, so a flipped tie is a visible pixel, not a rounding step).
+      // The firmware weighs the taps in 1/256 steps; use the same weights for the coverage and for the colour,
+      // which comes from the heaviest tap, so near-ties resolve alike (a baked shadow puts a dark texel right
+      // next to a bright one, so a flipped tie is a visible pixel, not a rounding step).
       const wx1 = Math.floor(fx * 256 + 0.5), wx0 = 256 - wx1, wy1 = Math.floor(fy * 256 + 0.5), wy0 = 256 - wy1;
       const w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
       for (let ry = ry0; ry <= ry1; ry++) {
         const cy = rows(ry) - sourceTop - iy; if (cy < 0 || cy > s.h) continue;
         const L = inLiquid !== null && inLiquid(xd, ry);
         const t00 = tap(L, cx, cy), t10 = tap(L, cx - 1, cy), t01 = tap(L, cx, cy - 1), t11 = tap(L, cx - 1, cy - 1);
-        const a = t00 * (1 - fx) * (1 - fy) + t10 * fx * (1 - fy) + t01 * (1 - fx) * fy + t11 * fx * fy; if (a < 0.5) continue;
         const m00 = t00 * w00, m10 = t10 * w10, m01 = t01 * w01, m11 = t11 * w11, m = Math.max(m00, m10, m01, m11);
+        const a = (m00 + m10 + m01 + m11 + 32768) >> 16; if (!a) continue;
         const c = shadow ? lb.shadow : m === m00 ? C(L, cx, cy) : m === m10 ? C(L, cx - 1, cy) : m === m01 ? C(L, cx, cy - 1) : C(L, cx - 1, cy - 1);
-        mark(xd, lb.y0 + ry, c, a * gain);
+        mark(xd, lb.y0 + ry, c, cov(a));
       }
     };
     for (let cx = 0; cx < s.w; cx++) {                        // behind air: the dry copy
@@ -712,7 +716,7 @@ function drawGlyph(s: GlyphSampler, x: number, yTop: number, lb: Labels, warp: W
         const cy = lb.drySourceRows[ry] - sourceTop; if (cy < 0 || cy >= s.h) continue;
         const L = inLiquid !== null && inLiquid(xd, ry);
         const a = A(L, cx, cy); if (!a) continue;
-        mark(xd, lb.y0 + ry, shadow ? lb.shadow : C(L, cx, cy), a * gain);
+        mark(xd, lb.y0 + ry, shadow ? lb.shadow : C(L, cx, cy), cov(a));
       }
     }
     // behind liquid, and across the meniscus: every destination column the shifted glyph can reach

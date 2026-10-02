@@ -11,7 +11,7 @@
 // (compiled outside sim/ so package.json "type":"module" doesn't bite the CJS output)
 import {
   ANGLE_HARD_MAX_DEG, ANGLE_VERTICAL_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, FILM_FULL_PX_S, GravityNorm, ImuFilter, PHYS_DT,
-  columnLen, contactLeads, newTube, stepTube, type TiltInput,
+  columnLen, contactLeads, mirrored, newTube, stepTube, type TiltInput,
 } from '../src/physics';
 import { DEFAULT_PARAMS, PRESETS, migrateParams, presetParams } from '../src/params';
 
@@ -267,11 +267,18 @@ for (const [name, samples] of scenarios) {
   }
   console.log('ok  automatic liquid: smooth viewing band across axes and input gains');
 
-  // Every liquid material must return home with its own drag/spring tuning.
+  // Every liquid material must return home with its own drag/spring tuning: from up to 200 px off its home end
+  // (the far end in the mirrored frame), a gentle tilt away from home held against it. A slug left always free
+  // (no home pull, freeHomeK 0) is never parked: it must slide home under a tilt toward that end and rest there.
   for (const e of PRESETS) {
-    const pp = presetParams(e), tube = newTube(); tube.fillTarget = 0.3; tube.slugPos = 200; tube.reading = 0;
-    for (let i = 0; i < 250; i++) stepTube(tube, { along: 0.2 * pp.inputGain, across: 0, gyroAlong: 0, gyroAcross: 0 }, pp);
-    if (Math.abs(tube.slugPos) > 0.1 || !Number.isFinite(tube.slugPos)) fail(`${e.id}: reading did not settle (${tube.slugPos})`);
+    const pp = presetParams(e), tube = newTube(); tube.fillTarget = 0.3; tube.reading = 0;
+    const travel = TUBE_LENGTH_PX - columnLen(tube.fillTarget, pp), home = mirrored(pp) ? travel : 0, away = home ? -1 : 1;
+    const parks = pp.freeHomeK > 0;
+    tube.slugPos = home + away * Math.min(200, travel);
+    const along = (parks ? 0.2 : -0.9) * away * pp.inputGain, n = parks ? 250 : 500;
+    for (let i = 0; i < n; i++) stepTube(tube, { along, across: 0, gyroAlong: 0, gyroAcross: 0 }, pp);
+    if (!(Math.abs(tube.slugPos - home) <= 0.1) || !(Math.abs(tube.slugVel) <= 0.1))
+      fail(`${e.id}: ${parks ? 'reading did not settle' : 'free slug did not come to rest at home'} (${tube.slugPos} @ ${tube.slugVel}, home ${home})`);
   }
   const migrated = migrateParams({ v: 15, freeLiquid: true, readFaceUp: 1, readTurn: 125, readHold: 11 });
   if (migrated.readTiltStart !== 20 || migrated.readTiltEnd !== 50 || 'readTurn' in migrated)

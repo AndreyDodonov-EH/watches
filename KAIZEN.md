@@ -53,9 +53,8 @@
   (Bond number) would be closer to a capillary.
 
 ## Tooling / firmware
-- `check:meniscus` fails on master at `marks-blick-moving` (403,34), 17/255 (stacked-blend class), and stops there:
-  later scenes go uncompared. Report all over-tolerance scenes instead of raising on the first.
-- `check:imu` fails on master: 14 presets "reading did not settle" (olive-white, menthe, lime, seltzer, glycerol, …).
+- `check_meniscus.py` raises on the first over-tolerance pixel: later scenes go uncompared. Report all
+  over-tolerance scenes instead.
 - Push all writes fields one at a time, so the board renders transient combinations (e.g. new
   `tubeHeight` with the old fizz positions, which used to hit the task watchdog). A `Pbegin`/`Pcommit`
   transaction like the retired physical renderer's would apply a whole preset atomically.
@@ -300,8 +299,6 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
   checks and JSON parity pass, but `check:presets` skips it. A modern material profile is still needed.
 - Contact-angle meniscus (2026-09-24): the flick wobble (`cap`, ±12 px) still rides on top of the cap and can
   turn a near-90° end over for a moment (physical slosh); presets got class-default angles, not per-liquid values.
-- `check:imu` fails "reading did not settle" for alpine / pinot / spritz / cuvee / tide — pre-existing on master
-  (2026-09-24), slug home-parking, unrelated to the meniscus.
 - Perf ceiling (2026-09-24, `e2e.sh --bare` = no BLE/IMU): spritz 34.9 fps / 21.4 ms (normal build 29.4), preset 1
   45.4 / 14.7 (39.1). BLE+IMU cost ~3–4 ms/frame. Spritz stages on bare: digits 13.0 ms, surface band 6.5, meniscus 3.3,
   fizz 2.1, minute ticks 2.1. Normal build `f` showed cores h 16 / m 27 ms — the minutes tube on core 1 sets the frame;
@@ -360,7 +357,6 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - derive: the emissive dark-backing rejection uses luma ≥ 16 (the checker's `< 16`), the doc says "brighter than 16".
 - derive: rejection 11 (coherence) is evaluated only when no material rejection (1–6, 8–10) fired, so a rejected
   material lists its own reason, not the checker's echo of it; a design error on a rejected material shows up on retry.
-- check:imu fails at HEAD ca81f30 already (alpine/pinot/spritz/cuvee/tide "reading did not settle (160.8)").
 - derive: surfaceBlick = 0.9·highlightBright gives 1.17 for metal (highlightBright 1.3), above the UI range 0..1.
 - Material mode: the legacy compositor's scalar `liquidTransparency` mixes the raw backing, so a tinted liquid on a light
   backing (spritz, pinot, phosphor on paper) derives opaque and its rear marks vanish behind the liquid; physically they show
@@ -437,8 +433,6 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `check_render_frames.py --reference` must point at a copy outside `firmware/src` (e.g. a scratch file): a render.cpp
   inside a worktree's `firmware/src` includes that tree's own headers, so a header change on one side yields thousands of
   bogus diffs (TubeState layout mismatch). The tool could copy the reference into its tempdir itself.
-- `npm run check:imu` fails on HEAD b97305c: "reading did not settle (160.8)" for alpine / pinot / spritz / cuvee / tide
-  (readTiltStart 0 / readTiltEnd 1 presets).
 - Rear ticks and rear digits share one wall, yet their lenses are separate keys (tickLens/bottomLens,
   tickDryLens/digitDryLens). Presets were aligned by hand (2026-09-26); nothing keeps them aligned — a
   coherenceIssues rule (or one dry-lens key derived from the vessel) would. Same for tickParallax vs digitParallax
@@ -477,7 +471,6 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `sim/src/material/model.ts` is generated from spec/material-schema.json; a new design key goes in the schema, then `npm run gen:material`.
 
 ## Meniscus on the bore (2026-09-29)
-- `check:meniscus` parity: `marks-blick-moving` fails at (403,34), red off 2 LSB (17/255). Pre-existing: baseline fails the same pixel at cap 2.09–2.36 (and 3 other pixels in a cap sweep) — stacked 565 roundings in the band-over-mark path (sim markFn `inside` branch vs firmware Mark::bandMark). The bore-radius geometry just moved the scene onto it.
 - Wall band now eases the cap C1 onto the ring at the outer edge (was a vertical cut); the dry band past the ring still gets no film/refraction of its own.
 - Spherical cap assumes bore ≪ capillary length; several presets are outside that regime (flattened, gravity-shaped menisci not modelled).
 
@@ -485,8 +478,6 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `PARAM_META` help is stale vs derive: `contactDyn` says "honey 180°" (derive clamps to 90); `capLength` says "water 2.7, oils ~1.9" (derived display-scaled values are 2.17 / 1.5–1.8 since the bore-radius change).
 
 ## Vertical watch mode (2026-10-01)
-- `check_meniscus.py` fails at HEAD on `marks-blick-moving` (403,34): 17/255 > 12, and aborts before the later scenes — report all failing scenes instead of raising on the first.
-- `npm run check:imu` fails at HEAD: 14 presets "reading did not settle (160.8)".
 - Vertical: fizz core/pinpoint light still comes from panel-left (= from below as worn); `lxS` could follow the pose.
 - Vertical: phone "device orientation" input is mapped for landscape only.
 - Vertical: leather overlay lighting/gloss just rotates with the panel; calibration / hello faces on the board stay landscape.
@@ -507,3 +498,8 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - `display_push_strip_async` blocks ~6.2 ms a frame (each band's window command waits for the band before it); it is in neither `render` nor `push-wait`.
 - `tools/tilt.py` swings are open-loop host timing (serial round trip per pose); a firmware-side pose script would give repeatable phases.
 - No check exercises `stepFizz` on either side (compare-device turns fizz off, check_render_frames never steps it, replay-check only `stepTube`): a host/sim population check under a reversing tilt would catch a spring-block divergence.
+
+## Failing checks fixed (2026-10-02)
+- Sim glyph coverage now uses the firmware's 1/256 steps (`drawGlyph`); the rest of `markFn` is still float where the firmware truncates (`cov * through`, `* transK`, `* dryT`, bakedT `cov / a`), and so are tick emboss coverages: the same one-step class, can stack where a tick and a digit share a pixel.
+- `check:imu` material loop: no preset is `vertical`, so the vertical home path is only covered by the default-params block.
+- 10 presets are always free (`freeHomeK` 0, `readTilt` 0/1): held level they never park, so the time reads only with the home end down.
