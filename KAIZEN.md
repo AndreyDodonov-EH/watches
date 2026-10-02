@@ -503,3 +503,13 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 - Sim glyph coverage now uses the firmware's 1/256 steps (`drawGlyph`); the rest of `markFn` is still float where the firmware truncates (`cov * through`, `* transK`, `* dryT`, bakedT `cov / a`), and so are tick emboss coverages: the same one-step class, can stack where a tick and a digit share a pixel.
 - `check:imu` material loop: no preset is `vertical`, so the vertical home path is only covered by the default-params block.
 - 10 presets are always free (`freeHomeK` 0, `readTilt` 0/1): held level they never park, so the time reads only with the home end down.
+
+## Imminent residue (2026-10-02)
+- Hand-off for the residue physics items below (deposit law, dried colour, drainage): `docs/residue-physics-handoff.md`.
+- Residue deposit skew is not stored: physics lays each deposit at the edge's mid-row centre, the renderer only bends the smear onto the contact line within Z of it. A per-column skew byte (tanA at deposit time) would keep an old smear slanted where it was laid; it costs the plain-residue fast path a per-row gather.
+- `traceThin` makes fast recession deposit less; entrained films go the other way (Bretherton, h ∝ Ca^⅔). Flipping it with traceAmount 2 painted the whole smear opaque green: the dried endpoint `traceRows` (opaque shading × 0.85) reads denser than the column; a dried dye stain is a Beer–Lambert tint too.
+- Upright tubes dry the residue up to 5× faster (`TRACE_TILT_DRY`); gravity drains a film (signed flux toward the low end, conservative), it does not evaporate it. Drain-back by distance (`traceFollow`) ignores gravity's sign.
+- The wet film rides the edge's `film*` follower (one value per edge, decays 2/s once the line stops); a per-column film thickness (L × u16) would let a stopped film thin from the top down instead of all at once.
+- Sweep mode (`minutes sweep`) moves the edge through `fillTarget`, which `edgeVel` does not see: no wet film, no pull, no dynamic angle during a sweep drain.
+- Step 3c (traces off) still draws the old faint 0.35 · film band instead of the film law.
+- e2e.sh `--ref` copies `.pio/libdeps` into the temp worktree, yet PlatformIO still reinstalls the libraries there on every ref build (seen 2026-10-02).

@@ -42,7 +42,8 @@ def run_check(tmp):
             cpp.append(f's.{key}={value};')
         cpp.append('s.trace=trace;')
         if job['residue']:
-            cpp.append('for (auto &v:trace) v=0xff00; s.traceLo=0; s.traceHi=536;')
+            lo, hi = (0, 536) if job['residue'] is True else job['residue']
+            cpp.append(f'for (int i=0;i<536;i++) trace[i]=i>={lo}&&i<{hi}?0xff00:0; s.traceLo={lo}; s.traceHi={hi};')
         else:
             cpp.append('for (auto &v:trace) v=0; s.traceLo=536; s.traceHi=0;')
         cpp.append(f'renderTube(0,s,p,{i + 1},strip);')

@@ -38,7 +38,8 @@ function render(name, changes = {}, state = {}, preset = base, residue = false) 
   const p = { ...preset, ...changes };
   state = steady(p, state);
   const s = { ...newTube(), fillTarget: 0.5, slugPos: 134, ...state };
-  if (residue) { s.trace.fill(0xff00); s.traceLo = 0; s.traceHi = 536; }
+  // residue: true = a fresh deposit on every column, [lo, hi] = on those panel columns only
+  if (residue) { const [lo, hi] = residue === true ? [0, 536] : residue; s.trace.fill(0xff00, lo, hi); s.traceLo = lo; s.traceHi = hi; }
   R.fb.fill(0);
   R.drawTube(0, 0, s, p, R.buildPalette(p, s.light), 12);
   const frame = R.fb.slice(0, 536 * R.tubeLayout(p).H);
@@ -145,6 +146,54 @@ assert(new Set(gradient.slice(30 * 536 + 400, 30 * 536 + 406)).size >= 4, 'surfa
 const covered = render('opaque-residue', { traces: true, traceAmount: 2 }, {}, base, true);
 for (let x = 400; x < 406; x++) assert.equal(covered[30 * 536 + x], symmetric[30 * 536 + x], 'opaque surface must cover residue');
 for (const film of [0.1, 0.5, 0.9]) render('settling-' + film, { traces: true, wetFilm: 15 }, { filmFree: film, filmHome: film }, base, true);
+// Imminent residue: a strongly skewed slug (a vertical watch held sideways) receding at both ends, with a smear
+// that stops short of the tube ends — the residue near each line is sampled along its contact line, wet.
+// contactDyn 40 gives the film a thickness (η ≈ 0.02), so the annular-path lookup runs too.
+for (const remaining of [false, true]) for (const film of [0.4, 1]) for (const contactDyn of [0, 40])
+  render(`imminent-tilt-${remaining}-${film}-${contactDyn}`, { traces: true, wetFilm: 15, traceAmount: 1.5, contactDyn, remaining, freeLiquid: true },
+    { angle: 40, slugVel: (remaining ? 1 : -1) * 60, filmFree: film, filmHome: film }, base, [40, 470]);
+// The film fades out with its follower: no pop where the follower crosses the 0.02 gate (a tangent row sees
+// even a vanishing film at full chord), and none along the wall where it hands over to the residue.
+{
+  const gate = { traces: true, wetFilm: 15, traceAmount: 0.5, contactDyn: 20, tubeHeight: 60 };
+  const above = render('film-gate-above', gate, { filmFree: 0.0201, filmHome: 0.0201 }, base, true);
+  const below = render('film-gate-below', gate, { filmFree: 0.0199, filmHome: 0.0199 }, base, true);
+  assert(delta(above, below) <= 9, 'wet film must fade out, not pop, at the follower gate');
+}
+// A 2 px slug whose AA ramps overlap, skewed over a smear: the two edges' warps meet mid-slug and must join
+// continuously — a hair's slide may not jump the backing between them.
+{
+  const tiny = { traces: true, wetFilm: 15, tubeHeight: 60, contactAngle: 90, edgeSoft: 4, liquid: '#000000', liquidHi: '#000000', liquidLo: '#000000' };
+  const st = { fillTarget: 2 / 536, angle: 40 };
+  const a = render('short-slug-warp-a', tiny, { ...st, slugPos: 267.4999 }, base, [268, 536]);
+  const b = render('short-slug-warp-b', tiny, { ...st, slugPos: 267.5001 }, base, [268, 536]);
+  assert(delta(a, b) <= 9, 'warped residue must join continuously between the two edges of a short slug');
+}
+// Crossed edges: a short convex slug compressed by slosh has rows where the home edge passes the time edge.
+// The firmware's sheared dry spans assume ordered edges and must fall back to the general zone there (native
+// parity runs it; a one-step error is below the tolerance — check_render_frames against a pre-split
+// reference is the exact gate). The assertion keeps the scene crossing.
+for (const remaining of [false, true]) {
+  const cross = { traces: true, traceAmount: 1.5, wetFilm: 15, contactAngle: 140, remaining };
+  render(`crossed-slug-${remaining}`, cross, { fillTarget: remaining ? 1 - 6 / 536 : 6 / 536, fillPos: remaining ? 4 : -4, slugPos: 200, angle: 20, filmFree: 0.6 }, base, [150, 260]);
+  const b = R.markBounds[0];
+  let crossed = 0;
+  for (let y = 0; y < 61; y++) if (b.lo[y] > b.hi[y]) crossed++;
+  assert(crossed > 0, 'crossed-slug scene must have rows where the edges cross');
+}
+// Hard edges (edgeSoft 0): the midpoint blend still spans a pixel. A 0.6 px slug (home edge 100.6, time edge
+// 101.2 in the render frame) with only its time edge's film up: pixel 100 lies on the home side but takes
+// a tenth of the time edge's film, so it must not be painted as plain residue.
+for (const remaining of [false, true]) {
+  const hard = { traces: true, wetFilm: 15, contactDyn: 40, edgeSoft: 0, tubeHeight: 60, contactAngle: 90, remaining };
+  const st = { fillTarget: remaining ? 1 - 0.6 / 536 : 0.6 / 536, slugPos: remaining ? 536 - 0.6 - 100.6 : 100.6, filmHome: 0 };
+  const on = render(`hard-slug-film-${remaining}`, hard, { ...st, filmFree: 1 }, base, true);
+  const off = render(`hard-slug-dry-${remaining}`, hard, { ...st, filmFree: 0 }, base, true);
+  const col = remaining ? 535 - 100 : 100;
+  let differs = false;
+  for (let y = 0; y < 60; y++) differs ||= on[y * 536 + col] !== off[y * 536 + col];
+  assert(differs, 'a hard-edged slug must blend its time edge film into the pixel the home side owns');
+}
 for (const angle of [0, 45, 89.9, 90, 90.1, 140, 180]) for (const remaining of [false, true])
   render(`angle-${angle}-${remaining}`, { contactAngle: angle, remaining }, { edgeLight: 0.4, acrossTilt: -0.2, cap: 3 });
 // Hysteresis band under tilt pressure, and moving lines (advancing / receding, Cox–Voinov) at both ends.
@@ -164,10 +213,11 @@ for (const H of [4, 80]) for (const fill of [0, 0.001, 1])
 const trailingPreset = { ...DEFAULT_PARAMS,
   ...migrateParams(JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/meniscus-trailing.json')))),
   fizz: false, bubble: false, digits: false, ticksH: false, ticksM: false };
-// If the wet film is fully developed, the inner half of the body AA and the film
-// are the same liquid colour. Their junction must not expose the white tube back.
+// A saturated residue (traceAmount 4: alpha 1 on every row, whatever the streak) under a fully wet receding
+// line is, at the line, liquid of the full chord — the body colour — so the inner half of the body AA and
+// the backing are the same colour. Their junction must not expose the white tube back.
 for (const remaining of [false, true]) {
-  const changes = { remaining, surfaceBand: 0, lens: 0 };
+  const changes = { remaining, surfaceBand: 0, lens: 0, traceAmount: 4 };
   const p = { ...trailingPreset, ...changes };
   const joined = render(`wet-junction-${remaining}`, changes, { filmHome: 1, filmFree: 1 }, trailingPreset, true);
   const pal = R.buildPalette(p, 0);
@@ -176,6 +226,26 @@ for (const remaining of [false, true]) {
     const right = Math.ceil(R.edgeX(row, 402, 0, p) - 0.5) - 1;
     for (const x of [left, right]) assert.equal(joined[row * 536 + (remaining ? 535 - x : x)], pal.rows[row],
       'liquid/wet-film junction must not leak white background through overlapping alpha ramps');
+  }
+}
+// The same junction over the fixture's own, unsaturated residue: the wet residue at the line is then a tint
+// lighter than the body, and its per-column streak varies, so the junction pixel may be as light as the
+// lightest backing just past the ramp — but no lighter (a white leak through overlapping ramps is far more).
+for (const remaining of [false, true]) {
+  const changes = { remaining, surfaceBand: 0, lens: 0 };
+  const p = { ...trailingPreset, ...changes };
+  const joined = render(`wet-junction-unsat-${remaining}`, changes, { filmHome: 1, filmFree: 1 }, trailingPreset, true);
+  const pal = R.buildPalette(p, 0);
+  for (const row of [15, 25, 30, 40]) {
+    const bk = rgb(pal.tubeBackRows[row]), at = (x) => joined[row * 536 + (remaining ? 535 - x : x)];
+    const far = (x) => { const c = rgb(at(x)); return Math.abs(c[0] - bk[0]) + Math.abs(c[1] - bk[1]) + Math.abs(c[2] - bk[2]); };
+    const left = Math.floor(R.edgeXL(row, 134, 0, p) - 0.5) + 1;
+    const right = Math.ceil(R.edgeX(row, 402, 0, p) - 0.5) - 1;
+    for (const [x, out] of [[left, -1], [right, 1]]) {
+      let backing = far(x - 3 * out);
+      for (let k = 3; k <= 8; k++) backing = Math.min(backing, far(x + k * out));
+      assert(far(x) >= backing - 24, 'unsaturated liquid/wet-film junction must not leak white background');
+    }
   }
 }
 function half(frame, right) {

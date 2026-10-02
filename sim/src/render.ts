@@ -1314,6 +1314,49 @@ function traceGamma(t: number): number {   // t in 0..1
 const traceA = new Float32Array(TUBE_LENGTH_PX);    // per-column residue alpha before the wall weight
 const traceRaw = new Uint16Array(TUBE_LENGTH_PX);   // render-frame copy of the residue, input to the taper blur
 
+// Wet film (step 3d): the liquid a receding line leaves on the bore wall, h = η·R. Bretherton's tube law
+// with the finite-Ca correction, η = 1.34 Ca^⅔ / (1 + 3.35 Ca^⅔), capped at FILM_ETA_MAX (thin-film
+// limit). Ca is the one capShape's Cox–Voinov term is calibrated with (θ³ = θ₀³ − G·v ⇒ Ca ≈ θ_dyn³ / 9Λ
+// at FILM_FULL_PX_S; material/derive.ts inverts the same law for contactDyn): the film a fully drawn line
+// leaves. The edge's film follower (TubeState.film*) then scales it — it drains as the follower decays,
+// thinning to nothing instead of switching off. A watery line leaves microns: only the rays grazing the
+// wall see it; a syrup coats the bore.
+const FILM_LAMBDA = 9.2, FILM_ETA_MAX = 0.1;
+export function filmEta(p: Params): number {
+  const dyn = Math.max(0, p.contactDyn) * Math.PI / 180, ca = dyn * dyn * dyn / (9 * FILM_LAMBDA);
+  const c = Math.cbrt(ca * ca);
+  return Math.min(FILM_ETA_MAX, 1.34 * c / (1 + 3.35 * c));
+}
+// Seen across the tube, a row at bore coordinate u (boreRow) crosses the annular film at both walls:
+// path / full chord f = 1 − √(1 − q), q = (2η − η²)/(1 − u²), 1 once the ray misses the gas core (the
+// palette's outer rows already carry their own short chord, so f = 1 there is the body colour of that
+// row). FILM_PHI[i] is f in 1/256 at q = i/256. Colour: Beer–Lambert against the
+// backing in linear light, D·(C/D)^f = D^(1−f)·C^f per channel (C the body row = full chord, D the local
+// backing) — monotone between the two and exact at both ends. Over residue it is the handoff of the
+// dissolved deposit into the film. FILM_LG = −log2 of the decoded sRGB channel, Q8; FILM_EX encodes 2^(−m/256)
+// back to sRGB; integer tables, as the firmware.
+const FILM_PHI = new Uint16Array(257), FILM_LG = new Uint16Array(256), FILM_EX = new Uint8Array(4096);
+const srgbLin = (c: number): number => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+const srgbEnc = (l: number): number => l <= 0.0031308 ? 12.92 * l : 1.055 * Math.pow(l, 1 / 2.4) - 0.055;
+for (let i = 0; i <= 256; i++) FILM_PHI[i] = Math.floor(256 * (1 - Math.sqrt(1 - i / 256)) + 0.5);
+for (let v = 0; v < 256; v++) FILM_LG[v] = Math.min(4095, Math.floor(-Math.log2(srgbLin(Math.max(1, v) / 255)) * 256 + 0.5));
+for (let m = 0; m < 4096; m++) FILM_EX[m] = Math.floor(255 * srgbEnc(Math.pow(2, -m / 256)) + 0.5);
+/** One channel of D^(1−f)·C^f, f = fT / 256 (0 < fT < 256), from the channels' Q8 logs. */
+function filmMix(lgD: number, lgC: number, fT: number): number {
+  return FILM_EX[(lgD * (256 - fT) + lgC * fT + 128) >> 8];
+}
+/** The film path fraction through a row, 1/256, for film thickness eta (FILM_PHI at q = (2η − η²)·kRow). */
+function filmRowT(eta: number, kRow: number): number {
+  if (eta <= 0) return 0;
+  const q = eta * (2 - eta) * kRow;
+  return q >= 1 ? 256 : FILM_PHI[Math.floor(q * 256 + 0.5)];
+}
+/** 1 − smoothstep(t), t clamped to 0..1: the eases of the imminent zone (1 at the line, 0 at its reach). */
+function ease(t: number): number {
+  const s = Math.min(1, Math.max(0, t));
+  return 1 - s * s * (3 - 2 * s);
+}
+
 /** Draw one tube. y0 = top of tube in panel coords.
  *  `remaining` mode: the liquid sits at the right end and drains as time passes. The liquid layer is
  *  rendered in a mirrored frame (edge from the right, along-axis signs flipped), then flipped before
@@ -1373,8 +1416,13 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // over an already-AA body leaks the bare tube colour at their junction.
   if (traceMode) {
     const yc = (H - 1) / 2, hw = softW / 2;
-    const N = p.wetFilm > 0 ? Math.max(1, Math.round(p.wetFilm)) : 0;
+    const N = p.wetFilm > 0 ? Math.max(1, Math.round(p.wetFilm)) : 0, invN = N > 0 ? 1 / N : 0, invBW = 1 / Math.max(1, softW);
     const bandR = hasLiquid && N > 0 && s.filmFree > 0.02, bandL = hasLiquid && N > 0 && p.freeLiquid && s.filmHome > 0.02;
+    // Film thickness per edge (η·follower: it thins as the follower drains). Its visibility also fades
+    // out with the follower from 0.2 down to the 0.02 gate (the film breaks up as it dries): a tangent row
+    // sees even a vanishing film at full chord, so thickness alone would pop it off at the gate.
+    const eta = filmEta(p), etaR = bandR ? eta * s.filmFree : 0, etaL = bandL ? eta * s.filmHome : 0;
+    const visR = bandR ? ease((0.2 - s.filmFree) / 0.18) : 0, visL = bandL ? ease((0.2 - s.filmHome) / 0.18) : 0;
     // Columns that may receive residue or band: the occupied residue range (physics keeps
     // [traceLo, traceHi) tight) mirrored into the render frame, plus each band's reach over all rows.
     // Permanent film (traceFilm): every column carries residue of at least that level, so the range
@@ -1387,9 +1435,31 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     let lo = L, hi = 0;
     if (filmG > 0) { lo = 0; hi = L; }
     else if (state.traceHi > state.traceLo) { lo = mir ? L - state.traceHi : state.traceLo; hi = mir ? L - state.traceLo : state.traceHi; }
-    if (bandL || bandR) for (let ry = 0; ry < H; ry++) {
-      if (bandL) { lo = Math.min(lo, Math.floor(edgesL[ry] - N)); hi = Math.max(hi, Math.ceil(edgesL[ry] + hw) + 1); }
-      if (bandR) { lo = Math.min(lo, Math.floor(edges[ry] - hw)); hi = Math.max(hi, Math.ceil(edges[ry] + N) + 1); }
+    // Imminent residue: physics lays a deposit at its edge's mid-row centre (xe / xs, the columns stepTube
+    // deposits at), but the line really left it along the contact line, which leads or lags that centre
+    // per row by Δ = edge − centre (tilt skew, meniscus cap). Within Z px of the line the residue is
+    // sampled Δ·w back, w easing 1 → 0 over Z = 2·max|Δ| (keeps the map monotone): the fresh smear hugs
+    // the meniscus instead of leaving a bare wedge where the line leads. Past Z the deposit stays where
+    // it dried. Only where a deposit lies within reach of the edge (a uniform traceFilm floor shears onto
+    // itself) and only on rows whose |Δ| ≥ 1/8 px: everything else stays on the fast plain-residue path.
+    let dR = 0, dL = 0, eR0 = L, eR1 = 0, eL0 = L, eL1 = 0;
+    for (let ry = 0; ry < H; ry++) {
+      dR = Math.max(dR, Math.abs(edges[ry] - xe)); eR0 = Math.min(eR0, edges[ry]); eR1 = Math.max(eR1, edges[ry]);
+      dL = Math.max(dL, Math.abs(edgesL[ry] - xs)); eL0 = Math.min(eL0, edgesL[ry]); eL1 = Math.max(eL1, edgesL[ry]);
+    }
+    const ZR = Math.max(1, 2 * dR), ZL = Math.max(1, 2 * dL), invZR = 1 / ZR, invZL = 1 / ZL;
+    const depLo = mir ? L - state.traceHi : state.traceLo, depHi = mir ? L - state.traceLo : state.traceHi;
+    const near = (e0: number, e1: number, z: number): boolean => depHi > depLo && depLo < e1 + z + 4 && depHi > e0 - z - 4;
+    const shearR = hasLiquid && dR >= 0.125 && near(eR0, eR1, ZR);
+    const shearL = hasLiquid && p.freeLiquid && dL >= 0.125 && near(eL0, eL1, ZL);
+    // Wet residue: while a line recedes (its film follower up), what it laid down within N px is still
+    // dissolved in the film — it hands over to the body colour at the line (monotone, see the pixel loop),
+    // easing into the dried pigment (traceRows) further out and as the follower drains.
+    const wetR = bandR ? s.filmFree : 0, wetL = bandL ? s.filmHome : 0;
+    const extR = Math.max(bandR ? N : 0, shearR ? ZR : 0), extL = Math.max(bandL ? N : 0, shearL ? ZL : 0);
+    if (extL > 0 || extR > 0) for (let ry = 0; ry < H; ry++) {
+      if (extL > 0) { lo = Math.min(lo, Math.floor(edgesL[ry] - extL)); hi = Math.max(hi, Math.ceil(edgesL[ry] + hw) + 1); }
+      if (extR > 0) { lo = Math.min(lo, Math.floor(edges[ry] - hw)); hi = Math.max(hi, Math.ceil(edges[ry] + extR) + 1); }
     }
     if (hi > lo) {
       // widened ±4 for the blur reach (and 4 more for the columns the blur reads); columns outside
@@ -1410,14 +1480,21 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
       for (let ry = 0; ry < H; ry++) {
         const d = (ry - yc) / yc, rowW = 0.4 + 0.6 * d * d, y = y0 + ry;
         const ex = edges[ry], exL = edgesL[ry], xm = (ex + exL) / 2;
+        // film path weight 1/(1 − u²) of this row; the outermost rows graze the wall (u → 1)
+        const u = boreRow(ry, p), gr = 1 - u * u, kRow = gr > 1e-6 ? 1 / gr : 1e6;
+        const B = rgb565to888(pal.tubeBackRows[ry]), P = rgb565to888(pal.traceRows[ry]), C = rgb565to888(pal.rows[ry]);
+        const lgC0 = FILM_LG[C[0]], lgC1 = FILM_LG[C[1]], lgC2 = FILM_LG[C[2]];
         const xr = Math.round(ex), xrL = Math.round(exL);   // hard edge: liquid where xrL <= x < xr
+        // this row's Δ per edge, where the smear is sheared at all
+        const shR = shearR && Math.abs(ex - xe) >= 0.125 ? ex - xe : 0, shL = shearL && Math.abs(exL - xs) >= 0.125 ? exL - xs : 0;
         // Row split into segments so the per-pixel coverage/band math only runs near the edges:
         // [a0, pl1) plain residue · [zl0, zl1) home-edge zone · [zl1, zr0) fully covered, skipped ·
-        // [zr0, zr1) time-edge zone · [pr0, a1) plain residue. A zone reaches max(N, hw) px out
-        // from its edge (band + soft ramp) and hw px in.
+        // [zr0, zr1) time-edge zone · [pr0, a1) plain residue. A zone reaches hw px in and out from its
+        // edge (soft ramp), N px out while a wet film is up, Z px out on a sheared row.
         let pl1 = a1, zl0 = a1, zl1 = a1, zr0 = a1, zr1 = a1, pr0 = a1;
         if (hasLiquid) {
-          const dl = bandL ? Math.max(N, hw) : hw, dr = bandR ? Math.max(N, hw) : hw;
+          // at least half a pixel even for hard edges: the midpoint blend bt spans max(1, softW) px
+          const hz = Math.max(0.5, hw), dl = Math.max(hz, bandL ? N : 0, shL ? ZL : 0), dr = Math.max(hz, bandR ? N : 0, shR ? ZR : 0);
           const clamp = (v: number): number => Math.max(a0, Math.min(a1, v));
           pl1 = clamp(Math.floor(exL - dl - 0.5) + 1);
           const sk0 = clamp(softW > 0 ? Math.ceil(exL + hw - 0.5) : xrL);       // first fully covered column
@@ -1440,17 +1517,31 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
               ? Math.min(1, Math.max(0, (ex + hw - x - 0.5) / softW), Math.max(0, (x + 0.5 - exL + hw) / softW))
               : (x >= xrL && x < xr ? 1 : 0);
             if (cov >= 1) continue;
-            let a = traceA[x] * rowW, c = pal.traceRows[ry];
-            // wet band on each edge's own half: 1 at (and inside) the contact line, 0 at N px out
-            const b = x + 0.5 < xm
-              ? (bandL ? s.filmHome * Math.min(1, Math.max(0, 1 - (exL - x - 0.5) / N)) : 0)
-              : (bandR ? s.filmFree * Math.min(1, Math.max(0, 1 - (x + 0.5 - ex) / N)) : 0);
-            // Composite as residue (traceRows at a) UNDER the film (rows at b), folded into one write:
-            // alpha a + (1 - a) b, colour weighted by each layer's contribution (b / alpha for the film).
-            // Interpolating the colour by b alone pulls a see-through liquid's film toward the opaque
-            // residue pigment while the alpha is still near 1: the trail reads denser than the column.
-            if (b > 0) { const A = a + (1 - a) * b; c = blend565(c, pal.rows[ry], b / A); a = A; }
-            if (a >= 1 / 255) pxa(x, y, c, Math.min(1, a));
+            // px outward of each contact line (< 0 under its soft ramp). bt = how much the pixel belongs to the
+            // time edge: 0 / 1 on each half, blended across a softW-wide window at the midpoint so the two
+            // edges' warps and films join continuously where a short slug's ramps overlap.
+            const oL = exL - x - 0.5, oR = x + 0.5 - ex, bt = Math.min(1, Math.max(0, (x + 0.5 - xm) * invBW + 0.5));
+            // shift toward the edge centre (Δ·w), wet weight and film weight 1/256. The wet residue and the
+            // film ease from the contact line to 0 at N px out; the film also thins there (η·wN), so its
+            // full-chord rows retreat to the walls — legs — and its visibility takes wN·vis on top, so even a
+            // tangent row hands over to the residue smoothly.
+            let sh = 0, wet = 0, fw = 0;
+            if (bt < 1) { const k = 1 - bt, wN = ease(oL * invN); if (shL) sh += k * shL * ease(oL * invZL); wet += k * wetL * wN; if (etaL > 0) fw += k * filmRowT(etaL * wN, kRow) * wN * visL; }
+            if (bt > 0) { const wN = ease(oR * invN); if (shR) sh += bt * shR * ease(oR * invZR); wet += bt * wetR * wN; if (etaR > 0) fw += bt * filmRowT(etaR * wN, kRow) * wN * visR; }
+            // imminent residue sampled at the shifted column, linear between columns
+            const xf = x - sh, i0 = Math.floor(xf), ft = xf - i0;
+            const r0 = i0 >= a0 && i0 < a1 ? traceA[i0] : 0, r1 = i0 + 1 >= a0 && i0 + 1 < a1 ? traceA[i0 + 1] : 0;
+            const a = Math.min(1, (r0 + (r1 - r0) * ft) * rowW);
+            // The wet deposit hands over to the liquid (weight wet·a: a denser deposit is more of the film)
+            // and the film darkens toward it too: one Beer–Lambert step from the dried residue D toward the
+            // body, D^(1−t)·C^t, t = 1 − (1 − wet·a)(1 − f). Monotone between the two — never a band lighter
+            // than both the liquid and the residue beside it.
+            const T = Math.floor((1 - (1 - wet * a) * (1 - fw / 256)) * 256 + 0.5);
+            if (T >= 256) { px(x, y, pal.rows[ry]); continue; }
+            if (T <= 0) { if (a >= 1 / 255) pxa(x, y, pal.traceRows[ry], a); continue; }
+            // D = dried residue over the tube back, in 888 so the pixel is written once
+            const E0 = Math.round(B[0] + (P[0] - B[0]) * a), E1 = Math.round(B[1] + (P[1] - B[1]) * a), E2 = Math.round(B[2] + (P[2] - B[2]) * a);
+            px(x, y, rgb565(filmMix(FILM_LG[E0], lgC0, T), filmMix(FILM_LG[E1], lgC1, T), filmMix(FILM_LG[E2], lgC2, T)));
           }
         }
       }
