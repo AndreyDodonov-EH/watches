@@ -1244,29 +1244,41 @@ function wallCap(ry: number, p: Params, c: CapShape): number {
 export function capScale(len: number, c: CapShape): number {
   return Math.min(1, Math.max(0, len) / 2 / Math.max(1, Math.abs(c.h) * (1 + Math.abs(c.asym)) + Math.abs(c.cap)));
 }
-/** Fill-edge x for tube-row `ry` (0..H-1), given edge centre `xe`, in-plane skew and this end's cap. */
-export function edgeX(ry: number, xe: number, angleDeg: number, p: Params, c = capShape(p), k = 1): number {
+/** In-plane skew of the two ends, px per row: [time edge, home edge] (TubeState.angle). The liquid lies on
+ *  the low wall at both ends, so the home end leans the other way: a slug off its home end is a trapezoid,
+ *  not a parallelogram. There (`xs` px off the end cap, the ramp edgeXL flattens by) the two leans share what
+ *  the column (`gap` px between the edge centres, slosh included) has left past both caps' reach into it at a
+ *  wall row, so the lean never makes the ends of a short slug cross — one budget for the pair: the caps are
+ *  not alike under tilt. A column on its end cap leans freely (the cap clips it); lifting off, the part of that
+ *  free lean still in the time edge comes out of the same budget. */
+export function edgeSkews(angleDeg: number, H: number, gap: number, xs: number, cR: CapShape, kR: number, cL: CapShape, kL: number): [number, number] {
+  const tanA = Math.tan((angleDeg * Math.PI) / 180), yc = Math.max(1, (H - 1) / 2), off = Math.max(0, Math.min(1, xs / 8));
+  const reach = (c: CapShape, k: number): number => k * Math.max(0, Math.abs(c.h * c.asym) + Math.abs(c.cap) - c.h);
+  const lim = Math.max(0, gap - reach(cR, kR) - off * reach(cL, kL) - (1 - off) * Math.abs(tanA) * yc) / (2 * yc);
+  const lean = Math.max(-lim, Math.min(lim, tanA));
+  return [tanA + off * (lean - tanA), -lean];
+}
+/** Fill-edge x for tube-row `ry` (0..H-1), given edge centre `xe`, in-plane skew `tanA` (px per row,
+ *  edgeSkews) and this end's cap. */
+export function edgeX(ry: number, xe: number, tanA: number, p: Params, c = capShape(p), k = 1): number {
   const yc = (tubeLayout(p).H - 1) / 2;
-  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xe + skew + k * edgeCap(ry, p, c);
+  return xe + tanA * (ry - yc) + k * edgeCap(ry, p, c);
 }
 /** Home-end edge of a free slug whose centre sits at `xs`: the mirror image of edgeX (its cap takes
- *  the mirrored forcing, the centre leads in -x). Flattens onto the end cap over the last 8 px. */
-export function edgeXL(ry: number, xs: number, angleDeg: number, p: Params, c = capShape(p), k = 1): number {
+ *  the mirrored forcing, the centre leads in -x; `tanA` = the home end's own skew, edgeSkews). Flattens
+ *  onto the end cap over the last 8 px. */
+export function edgeXL(ry: number, xs: number, tanA: number, p: Params, c = capShape(p), k = 1): number {
   const yc = (tubeLayout(p).H - 1) / 2;
-  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xs + Math.min(1, xs / 8) * (skew - k * edgeCap(ry, p, c));
+  return xs + Math.min(1, xs / 8) * (tanA * (ry - yc) - k * edgeCap(ry, p, c));
 }
 /** Wall-ring x of the time edge / home edge: edgeX / edgeXL with wallCap in place of edgeCap. */
-function wallX(ry: number, xe: number, angleDeg: number, p: Params, c: CapShape, k: number): number {
+function wallX(ry: number, xe: number, tanA: number, p: Params, c: CapShape, k: number): number {
   const yc = (tubeLayout(p).H - 1) / 2;
-  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xe + skew + k * wallCap(ry, p, c);
+  return xe + tanA * (ry - yc) + k * wallCap(ry, p, c);
 }
-function wallXL(ry: number, xs: number, angleDeg: number, p: Params, c: CapShape, k: number): number {
+function wallXL(ry: number, xs: number, tanA: number, p: Params, c: CapShape, k: number): number {
   const yc = (tubeLayout(p).H - 1) / 2;
-  const skew = Math.tan((angleDeg * Math.PI) / 180) * (ry - yc);
-  return xs + Math.min(1, xs / 8) * (skew - k * wallCap(ry, p, c));
+  return xs + Math.min(1, xs / 8) * (tanA * (ry - yc) - k * wallCap(ry, p, c));
 }
 
 /** Stable per-column streak factor 0.82..1 for the dried traces — a subtle texture, not stripes.
@@ -1301,7 +1313,6 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   // Mirroring flips along-axis quantities only; across-axis ones (angle, light, acrossTilt) are invariant.
   const mir = mirrored(p);
   const s = mir ? { ...state, fillPos: -state.fillPos, edgeLight: -state.edgeLight, cap: -state.cap } : state;
-  const angle = s.angle;
   const len = columnLen(s.fillTarget, p);
   const xs = p.freeLiquid ? (mir ? L - len - s.slugPos : s.slugPos) : 0; // home-end edge centre
   const xe = xs + len + Math.max(-len, Math.min(len, s.fillPos));              // time-edge centre; slosh can't exceed the volume
@@ -1315,6 +1326,7 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, s.pinFree, s.lineVFree);
   const capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, s.pinHome, s.lineVHome);
   const capK = capScale(len, capR), capKL = capScale(len, capL);
+  const [tanR, tanL] = edgeSkews(s.angle, H, xe - xs, xs, capR, capK, capL, capKL);
   const hasLiquid = xe - xs >= 0.5;   // an empty column draws nothing, not even an anti-aliased sliver
   fizzShift[idx] = xs;
   ensureFizz(idx, p, Math.max(0, Math.min(L, xe - xs - 6)), s.agitation);
@@ -1333,8 +1345,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
   const surfL = fizzSurfL[idx].length === H ? fizzSurfL[idx] : (fizzSurfL[idx] = new Float32Array(H));
   fizzExposed[idx] = (xe < L - 0.5 ? 1 : 0) | (p.freeLiquid && xs > 0.5 ? 2 : 0);
   for (let ry = 0; ry < H; ry++) {
-    const ex = edgeX(ry, xe, angle, p, capR, capK);
-    const exL = p.freeLiquid ? edgeXL(ry, xs, angle, p, capL, capKL) : 0;
+    const ex = edgeX(ry, xe, tanR, p, capR, capK);
+    const exL = p.freeLiquid ? edgeXL(ry, xs, tanL, p, capL, capKL) : 0;
     edges[ry] = ex; edgesL[ry] = exL;
     surf[ry] = ex - xs; surfL[ry] = exL - xs;
     let x0 = 0;
@@ -1724,8 +1736,8 @@ export function drawTube(idx: number, y0: number, state: TubeState, p: Params, p
     };
     for (let ry = 0; ry < H; ry++) {
       const xi = Math.floor(edges[ry]), xa = Math.max(capX0[ry], Math.floor(edgesL[ry]) + 1);
-      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, angle, p, capR, capK), 1, lightK, xa, L);
-      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, angle, p, capL, capKL), -1, lightKL, capX0[ry], xi);
+      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanR, p, capR, capK), 1, lightK, xa, L);
+      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanL, p, capL, capKL), -1, lightKL, capX0[ry], xi);
     }
   }
 

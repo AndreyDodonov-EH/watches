@@ -189,11 +189,11 @@ void stepTube(TubeState &s, const TiltInput &in, const Params &p, float dt) {
   }
 
   // Vertical watch: the surface stays level — the front settles at the tube's in-plane tilt from the vertical,
-  // faded out as the panel's plane loses gravity; turned over the slope is the other way, the sign crossing over
-  // a ±0.15 g band of along (see sim).
+  // faded out as the panel's plane loses gravity. The sign follows across alone (the liquid lies on the low wall
+  // whichever end is down; the renderer leans the home edge the other way), at the cap on its side (see sim).
   const float aMax = p.vertical ? ANGLE_VERTICAL_MAX_DEG : fminf(p.angleMax, ANGLE_HARD_MAX_DEG);
   const float angleRest = clampf(p.vertical
-    ? fminf(1, 2 * sqrtf(poseAlong * poseAlong + poseAcross * poseAcross)) * clampf(-poseAlong / 0.15f, -1, 1) * atan2f(poseAcross, fabsf(poseAlong)) * 180 / (float)M_PI
+    ? fminf(1, 2 * sqrtf(poseAlong * poseAlong + poseAcross * poseAcross)) * atan2f(poseAcross, fabsf(poseAlong)) * 180 / (float)M_PI
     : across * p.angleTiltGain, -aMax, aMax);   // in-plane gravity only (see sim physics.ts)
   const float angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel;
   s.angleVel += angleAcc * dt;

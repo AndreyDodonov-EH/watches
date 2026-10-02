@@ -22,7 +22,7 @@ export interface TiltInput {
 // can ever make the liquid run off the end of the tube. Ported to firmware as-is.
 export const FILL_SLOSH_MAX_PX = 30;  // |fillPos| cap
 export const ANGLE_HARD_MAX_DEG = 20; // |angle| cap (params.angleMax tightens it, never widens)
-export const ANGLE_VERTICAL_MAX_DEG = 45; // |angle| cap of a vertical watch, whose surface stays level against the tilted tube
+export const ANGLE_VERTICAL_MAX_DEG = 45; // |angle| cap of a vertical watch, whose upper surface stays level against the tilted tube
 export const LIGHT_MAX_DEG = 85;      // |light| cap
 export const CAP_DYN_MAX_PX = 12;     // |cap| cap: dynamic meniscus bulge / hollow
 export const PIN_RELAX_S = 3;         // a held contact line creeps back to the static shape (wrist micro-motion), s
@@ -38,7 +38,7 @@ export interface TubeState {
   fillTarget: number;  // 0..1 from time
   fillPos: number;     // px offset of the edge relative to target (slosh), spring toward 0
   fillVel: number;
-  angle: number;       // deg, in-plane front skew (+ = bottom contact line leads); follows across-tilt
+  angle: number;       // deg, in-plane skew of the time edge (+ = bottom contact line leads); follows across-tilt. The home edge of a free slug leans the other way (render.ts edgeSkews)
   angleVel: number;
   light: number;       // deg, highlight surface-normal angle in the tube cross-section (0 = centre row, + = toward the top edge); spring toward lightRest()
   lightVel: number;
@@ -309,12 +309,13 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   // gravity (the one fizz rises against) tilts the front on screen. Along-tilt is out of plane.
   // Vertical watch: the surface of an upright column stays level, so the front settles at the tube's own in-plane
   // tilt from the vertical (whatever the material: viscosity only sets how fast, angleK / angleDamp), faded out
-  // as the plane of the panel loses gravity (lying flat: no in-plane direction, only noise). Turned over, the slope
-  // is the other way; the sign crosses over a ±0.15 g band of along, so a watch on its side (along ≈ 0, where the
-  // level surface would run along the tube) rests at 0 instead of flipping between the caps on noise.
+  // as the plane of the panel loses gravity (lying flat: no in-plane direction, only noise). The sign follows the
+  // across component alone — the liquid lies on the low wall whichever end is down: turned over, the time edge
+  // is the slug's hanging end and the level surface is its home edge, which the renderer leans the other way.
+  // On its side (along ≈ 0) the lean sits at the cap, both ends on the low wall.
   const aMax = p.vertical ? ANGLE_VERTICAL_MAX_DEG : Math.min(p.angleMax, ANGLE_HARD_MAX_DEG);
   const angleRest = Math.max(-aMax, Math.min(aMax, p.vertical
-    ? Math.min(1, 2 * Math.hypot(poseAlong, poseAcross)) * Math.max(-1, Math.min(1, -poseAlong / 0.15)) * Math.atan2(poseAcross, Math.abs(poseAlong)) * 180 / Math.PI
+    ? Math.min(1, 2 * Math.hypot(poseAlong, poseAcross)) * Math.atan2(poseAcross, Math.abs(poseAlong)) * 180 / Math.PI
     : across * p.angleTiltGain));
   const angleAcc = -p.angleK * (s.angle - angleRest) - p.angleDamp * s.angleVel;
   s.angleVel += angleAcc * dt;

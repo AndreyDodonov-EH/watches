@@ -7,7 +7,7 @@ const R = require(path.join(cache, 'sim/src/render.js'));
 const { DEFAULT_PARAMS, migrateParams } = require(path.join(cache, 'sim/src/params.js'));
 // Contact angle whose spherical cap has wall depth `depth` px in the 61 px test tube (R = 30).
 const ang = (depth) => 90 - 2 * Math.atan(depth / 30) * 180 / Math.PI;
-const { newTube } = require(path.join(cache, 'sim/src/physics.js'));
+const { newTube, columnLen, mirrored } = require(path.join(cache, 'sim/src/physics.js'));
 const jobs = [];
 // Sprite sheets decoded by check_meniscus.py (sprites/<name>.rgba), metadata from the sim's assets.
 R.SPRITE_SHEETS.forEach((name, i) => {
@@ -269,5 +269,47 @@ for (const H of [37, 46, 60, 61, 80]) for (const digitDryLens of [-1, -0.4, 0, 0
   }
 assert.ok(followCases > 1000, `tick/label clearance cases: ${followCases}`);
 assert.ok(tickAndLabel(37, { digitDryLens: -1, bottomLens: 0.6, tickDryLens: 0 }, 14, 21)[0].lo - 13 === 2, 'the review case has one clear dry row');
+// In-plane skew: the liquid lies on the low wall at both ends — the home end of a slug leans the other way —
+// and the two leans of a short slug off its home end never cross, whatever the cap (concave, convex, wobble).
+let skewCases = 0;
+for (const [tag, mode] of [['land', {}], ['land-rem', { remaining: true }], ['vert', { vertical: true }]])
+  for (const contactAngle of [30, 140]) for (const column of [0.5, 0.06, 0.02]) for (const slugPos of [3, 134]) for (const angle of [40, -40]) {
+    const changes = { ...mode, contactAngle, contactHyst: 12 }, p = { ...base, ...changes };
+    const fillTarget = p.remaining ? 1 - column : column;   // the column's share of the tube, either scale
+    const state = { fillTarget, slugPos, angle, acrossTilt: Math.sign(angle) * 0.5, cap: 3 };
+    render(`skew-${tag}-${contactAngle}-${column}-${slugPos}-${angle}`, changes, state);
+    const mir = mirrored(p), len = columnLen(fillTarget, p), xs = mir ? 536 - len - slugPos : slugPos, xe = xs + len, H = R.tubeLayout(p).H;
+    const cR = R.capShape(p, len, 0, state.acrossTilt, mir ? -3 : 3), cL = R.capShape(p, len, 0, state.acrossTilt, mir ? 3 : -3);
+    const kR = R.capScale(len, cR), kL = R.capScale(len, cL), [tanR, tanL] = R.edgeSkews(angle, H, xe - xs, xs, cR, kR, cL, kL);
+    const span = (ry) => R.edgeX(ry, xe, tanR, p, cR, kR) - R.edgeXL(ry, xs, tanL, p, cL, kL), where = JSON.stringify({ tag, ...state, contactAngle });
+    assert.ok(tanR * angle >= 0 && tanL * angle <= 0 && (len < 60 || tanL === -tanR), `home end must lean the other way ${where}`);
+    for (let ry = 0; ry < H; ry++) {
+      if (slugPos >= 8) assert.ok(span(ry) >= -1e-6, `slug ends cross at row ${ry} ${where}`);
+      if (ry < H >> 1) assert.ok((span(H - 1 - ry) - span(ry)) * angle > 0, `liquid must be longer on the low wall, row ${ry} ${where}`);
+    }
+    skewCases++;
+  }
+assert.ok(skewCases === 72, `skew cases: ${skewCases}`);
+// Unlike caps under slosh (review case: convex, tilt pressure and sag make the home cap overshoot its half of a
+// 35 px gap): the lean takes only what both caps leave of the real gap, so it never crosses the ends — where the
+// caps alone already meet, the slug keeps their shape.
+let sloshCases = 0;
+for (const contactAngle of [140, 100, 30]) for (const len of [20, 40, 60]) for (const fillPos of [-5, 0, 5]) for (const edgeLight of [-0.4, 0.4])
+  for (const acrossTilt of [0.75, -0.75]) for (const angle of [4.125, -40]) for (const cap of [0, 6]) for (const slugPos of [4, 100]) {
+    const changes = { contactAngle, contactHyst: 15 }, p = { ...base, ...changes }, H = R.tubeLayout(p).H;
+    const state = { fillTarget: len / 536, slugPos, fillPos, edgeLight, acrossTilt, angle, cap }, xe = slugPos + len + fillPos;
+    const cR = R.capShape(p, len, edgeLight, acrossTilt, cap), cL = R.capShape(p, len, -edgeLight, acrossTilt, -cap);
+    const kR = R.capScale(len, cR), kL = R.capScale(len, cL), [tanR, tanL] = R.edgeSkews(angle, H, xe - slugPos, slugPos, cR, kR, cL, kL);
+    const tanA = Math.tan(angle * Math.PI / 180), off = Math.min(1, slugPos / 8);
+    for (let ry = 0; ry < H; ry++) {
+      const eL = (t) => R.edgeXL(ry, slugPos, t, p, cL, kL), span = R.edgeX(ry, xe, tanR, p, cR, kR) - eL(tanL);
+      // the width the caps alone leave (off the end cap: no lean; lifting off it: the free lean the cap clips)
+      const capsOnly = R.edgeX(ry, xe, (1 - off) * tanA, p, cR, kR) - eL(0);
+      assert.ok(span >= Math.min(0, capsOnly) - 1e-6, `lean crosses the slug ends at row ${ry}: ${span} (caps alone ${capsOnly}) ${JSON.stringify({ contactAngle, len, ...state })}`);
+    }
+    if (len === 40 && slugPos === 100 && cap === 0) render(`skew-slosh-${contactAngle}-${fillPos}-${edgeLight}-${acrossTilt}-${angle}`, changes, state);
+    sloshCases++;
+  }
+assert.ok(sloshCases === 864, `slosh cases: ${sloshCases}`);
 fs.writeFileSync(path.join(out, 'jobs.json'), JSON.stringify(jobs));
 console.log(`Meniscus: symmetry, subpixel motion, flattening, residue, receding edge, gradient passed; ${jobs.length} parity scenes.`);

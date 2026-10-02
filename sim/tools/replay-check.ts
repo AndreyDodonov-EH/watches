@@ -10,7 +10,7 @@
 //       && node /tmp/replay-check/tools/replay-check.js
 // (compiled outside sim/ so package.json "type":"module" doesn't bite the CJS output)
 import {
-  ANGLE_HARD_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, FILM_FULL_PX_S, GravityNorm, ImuFilter, PHYS_DT,
+  ANGLE_HARD_MAX_DEG, ANGLE_VERTICAL_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, FILM_FULL_PX_S, GravityNorm, ImuFilter, PHYS_DT,
   columnLen, contactLeads, newTube, stepTube, type TiltInput,
 } from '../src/physics';
 import { DEFAULT_PARAMS, PRESETS, migrateParams, presetParams } from '../src/params';
@@ -225,13 +225,16 @@ for (const [name, samples] of scenarios) {
     if (Math.abs(tube.angle - 30) > 1 || !still()) fail(`${tag}: 30° sideways: angle ${tube.angle}, slug ${tube.slugPos} @ ${tube.slugVel}`);
     step(-0.866, -0.5, 500);
     if (Math.abs(tube.angle + 30) > 1 || !still()) fail(`${tag}: -30° sideways: angle ${tube.angle}, slug ${tube.slugPos} @ ${tube.slugVel}`);
-    // turned over and tilted sideways: the level surface slopes the other way; on its side: no slope, no flipping
+    // turned over and tilted sideways: the time edge is the hanging end, still leaning onto the low wall (the level
+    // surface is the home edge, drawn with the opposite lean); on its side: at the cap, the same way, no flipping
     for (const side of [0.5, -0.5]) {
       step(0.866, side, 500);
-      if (Math.abs(tube.angle + Math.sign(side) * 30) > 1) fail(`${tag}: inverted, across ${side}: angle ${tube.angle}`);
+      if (Math.abs(tube.angle - Math.sign(side) * 30) > 1) fail(`${tag}: inverted, across ${side}: angle ${tube.angle}`);
     }
-    step(0, 1, 500);
-    if (Math.abs(tube.angle) > 0.5) fail(`${tag}: on its side: angle ${tube.angle}`);
+    for (const along of [0.05, 0, -0.05]) {
+      step(along, 1, 500);
+      if (Math.abs(tube.angle - ANGLE_VERTICAL_MAX_DEG) > 0.5) fail(`${tag}: on its side (along ${along}): angle ${tube.angle}`);
+    }
     step(-1, 0, 500);
     step(0, 0, 500);
     if (Math.abs(tube.angle) > 0.5 || tube.reading < 0.99 || Math.abs(tube.slugPos) > 0.01 || Math.abs(tube.slugVel) > 0.01 || Math.abs(tube.fillPos) > 0.01) fail(`${tag}: flat: angle ${tube.angle}, reading ${tube.reading}`);
@@ -242,7 +245,7 @@ for (const [name, samples] of scenarios) {
       if (tube.reading < 0.99 || Math.abs(tube.slugPos) > 0.01 || Math.abs(tube.slugVel) > 0.01) fail(`${tag}: did not return upright (reading ${tube.reading}, slug ${tube.slugPos})`);
     }
   }
-  console.log('ok  vertical watch: upright rest, level surface at ±30° upright and inverted, on its side, flat, turned over and back');
+  console.log('ok  vertical watch: upright rest, low-wall lean at ±30° upright and inverted, on its side, flat, turned over and back');
 
   // Both axes and diagonals use the physical angle, independent of artistic input gain/deadzone.
   for (const inputGain of [0.1, 1, 2]) for (const axis of ['along', 'across', 'diagonal']) {

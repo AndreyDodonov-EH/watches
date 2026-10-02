@@ -1809,13 +1809,18 @@ inline float Tube::edgeCap(int ry, const CapShape &c) const {
   float sphere = c.cosT * R * u2 / (1 + sqrtf(fmx(0, 1 - c.cosT * c.cosT * u2)));
   return sphere * fmx(0, 1 + c.asym * rc.rowD[ry]) - c.cap * u2;
 }
-// tanA = tan(angle) hoisted per tube (was recomputed per row).
+// Px an end's cap can reach into the column at a wall row (0 for a concave cap at rest): what the two leans of
+// a free slug have to leave of the gap between the edge centres (sim edgeSkews).
+static inline float capReach(const CapShape &c) {
+  return c.k * fmx(0, fabsf(c.h * c.asym) + fabsf(c.cap) - c.h);
+}
+// tanA = the end's skew, px per row, hoisted per tube (was recomputed per row).
 inline float Tube::edgeX(int ry, float xe, float tanA, const CapShape &c) const {
   const float yc = (H - 1) / 2.0f;
   return xe + tanA * (ry - yc) + c.k * edgeCap(ry, c);
 }
 // Home-end edge of a free slug centred at xs: mirror image of edgeX (its CapShape takes the mirrored
-// forcing), flattening onto the end cap.
+// forcing, tanA is the home end's own skew), flattening onto the end cap.
 inline float Tube::edgeXL(int ry, float xs, float tanA, const CapShape &c) const {
   const float yc = (H - 1) / 2.0f;
   return xs + fmn(1, xs / 8) * (tanA * (ry - yc) - c.k * edgeCap(ry, c));
@@ -1934,7 +1939,6 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   TubeState s = st;
   const bool mir = mirrored(p);
   if (mir) { s.fillPos = -st.fillPos; s.edgeLight = -st.edgeLight; s.cap = -st.cap; }
-  float angle = s.angle;
   float len = columnLen(s.fillTarget, p);
   float xs = p.freeLiquid ? (mir ? L - len - s.slugPos : s.slugPos) : 0;   // home-end edge centre
   float xe = xs + len + clampf(s.fillPos, -len, len);                                // time-edge centre; slosh can't exceed the volume
@@ -1945,7 +1949,13 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   // end's own outward sense (physics). See sim drawTube.
   const CapShape capR = capShape(p, len, s.edgeLight, s.acrossTilt, s.cap, s.pinFree, s.lineVFree);
   const CapShape capL = capShape(p, len, -s.edgeLight, s.acrossTilt, -s.cap, s.pinHome, s.lineVHome);
-  float tanA = tanf(angle * (float)M_PI / 180);
+  // Skew per end: the liquid lies on the low wall at both, so the home end leans the other way; off the
+  // end cap the two leans share what the gap has left past both caps and the time edge's remaining free lean
+  // (one budget for the pair), so the lean never makes the ends cross. See sim edgeSkews.
+  const float tanA = tanf(s.angle * (float)M_PI / 180), ycA = fmx(1, (H - 1) / 2.0f), offA = clampf(xs / 8, 0, 1);
+  const float leanLim = fmx(0, xe - xs - capReach(capR) - offA * capReach(capL) - (1 - offA) * fabsf(tanA) * ycA) / (2 * ycA);
+  const float lean = clampf(tanA, -leanLim, leanLim);
+  const float tanR = tanA + offA * (lean - tanA), tanL = -lean;
   const bool hasLiquid = xe - xs >= 0.5f;   // an empty column draws nothing, not even an AA sliver
   fizzShift = xs;
   ensureFizz(p, clampf(xe - xs - 6, 0, L), s.agitation);
@@ -1957,8 +1967,8 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   // Tube back and cached edge geometry, before the residue backing and liquid body.
   const int16_t *capX0 = rc.capX0;
   for (int ry = 0; ry < H; ry++) {
-    float ex = edgeX(ry, xe, tanA, capR);
-    float exL = p.freeLiquid ? edgeXL(ry, xs, tanA, capL) : 0;
+    float ex = edgeX(ry, xe, tanR, capR);
+    float exL = p.freeLiquid ? edgeXL(ry, xs, tanL, capL) : 0;
     edges[ry] = ex; edgesL[ry] = exL;
     fizzSurf[ry] = ex - xs; fizzSurfL[ry] = exL - xs;   // surface fronts for stepFizz (foam parks on the profile)
     hspan(y0 + ry, 0, L, pal.tubeBackRows[ry]);
@@ -2290,8 +2300,8 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     };
     for (int ry = 0; ry < H; ry++) {
       int xi = (int)ffloor(edges[ry]), xa = (int)ffloor(edgesL[ry]) + 1; if (xa < capX0[ry]) xa = capX0[ry];
-      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanA, capR), 1, lightK, xa, L);
-      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanA, capL), -1, lightKL, capX0[ry], xi);
+      strokeR[ry] = surface(ry, edges[ry], wallX(ry, xe, tanR, capR), 1, lightK, xa, L);
+      if (p.freeLiquid) strokeL[ry] = surface(ry, edgesL[ry], wallXL(ry, xs, tanL, capL), -1, lightKL, capX0[ry], xi);
     }
   }
 

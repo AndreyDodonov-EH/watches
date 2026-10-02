@@ -22,7 +22,7 @@ Param `vertical` (bool, Shape group, design key; default off): the watch worn up
   free slug, film drying and the light angle still feel it; the light angle fades to `lightAngle` when the
   cross-section sees no gravity.
 - **Pose**: upright (bottom end down) is the reading pose — only gravity toward the top end or across the tube counts
-  as tilt. The front settles at the tube's in-plane tilt from the vertical (level surface, sign following which end is down, cap 45°, `angleTiltGain` /
+  as tilt. The front settles at the tube's in-plane tilt from the vertical (level upper surface, the liquid on the low wall whichever end is down, cap 45°, `angleTiltGain` /
   `angleMax` unused; `angleK` / `angleDamp` still set the speed). A slug pressed into the wall it rests on has no
   rebound (both modes): no residual `slugVel` / film.
 - **Sim**: the panel is shown turned (drag-tilt remapped); manual input rests upright (along -1), "centre" and
@@ -34,6 +34,15 @@ Param `vertical` (bool, Shape group, design key; default off): the watch worn up
   (2 with different tick / digit lenses) within 12/255; `check-meniscus.cjs` table checks — identical wet/dry optics
   move no tick (plateau case H=80, lens 1), and a lens/height/label sweep keeps one-row dry clearance at every wet
   share 0..256; `pio run` builds. Not flashed.
+- 2026-10-02, slug skew (both modes): `angle` is the time edge's lean onto the low wall; the home edge of a free slug
+  leans the other way (`edgeSkews`, sim + firmware) — a trapezoid, not a parallelogram, so the gravity-ward end no
+  longer has its long leg on the high wall. Vertical: the sign follows across alone (no flip when turned over, no
+  ±0.15 g band; on its side the lean sits at the 45° cap). Off the end cap the two leans share one budget — the real
+  gap (slosh included) less both caps' reach and the time edge's remaining free lean — so the lean never makes a
+  short slug's ends cross. `check-meniscus.cjs`: 72 `skew-*` scenes (low wall longer, no crossing) and an 864-case
+  slosh / unlike-caps sweep (never narrower than 0 unless the caps alone already are; 72 rendered), sim vs native
+  within 12/255; non-free strips unchanged by construction (`check_render_frames.py`: only free-slug scenes differ,
+  digit groups 0); `pio run` builds. Not flashed.
 
 ## Physical materials: liquids derived from physical properties (2026-09-25, astra-loop)
 

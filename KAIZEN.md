@@ -45,7 +45,17 @@
   pixel twice in the same direction can stack to 2 LSB (17/255). Compose layers before writing (as step 3e
   now does) rather than widening the tolerance.
 
+- The time edge does not flatten onto the far end cap (the home edge does, `edgeXL` `xs / 8`): a slug parked at
+  the far end with a lean leaves an air wedge in the corner.
+- Cap amplitudes are scaled against the nominal column (`capScale(len)`), not the real gap: under negative slosh
+  two convex caps of a short slug can cross on their own (lean or not). Scaling by the gap changes non-free strips.
+- A slug's hanging (gravity-ward) end leans as much as the level upper one (one `angle`); a weaker lean there
+  (Bond number) would be closer to a capillary.
+
 ## Tooling / firmware
+- `check:meniscus` fails on master at `marks-blick-moving` (403,34), 17/255 (stacked-blend class), and stops there:
+  later scenes go uncompared. Report all over-tolerance scenes instead of raising on the first.
+- `check:imu` fails on master: 14 presets "reading did not settle" (olive-white, menthe, lime, seltzer, glycerol, …).
 - Push all writes fields one at a time, so the board renders transient combinations (e.g. new
   `tubeHeight` with the old fizz positions, which used to hit the task watchdog). A `Pbegin`/`Pcommit`
   transaction like the retired physical renderer's would apply a whole preset atomically.
