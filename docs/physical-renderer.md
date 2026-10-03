@@ -210,8 +210,7 @@ the coherence ranges. `x_μ = log10 μ_eff`; class thresholds at `x_μ = 0.398` 
 | `traces` | `solidsFraction > 0`. |
 | `traceAmount` | `0.3 + 1.7 · solidsFraction · (1 − T)` (a stain of a dark liquid reads denser). Blood 1.0, ink 1.15, oil 0.6. |
 | `traceStain` | `0.05 + 0.65 · solidsFraction`. `traceDry = clamp(dryingTime, 0.1, 2)` (the checker's watch regime; the schema allows up to 10 s and the excess is clamped, documented). |
-| `traceFollow` | Drain-back ∝ 1/μ: `anchored(x_μ, [(0, 0.5), (0.398, 0.3), (2.699, 0.15), (4, 0.06), (5, 0.03)])` (continuous; 0.15 satisfies the viscous ≤ 0.15 bound). |
-| `traceThin` | `anchored(x_μ, [(0, 1.5), (2.699, 0.6), (4, 0.3)])`. `traceFilm = 0.05 · solidsFraction · clamp(x_μ / 2.699)` (a permanent coat needs a viscous, solids-rich liquid). |
+| `traceDrain` | Gravity drain speed of a film at the thin-film cap, `ρ·g·(r/10)²/(3μ)` in px/s (r = innerRadius, × pxPerMm): water ~1600, olive oil ~17, honey ~0.2 (bounds: watery ≥ 100, viscous ≤ 20). The deposit itself needs no key: it is the wet-film law of `contactDyn`. `traceFilm = 0.05 · solidsFraction · clamp(x_μ / 2.699)` (a permanent coat needs a viscous, solids-rich liquid). |
 
 ## Gas
 
@@ -240,7 +239,7 @@ the coherence ranges. `x_μ = log10 μ_eff`; class thresholds at `x_μ = 0.398` 
   tickLens bottomLens bubbleRim bubbleDark edgeGlow glowStrength frontBright edgeLightGain edgeSoft
   surfaceFill surfaceBlick contactAngle contactHyst contactDyn capLength freeDamp freeBounce meniscusK
   meniscusDamp meniscusInertia angleTiltGain angleGyroGain angleMax wetFilm traces traceAmount traceDry
-  traceFollow traceStain traceThin traceFilm fizz fizzCount fizzSize fizzSpeed fizzFoamLife fizzFlatRise
+  traceDrain traceStain traceFilm fizz fizzCount fizzSize fizzSpeed fizzFoamLife fizzFlatRise
   fizzEdgeRise fizzDriftGain`, and `freeLiquid`/`fillK fillDamp fillSloshGain angleK angleDamp` for plasma.
 - **Fixed policy**: `v` (= `PARAMS_VERSION`), `highlightInset` 0, `surfaceBand surfaceRim surfaceWidth
   surfaceTone`, `freeGain` 570, `fillK fillDamp fillSloshGain angleK angleDamp` (liquids), `acrossK
@@ -258,11 +257,11 @@ exposure 1, 54 px tube (`pxPerMm` 9.64), design backing as listed. Colours are 8
 | Fixture | Inputs | Class / opacity | Colour | Dynamics | Film, residue, gas, glow |
 |---|---|---|---|---|---|
 | water | μ 1, ρ 1000, γ 72, ior 1.333, K 0, S 0, θ 20 ± 10, solids 0, gas dissolved 0.6 / r_b 0.06 / foam 4, back #0a0e10 | watery / clear, T 0.92 (two-pass 0.85² ≈ 0.72 through the liquid; the fixture's F_t·Tr² luma) | liquid (48,48,48) backing-free haze taken directly (clear class; the legacy mix attenuates it, residual accepted), liquidLo (15,15,15), liquidHi (189,190,190), liquidThin 0, shadeDepth 0.3 (was 0.35; clear class minimum), highlightBright 0.60, glassWallGlow 0.27, wallWet 1, glassOverLiquid 0.54 | freeDamp 0.8, bounce 0.20, K 475, damp 8, contactDyn 8.2, capLength 2.17, tilt 6.5, gyro 0.42 | wetFilm 10.5, traces off, fizz 1.16 px / 35 px/s / 48, glow 0.07 |
-| olive oil | μ 84, ρ 915, γ 32, ior 1.47, K (0.05, 0.07, 0.45), θ 15 ± 8, solids 0.3, drying 2, back #110b03 | medium / translucent, T 0.47 | liquid (57,53,0), liquidLo (5,7,0), liquidHi (192,189,164), residual 0, liquidThin 1.0, shadeDepth 0.4, highlightBright 0.55, glassWallGlow 0.27, glassOverLiquid 0.5 | freeDamp 3.35, bounce 0.05 (clamped), K 200 (clamped), damp 20.8, contactDyn 47, capLength 1.51, tilt 3.64, gyro 0.20 | wetFilm 18.8, traceAmount 0.57, traceStain 0.24, traceFollow 0.20, glow 0.04 |
-| honey | μ 10000, ρ 1420, γ 70, ior 1.49, K (0.06, 0.18, 0.7), θ 25 ± 20, solids 0.8, drying 2, gas trapped 0.04 / r_b 0.12 / foam 20, back #0c0703 | viscous / translucent, T 0.27 | liquid (44,21,0), liquidLo (9,2,0), liquidHi (199,184,161), residual 0.6 levels, liquidThin 1.0, shadeDepth 0.4, highlightBright 0.53, glassWallGlow 0.27 | freeDamp 8.65, bounce 0, K 79, damp 33, contactDyn 90, capLength 1.79, tilt 1.62, gyro 0.07 | wetFilm 28.3, traceAmount 1.32, traceStain 0.57, traceFollow 0.07, fizz 2.31 px / 0 px/s / 5 |
+| olive oil | μ 84, ρ 915, γ 32, ior 1.47, K (0.05, 0.07, 0.45), θ 15 ± 8, solids 0.3, drying 2, back #110b03 | medium / translucent, T 0.47 | liquid (57,53,0), liquidLo (5,7,0), liquidHi (192,189,164), residual 0, liquidThin 1.0, shadeDepth 0.4, highlightBright 0.55, glassWallGlow 0.27, glassOverLiquid 0.5 | freeDamp 3.35, bounce 0.05 (clamped), K 200 (clamped), damp 20.8, contactDyn 47, capLength 1.51, tilt 3.64, gyro 0.20 | wetFilm 18.8, traceAmount 0.57, traceStain 0.24, traceDrain 17.4, glow 0.04 |
+| honey | μ 10000, ρ 1420, γ 70, ior 1.49, K (0.06, 0.18, 0.7), θ 25 ± 20, solids 0.8, drying 2, gas trapped 0.04 / r_b 0.12 / foam 20, back #0c0703 | viscous / translucent, T 0.27 | liquid (44,21,0), liquidLo (9,2,0), liquidHi (199,184,161), residual 0.6 levels, liquidThin 1.0, shadeDepth 0.4, highlightBright 0.53, glassWallGlow 0.27 | freeDamp 8.65, bounce 0, K 79, damp 33, contactDyn 90, capLength 1.79, tilt 1.62, gyro 0.07 | wetFilm 28.3, traceAmount 1.32, traceStain 0.57, traceDrain 0.23, fizz 2.31 px / 0 px/s / 5 |
 | mercury | metallic 1, reflectance 0.75, μ 1.55, ρ 13546, γ 485, θ 140 ± 15 | metal / opaque, T 0 | liquid (152,152,152), liquidLo (65,65,65), liquidHi white, shadeDepth 0.95, highlightBright 1.3, glassWallGlow 0.27, glassOverLiquid 1 | freeDamp 0.8 (clamped), bounce 0.51, K 500 (clamped), damp 8 (clamped), contactDyn 5.1, capLength 1.53, tilt 2, gyro 0.4 | wetFilm 0, traces off, fizz off, glow 0 |
 | xenon | phase plasma, emission (0.35, 0.2, 0.9), ior 1.0, back #05020c, design freeLiquid false | plasma / translucent, T 0.5 fixed | liquid (123,95,187) = enc(E)/1.3, liquidLo (123,95,187) (was (53,39,83): emission is not shaded), liquidHi (196,176,196) (white specular + 1.5·E clipped in linear, ÷ 1.3), shadeDepth 0.85, glassWallGlow 0.27, wallWet 0, glassOverLiquid 0.4 | freeLiquid off, fill 260/22/0.5, angle 300/26/0.5/max 2, gyro 0.03, contact 100/0/0, K 400, damp 30, inertia 0 | film 0, traces off, fizz off, glowStrength 0.52, edgeGlow 23, lightPhys 0, liquidBright 1.3 |
-| blood | μ 4, ρ 1060, γ 58, ior 1.35, K (1, 20, 25), S 1, θ 30 ± 15, solids 0.45, drying 1.5, back #050203, front marks | medium / opaque, T 0.000 | liquid (120,35,31), liquidLo (49,9,7), liquidHi (247,168,166), residual 0, shadeDepth 0.95 (was 0.9; scattering body, class maximum), highlightBright 0.63, glassOverLiquid 0.53 | freeDamp 1.87, bounce 0.10, K 288, damp 14.8, contactDyn 14.1, capLength 1.89, tilt 4.85, gyro 0.29 | wetFilm 15.3, traceAmount 1.06, traceStain 0.34, traceFollow 0.29 |
+| blood | μ 4, ρ 1060, γ 58, ior 1.35, K (1, 20, 25), S 1, θ 30 ± 15, solids 0.45, drying 1.5, back #050203, front marks | medium / opaque, T 0.000 | liquid (120,35,31), liquidLo (49,9,7), liquidHi (247,168,166), residual 0, shadeDepth 0.95 (was 0.9; scattering body, class maximum), highlightBright 0.63, glassOverLiquid 0.53 | freeDamp 1.87, bounce 0.10, K 288, damp 14.8, contactDyn 14.1, capLength 1.89, tilt 4.85, gyro 0.29 | wetFilm 15.3, traceAmount 1.06, traceStain 0.34, traceDrain 423 |
 | milk | μ 2.9, ρ 1030, γ 45, ior 1.35, K 0.001, S 3, θ 30 ± 15 | medium / opaque | liquid (212,212,212), liquidLo (93,93,93), liquidHi white, T 0.00, shadeDepth 0.95 (was 0.9), highlightBright 1 | freeDamp 1.67, bounce 0.11, K 263, damp 14.2, contactDyn 13.8 | wetFilm 15.2, traces off |
 | liquid oxygen | μ 0.19, ρ 1141, γ 13, ior 1.22, K (0.005, 0.002, 0), θ 5 ± 3, gas boiling 0.7 / r_b 0.05 / foam 0 | watery / clear, T 0.88 | liquid (50,51,52) haze taken directly, liquidLo (16,17,17), liquidHi (190,190,190), shadeDepth 0.3 (was 0.35), glassWallGlow 0.27, wallWet 0.99, glassOverLiquid 0.63 | freeDamp 0.57, bounce 0.35, K 400 (clamped), damp 4.9, contactDyn 8.4, capLength 0.86 | wetFilm 10.7, fizz 1 px (clamped) / 55 px/s / 56 |
 | cola | μ 1.2, ρ 1040, γ 60, ior 1.35, K (0.05, 0.15, 0.35), θ 20 ± 10, gas dissolved 0.4 / r_b 0.07, back #070403 | watery / translucent, T 0.32 | liquid (52,29,5), liquidLo (12,4,0), liquidHi (196,184,170), residual ≤ 1 level, liquidThin 1, shadeDepth 0.4, glassWallGlow 0.27 |
@@ -285,15 +284,15 @@ snaps down through `T_up` to a residual ≤ 5 or is rejected (10); design bounds
 digitScaleX` rejected (11); actual `buildPalette(params)` centre AND wall rows (`y = round(yc·(1 + d))`) reproduce the
 targets within 5 levels after the RGB565 round trip for every non-clear, non-plasma fixture (the wall
 row through the fitted `shadeDepth` and the solved `rimTint`); a fixture with `rimLight` 0 renders
-byte-identically to the same params before v24 (`check:meniscus` parity unchanged); overexposure: milk at exposure 3 rejected (9), milk at exposure 1.1 accepted with `luma(liquidHi) > luma(liquid)`; `μ_eff` exactly at 2.5 and 500 and one step either side (class, `traceFollow`
-≤ 0.15 with traces on at 500, `freeDamp` jump direction).
+byte-identically to the same params before v24 (`check:meniscus` parity unchanged); overexposure: milk at exposure 3 rejected (9), milk at exposure 1.1 accepted with `luma(liquidHi) > luma(liquid)`; `μ_eff` exactly at 2.5 and 500 and one step either side (class, `traceDrain`
+≤ 20 with traces on at 500, `freeDamp` jump direction).
 
 Every fixture's derived `Params` must return zero coherence issues for its inferred class, and the
 viscosity sweep μ = 0.2 … 10⁵ (other inputs fixed) must give monotone non-increasing `freeBounce`,
-`meniscusK`, `angleTiltGain`, `angleGyroGain`, `traceFollow`, `traceThin`, `fizzSpeed` and monotone
+`meniscusK`, `angleTiltGain`, `angleGyroGain`, `traceDrain`, `fizzSpeed` and monotone
 non-decreasing `freeDamp`, `meniscusDamp`, `contactDyn`, `wetFilm`, `traceFilm` **across the whole
 sweep** (the class-threshold jumps go in the same direction as the law; the boundary values shared by
-two classes make `angleGyroGain`, `angleTiltGain` and `traceFollow` continuous).
+two classes make `angleGyroGain` and `angleTiltGain` continuous; `traceDrain` is one law across them).
 
 ## Provenance of preset values
 

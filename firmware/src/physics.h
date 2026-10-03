@@ -15,11 +15,12 @@
 #define PIN_RELAX_S 3.0f          // a held contact line creeps back to the static shape (wrist micro-motion), s
 #define FILM_FULL_PX_S 25.0f      // edge speed at which the trailing wet film is fully drawn
 #define TRACE_DEPOSIT_MAX_PX 32.0f // max px of newly exposed glass per tick that gets a fresh deposit
-#define TRACE_FULL 0xff00         // fresh deposit (8.8 fixed point; the high byte is what renders)
-#define TRACE_MIN (2 << 8)        // residue below this counts as dry (buffer empties)
-#define TRACE_FOLLOW_REF_PX 25.0f // distance at which traceFollow is the drain-back rate (1/s)
-#define TRACE_TILT_DRY 4.0f       // drying accelerates up to (1 + this)x as |along-tilt| -> 1 (film drains when tilted)
-#define TRACE_THIN_REF_PX_S 100.0f // edge speed at which traceThin halves the deposit (film stretches thin when smeared fast)
+#define TRACE_FULL 0xff00         // a film at FILM_ETA_MAX (8.8 fixed point)
+#define TRACE_MIN (2 << 8)        // dry residue below this is gone (buffer empties); also the thinnest deposit
+#define TRACE_DRAIN_MAX_PX_S 48.0f // cap of a film's drain speed: TRACE_DRAIN_STEPS upwind steps a tick stay stable
+#define TRACE_DRAIN_STEPS 3
+#define FILM_LAMBDA 9.2f          // Cox-Voinov log factor contactDyn is calibrated with (sim filmEta)
+#define FILM_ETA_MAX 0.1f         // thin-film limit of the film thickness eta = h / R
 #define GYRO_LP_HZ 12.0f          // smooths both gyro outputs (sensor noise twitches fizz/agitation)
 
 struct TiltInput { float along, across, gyroAlong, gyroAcross; };
@@ -32,9 +33,11 @@ struct TubeState {
   // end's outward sense: pin = px of surface-centre travel against the held wall ring (hysteresis band),
   // lineV = px/s the line is dragged at past the band, over ~0.5 s (0 while held). See sim TubeState.
   float pinFree = 0, pinHome = 0, lineVFree = 0, lineVHome = 0;
-  // dried traces: residue 0..TRACE_FULL (8.8 fixed point) per panel-frame column where an edge
-  // receded (blood smear), draining back / drying; one of the static traceBuf()s, assigned at boot
-  uint16_t *trace = nullptr;
+  // dried traces: residue 0..TRACE_FULL (8.8 fixed point, film thickness relative to FILM_ETA_MAX) per
+  // panel-frame column where an edge receded (blood smear); its wet part traceWet (<= trace) runs down
+  // under gravity and evaporates into a fading stain. trace: one of the static traceBuf()s, traceWet: a
+  // PSRAM traceWetBuf() (physics_init), both assigned at boot; the render reads trace only
+  uint16_t *trace = nullptr, *traceWet = nullptr;
   // occupied residue columns [traceLo, traceHi): deposits widen, decay shrinks; lo >= hi = empty
   // (physics and render skip the buffer entirely then)
   int16_t traceLo = TUBE_LENGTH_PX, traceHi = 0;
@@ -52,6 +55,10 @@ float columnLen(float fillTarget, const Params &p);   // liquid column length, p
 // there `remaining` only flips the scale and the column length. See sim mirrored().
 inline bool mirrored(const Params &p) { return p.remaining && !p.vertical; }
 uint16_t *traceBuf(int i);                            // static residue buffer of tube i
+bool physics_init();                                  // boot: the wet-film buffers in PSRAM (false = not allocated)
+uint16_t *traceWetBuf(int i);                         // wet-film buffer of tube i (nullptr before physics_init)
+// The film a line receding at `speed` px/s leaves, eta = h / R (Bretherton, capped at FILM_ETA_MAX). See sim filmEta.
+float filmEta(const Params &p, float speed = FILM_FULL_PX_S);
 
 float lightRest(float along, float across, const Params &p);
 // Bore radius, px in row-centre units: (H - 1)/2 less the glass wall band. See sim boreR.

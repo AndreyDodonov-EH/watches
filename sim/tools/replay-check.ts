@@ -11,7 +11,7 @@
 // (compiled outside sim/ so package.json "type":"module" doesn't bite the CJS output)
 import {
   ANGLE_HARD_MAX_DEG, ANGLE_VERTICAL_MAX_DEG, CAP_DYN_MAX_PX, FILL_SLOSH_MAX_PX, FILM_FULL_PX_S, GravityNorm, ImuFilter, PHYS_DT,
-  columnLen, contactLeads, mirrored, newTube, stepTube, type TiltInput,
+  columnLen, contactLeads, drainTrace, mirrored, newTube, stepTube, type TiltInput,
 } from '../src/physics';
 import { DEFAULT_PARAMS, PRESETS, migrateParams, presetParams } from '../src/params';
 
@@ -349,5 +349,80 @@ const previousTilt = migrateParams({ v: 16, readTiltStart: 15, readTiltEnd: 60 }
 if (previousTilt.playHold !== 5 || previousTilt.readTiltStart !== 15 || previousTilt.readTiltEnd !== 60)
   fail('play: migration lost custom viewing angles');
 if (migrateParams({ v: 17, playHold: 0 }).playHold !== 0) fail('play: migration lost disabled hold');
+
+// Residue physics: the deposit is the film a receding line leaves (thicker the faster for a watery liquid,
+// saturated for a syrup); gravity runs the wet part down the tube into the liquid, conservatively; tilt
+// moves it, never dries it. A pinned column (liquid on [0, len)), the vertical watch (no slosh offset).
+{
+  const res = (o: Partial<typeof DEFAULT_PARAMS>) => ({ ...DEFAULT_PARAMS, traces: true, freeLiquid: false, vertical: true, inputGain: 1, ...o });
+  const sum = (t: { trace: Uint16Array }): number => t.trace.reduce((a, v) => a + v, 0);
+  const centroid = (t: { trace: Uint16Array }): number => { let m = 0, x = 0; t.trace.forEach((v, i) => { m += v; x += v * i; }); return m ? x / m : 0; };
+  const run = (tube: ReturnType<typeof newTube>, pp: typeof DEFAULT_PARAMS, along: number, seconds: number, fillRate = 0): void => {
+    for (let i = 0; i < seconds * 50; i++) { tube.fillTarget += fillRate * PHYS_DT; stepTube(tube, { along, across: 0, gyroAlong: 0, gyroAcross: 0 }, pp); }
+  };
+  // a line receding at U px/s for 0.4 s from 0.8 full: the densest deposit it laid
+  const deposit = (contactDyn: number, U: number): number => {
+    const pp = res({ contactDyn, traceDrain: 0, traceDry: 2 }), tube = newTube(); tube.fillTarget = 0.8;
+    run(tube, pp, 0, 0.1); run(tube, pp, 0, 0.4, -U / TUBE_LENGTH_PX);
+    return Math.max(...tube.trace);
+  };
+  const w20 = deposit(8, 20), w80 = deposit(8, 80), h20 = deposit(90, 20), h80 = deposit(90, 80);
+  if (!(w20 > 0 && w80 > 2.2 * w20 && w80 < 0.1 * 0xff00)) fail(`residue: watery deposit 20 / 80 px/s = ${w20} / ${w80} (microns, U^⅔: ×2.5)`);
+  if (!(h20 > 0.8 * 0xff00 && h80 < 1.25 * h20)) fail(`residue: syrup deposit 20 / 80 px/s = ${h20} / ${h80} (near the cap whatever the speed)`);
+  // a thick wet film above the liquid of an upright tube (along -1: gravity toward the liquid at x < 268)
+  const film = (pp: typeof DEFAULT_PARAMS): ReturnType<typeof newTube> => {
+    const tube = newTube(); tube.fillTarget = 0.5; run(tube, pp, 0, 0.02);
+    for (let x = 300; x < 340; x++) tube.trace[x] = tube.traceWet[x] = 0xff00;
+    tube.traceLo = 300; tube.traceHi = 340; return tube;
+  };
+  const slow = res({ contactDyn: 90, traceDrain: 25, traceDry: 1000 });
+  const up = film(slow), m0 = sum(up), c0 = centroid(up);
+  run(up, slow, -1, 0.3);
+  if (!(centroid(up) < c0 - 5 && sum(up) <= m0)) fail(`residue: upright film did not run down (centroid ${c0} → ${centroid(up)}, mass ${m0} → ${sum(up)})`);
+  run(up, slow, -1, 2);
+  // the thick front runs in; the tail thins as it drains and slows with h² (its front spreads as t^⅓),
+  // so it lingers and dries in place
+  if (sum(up) > 0.9 * m0) fail(`residue: upright film did not rejoin the liquid (${sum(up)} of ${m0} left)`);
+  // a watery film as a 25 px/s line leaves it (~900), with a mobility that makes it run (~25 px/s; water's own
+  // ~2400 barely moves it): drained upright it must not thin away on the way — a draining film splits into
+  // sub-TRACE_MIN columns at its front, which are wet, not gone
+  const thin = res({ contactDyn: 8, traceDrain: 127000, traceDry: 2, traceStain: 1 });
+  const thinFilm = (along: number): number => {
+    const tube = newTube(); tube.fillTarget = 0.5; run(tube, thin, 0, 0.02);
+    for (let x = 300; x < 340; x++) tube.trace[x] = tube.traceWet[x] = 895;
+    tube.traceLo = 300; tube.traceHi = 340; run(tube, thin, along, 0.4); return sum(tube);
+  };
+  const tFlat = thinFilm(0), tUp = thinFilm(-1);
+  if (Math.abs(tUp / tFlat - 1) > 0.02) fail(`residue: a thin draining film lost mass on the way (${tUp} upright vs ${tFlat} flat after 0.4 s)`);
+  // the flux alone, turned over (away from the liquid): exactly conservative, it pools on the tube end
+  const over = film(slow), o0 = sum(over);
+  for (let i = 0; i < 50 * 80; i++) drainTrace(over, slow, 1, PHYS_DT);
+  if (!(sum(over) === o0 && over.trace[TUBE_LENGTH_PX - 1] === 0xff00 && over.trace.every((v, i) => over.traceWet[i] === v && v <= 0xff00)))
+    fail(`residue: inverted film lost mass or did not pool (${o0} → ${sum(over)}, end column ${over.trace[TUBE_LENGTH_PX - 1]})`);
+  // flat: it stays put; tilted away from the liquid: it moves but dries no faster
+  const dry = res({ contactDyn: 90, traceDrain: 25, traceDry: 1, traceStain: 0.5 });
+  const flat = film(dry), tilt = film(dry), f0 = centroid(tilt);
+  run(flat, dry, 0, 1); run(tilt, dry, 1, 1);
+  if (flat.trace.some((v, i) => v > 0 && (i < 300 || i >= 340))) fail('residue: a flat tube moved its film');
+  if (!(centroid(tilt) > f0 + 5)) fail(`residue: tilted film did not run down (${f0} → ${centroid(tilt)})`);
+  if (Math.abs(sum(tilt) / sum(flat) - 1) > 0.05) fail(`residue: tilt changed the drying (${sum(tilt)} vs ${sum(flat)} flat)`);
+  console.log(`ok  residue: deposit watery ${w20} → ${w80}, syrup ${h20} → ${h80}; upright film runs into the liquid, inverted pools at the end, flat stays, tilt does not dry`);
+  // A drop (the repro pose: a vertical watch turned over and on its side, so the free slug slides up and its home
+  // edge recedes): the line speeds up as it goes, so the residue is densest right behind it, next to the liquid.
+  {
+    const pp = res({ freeLiquid: true, contactDyn: 8, traceDrain: 2377, traceDry: 1.7, traceStain: 1, freeGain: 840, freeDamp: 7, freeHomeK: 150 });
+    const tube = newTube(); tube.fillTarget = 0.4;
+    const pose = (along: number, across: number, seconds: number): void => {
+      for (let i = 0; i < seconds * 50; i++) stepTube(tube, { along, across, gyroAlong: 0, gyroAcross: 0 }, pp);
+    };
+    pose(-1, 0, 2); pose(0.7, 0.7, 2.5);   // mid-slide (terminal ~84 px/s, ~320 px of travel)
+    // the trail from where the slide started (x = 0) to the line, in 10 px bins: densest in the last one
+    const xs = Math.round(tube.slugPos), bins: number[] = [];
+    for (let a = 0; a + 10 <= xs; a += 10) { let m = 0; for (let x = a; x < a + 10; x++) m += tube.trace[x]; bins.push(m / 10); }
+    const near = bins[bins.length - 1] ?? 0, start = bins[0] ?? 0;
+    if (!(xs > 100 && near === Math.max(...bins) && near > 2 * start)) fail(`residue: a drop's densest residue is not next to the liquid (slug at ${xs}, bins ${bins.map((v) => v.toFixed(0)).join(' ')})`);
+    else console.log(`ok  residue: a drop (slug at ${xs} px) leaves ${near.toFixed(0)} right behind its line, ${start.toFixed(0)} where it started`);
+  }
+}
 if (failures) throw new Error(`${failures} failure(s)`);
 console.log('all scenarios within bounds');

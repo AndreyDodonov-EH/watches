@@ -91,13 +91,12 @@ export function coherenceIssues(p: Params, m: Material): string[] {
   else if (p.traces) {
     want(p.traceAmount >= 0.2 && p.traceAmount <= 2, `traceAmount ${p.traceAmount} not in [0.2, 2]`);
     want(p.traceDry >= 0.1 && p.traceDry <= 2, `traceDry ${p.traceDry} not in [0.1, 2]`);
-    want(p.traceFollow >= 0 && p.traceFollow <= 1, `traceFollow ${p.traceFollow} not in [0, 1]`);
+    want(p.traceDrain >= 0 && p.traceDrain <= 20000, `traceDrain ${p.traceDrain} not in [0, 20000]`);
     want(p.traceStain >= 0.05 && p.traceStain <= 0.7, `traceStain ${p.traceStain} not in [0.05, 0.7]`);
-    want(p.traceThin >= 0 && p.traceThin <= 3, `traceThin ${p.traceThin} not in [0, 3]`);
     want(p.traceFilm >= 0 && p.traceFilm <= 1, `traceFilm ${p.traceFilm} not in [0, 1]`);
-    // drain-back tracks viscosity: thin liquids snap back, syrup barely crawls
-    if (m.viscosity === 'viscous') want(p.traceFollow <= 0.15, `viscous: traceFollow ${p.traceFollow} > 0.15`);
-    if (m.viscosity === 'watery') want(p.traceFollow >= 0.2, `watery: traceFollow ${p.traceFollow} < 0.2`);
+    // the film's drain speed goes as ρr²/μ: a syrup film barely crawls, a watery one would run (were it not microns)
+    if (m.viscosity === 'viscous') want(p.traceDrain <= 20, `viscous: traceDrain ${p.traceDrain} > 20`);
+    if (m.viscosity === 'watery') want(p.traceDrain >= 100, `watery: traceDrain ${p.traceDrain} < 100`);
   }
 
   // gas

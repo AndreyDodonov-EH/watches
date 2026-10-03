@@ -28,11 +28,32 @@ export const CAP_DYN_MAX_PX = 12;     // |cap| cap: dynamic meniscus bulge / hol
 export const PIN_RELAX_S = 3;         // a held contact line creeps back to the static shape (wrist micro-motion), s
 export const FILM_FULL_PX_S = 25;     // edge speed (px/s) at which the trailing wet film is fully drawn
 export const TRACE_DEPOSIT_MAX_PX = 32; // max px of newly exposed glass per tick that gets a fresh deposit
-export const TRACE_FULL = 0xff00;      // fresh deposit (8.8 fixed point; the high byte is what renders)
-export const TRACE_MIN = 2 << 8;       // residue below this counts as dry (buffer empties)
-export const TRACE_FOLLOW_REF_PX = 25; // distance at which traceFollow is the drain-back rate (1/s)
-export const TRACE_TILT_DRY = 4;       // drying accelerates up to (1 + this)× as |along-tilt| → 1 (film drains when tilted)
-export const TRACE_THIN_REF_PX_S = 100; // edge speed at which traceThin halves the deposit (film stretches thin when smeared fast)
+export const TRACE_FULL = 0xff00;      // a film at FILM_ETA_MAX (8.8 fixed point)
+export const TRACE_MIN = 2 << 8;       // dry residue below this is gone (buffer empties); also the thinnest deposit
+export const TRACE_DRAIN_MAX_PX_S = 48; // cap of a film's drain speed: TRACE_DRAIN_STEPS upwind steps a tick stay stable (3·c·dt/steps < 1)
+export const TRACE_DRAIN_STEPS = 3;
+
+// The film a receding line leaves on the bore wall, h = η·R: Bretherton's tube law with the finite-Ca
+// correction, η = 1.34 Ca^⅔ / (1 + 3.35 Ca^⅔), capped at FILM_ETA_MAX (thin-film limit). Ca is the one
+// capShape's Cox–Voinov term is calibrated with (θ³ = θ₀³ − G·v ⇒ Ca ≈ θ_dyn³ / 9Λ at FILM_FULL_PX_S;
+// material/derive.ts inverts the same law for contactDyn), scaled by the line's speed. A watery line leaves
+// microns, thicker the faster it goes (∝ U^⅔); a syrup coats the bore whatever the speed.
+export const FILM_LAMBDA = 9.2, FILM_ETA_MAX = 0.1;
+export function filmEta(p: Params, speed = FILM_FULL_PX_S): number {
+  const dyn = Math.max(0, p.contactDyn) * Math.PI / 180, ca = dyn * dyn * dyn / (9 * FILM_LAMBDA) * (speed / FILM_FULL_PX_S);
+  const c = Math.cbrt(ca * ca);
+  return Math.min(FILM_ETA_MAX, 1.34 * c / (1 + 3.35 * c));
+}
+/** traceDrain from the render params alone (presets without a material; migration to Params v27): ρg/μ from
+ *  the capillary length (γ/ρg = lc²) and the Ca contactDyn is calibrated with (μ = Ca·γ/U at FILM_FULL_PX_S),
+ *  v = ρg·h²/3μ = U·h²/(3·Ca·lc²) for h = FILM_ETA_MAX·R, in px/s. contactDyn tops out at 90°, so a syrup comes
+ *  out faster than its material would make it (the material layer derives it from ρ and μ instead). */
+export function legacyTraceDrain(p: Params): number {
+  const dyn = Math.max(0, p.contactDyn) * Math.PI / 180, ca = dyn * dyn * dyn / (9 * FILM_LAMBDA);
+  if (!(ca > 0)) return 0;
+  const r = boreR(p) * MM_PER_PX / Math.max(0.1, p.capLength);   // R / lc (render px-mm on both sides)
+  return FILM_FULL_PX_S * FILM_ETA_MAX * FILM_ETA_MAX * r * r / (3 * ca);
+}
 
 export interface TubeState {
   fillTarget: number;  // 0..1 from time
@@ -63,11 +84,13 @@ export interface TubeState {
   // Trailing wet film 0..1 left on the glass by a receding edge (drains away in ~0.5 s).
   filmFree: number;    // the time edge receding toward its home end
   filmHome: number;    // the home edge (free-liquid only) receding toward the time edge
-  // Dried traces: residue 0..TRACE_FULL (8.8 fixed point) per panel-frame column, deposited where
-  // an edge receded (blood smears the wall, syrup coats it); its wet part drains back toward the
-  // liquid, the stain dries out (params.traceFollow / traceDry).
-  // Owned by the tube (newTube allocates; firmware: one static buffer per tube).
+  // Dried traces: residue 0..TRACE_FULL (8.8 fixed point, film thickness relative to FILM_ETA_MAX) per
+  // panel-frame column, deposited where an edge receded (blood smears the wall, syrup coats it). Its wet
+  // part `traceWet` (<= trace) runs down under gravity and rejoins the liquid it reaches, and evaporates
+  // into a stain that fades (params.traceDrain / traceStain / traceDry); the render reads `trace` only.
+  // Owned by the tube (newTube allocates; firmware: a static buffer and a PSRAM one per tube).
   trace: Uint16Array;
+  traceWet: Uint16Array;
   traceLo: number;     // occupied residue columns [traceLo, traceHi): deposits widen, decay shrinks.
   traceHi: number;     // lo >= hi = empty; physics and render skip the buffer entirely then.
   xtPrev: number;      // panel-frame time-edge x at the previous tick (deposit tracking)
@@ -89,18 +112,48 @@ export interface TubeState {
 export function newTube(): TubeState {
   return { fillTarget: 0, fillPos: 0, fillVel: 0, angle: 0, angleVel: 0, light: 0, lightVel: 0, agitation: 0, edgeLight: 0, acrossTilt: 0,
     cap: 0, capVel: 0, pinFree: 0, pinHome: 0, lineVFree: 0, lineVHome: 0, filmFree: 0, filmHome: 0,
-    trace: new Uint16Array(TUBE_LENGTH_PX), traceLo: TUBE_LENGTH_PX, traceHi: 0, xtPrev: 0, xhPrev: 0, traceInit: false,
+    trace: new Uint16Array(TUBE_LENGTH_PX), traceWet: new Uint16Array(TUBE_LENGTH_PX), traceLo: TUBE_LENGTH_PX, traceHi: 0, xtPrev: 0, xhPrev: 0, traceInit: false,
     slugPos: 0, slugVel: 0, reading: 1, playTimer: 0, playWindow: 0,
     playAnchorAlong: 0, playAnchorAcross: 0, playDirAlong: 0, playDirAcross: 0, playInit: false };
 }
 
-/** Per-column unevenness of the dried traces: the high 16 bits scatter the decay rates, the low 16
- *  the stain floor. The integer hash must match firmware/src/physics.cpp exactly (and is salted
+/** Per-column unevenness of the dried traces: the high 16 bits scatter the drying rates, the low 16
+ *  the stain share. The integer hash must match firmware/src/physics.cpp exactly (and is salted
  *  differently from the renderer's traceStreak, so opacity striations and dissolve don't line up). */
 function traceUneven(n: number): number {
   let h = (Math.imul(n ^ 0x27d4eb2f, 2654435761) + 0x9e3779b9) | 0;
   h ^= h >>> 15; h = Math.imul(h, 2246822519); h ^= h >>> 13;
   return h >>> 0;
+}
+
+/** Gravity `g` (g along the tube, panel +x) runs the wet film down the bore. A viscous film on a wall moves
+ *  at a mean speed ρ·g·h²/3μ, so the flux out of a column is q = c·w, c = traceDrain·|g|·(w / TRACE_FULL)²
+ *  (traceDrain: that speed for a film at the thin-film cap, h = FILM_ETA_MAX·R), capped at
+ *  TRACE_DRAIN_MAX_PX_S. Thick parts outrun thin ones, so a draining film thins from its top; a watery film
+ *  of microns, or any syrup, barely moves before it dries. Upwind in integers, downstream column first:
+ *  what leaves one column lands in the next, exactly. The tube's ends hold it (a drop pools there) and a
+ *  column saturated at TRACE_FULL backs the film up. The range [traceLo, traceHi) grows with it. */
+export function drainTrace(s: TubeState, p: Params, g: number, dt: number): void {
+  if (!(p.traceDrain > 0) || g === 0 || s.traceHi <= s.traceLo) return;
+  const k = p.traceDrain * Math.abs(g) / (TRACE_FULL * TRACE_FULL), dts = dt / TRACE_DRAIN_STEPS;
+  const w = s.traceWet, t = s.trace, L = TUBE_LENGTH_PX;
+  const out = (v: number, into: number): number =>
+    Math.min(Math.floor(Math.min(TRACE_DRAIN_MAX_PX_S, k * v * v) * v * dts), TRACE_FULL - t[into]);
+  for (let n = 0; n < TRACE_DRAIN_STEPS; n++) {
+    const lo = s.traceLo, hi = s.traceHi;
+    if (g > 0) for (let x = Math.min(hi, L - 1) - 1; x >= lo; x--) {
+      const f = w[x] ? out(w[x], x + 1) : 0;
+      if (f <= 0) continue;
+      w[x] -= f; t[x] -= f; w[x + 1] += f; t[x + 1] += f;
+      if (x + 1 >= s.traceHi) s.traceHi = x + 2;
+    }
+    else for (let x = Math.max(lo, 1); x < hi; x++) {
+      const f = w[x] ? out(w[x], x - 1) : 0;
+      if (f <= 0) continue;
+      w[x] -= f; t[x] -= f; w[x - 1] += f; t[x - 1] += f;
+      if (x - 1 < s.traceLo) s.traceLo = x - 1;
+    }
+  }
 }
 
 /** Whether the column is drawn from the right end (the mirrored frame). A vertical watch keeps the liquid at
@@ -251,12 +304,12 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
   s.filmHome = follow(s.filmHome, p.freeLiquid ? filmT(-recede * s.slugVel) : 0);
 
   // Dried traces: the mid-row edges the renderer draws (meniscus detail skipped — the residue is
-  // behind the contact line anyway), in the panel frame. An edge that receded deposits saturated
-  // residue on the columns it uncovered. The wet part of that smear (value above a per-column stain
-  // floor) then drains back toward the liquid — pull rate grows with distance from the liquid span,
-  // so the tail of the band collapses first and the residue visibly follows a receded edge — and
-  // the stain it leaves dries out over traceDry. A per-column hash scatters both the rates and the
-  // stain floor: the smear dissolves unevenly, patches linger. Toggling off empties the buffer.
+  // behind the contact line anyway), in the panel frame. An edge that receded leaves its film on the
+  // columns it uncovered, all of it wet. Gravity runs the wet film down the tube (drainTrace) — into the
+  // liquid where it reaches it, onto the tube end where it does not — while it evaporates over traceDry,
+  // leaving traceStain of itself as a stain that fades at the same rate. Tilt moves the film, it does
+  // not dry it. A per-column hash scatters the rates and the stain share: the smear dissolves unevenly,
+  // patches linger. Toggling off empties the buffers.
   if (p.traces) {
     const len = columnLen(s.fillTarget, p);
     const fp = Math.max(-len, Math.min(len, s.fillPos));
@@ -265,45 +318,52 @@ export function stepTube(s: TubeState, inp: TiltInput, p: Params, dt = PHYS_DT):
     if (!s.traceInit) s.traceInit = true;
     else {
       // the time edge recedes toward -x when filling (!remaining), toward +x when draining;
-      // the home edge only moves for a free slug and recedes the opposite way. The deposit thins
-      // with the edge's speed (traceThin): a fast sweep stretches the film, so the far end of a
-      // slosh smear comes out faint and the residue densifies toward where the edge slowed down —
-      // i.e. toward the liquid.
+      // the home edge only moves for a free slug and recedes the opposite way. The deposit is the film
+      // the line leaves at its speed (filmEta, relative to FILM_ETA_MAX): a fast stretch of a slide lays
+      // a thicker film than a slow one, a creeping line next to none. The uncovered columns were under
+      // the liquid, which dissolved whatever lay there: a deposit too thin to count clears them.
       const dep = (a: number, b: number): void => {
         if (b <= a) return;
-        const v = Math.max(TRACE_MIN + 1, Math.round(TRACE_FULL / (1 + p.traceThin * ((b - a) / dt) / TRACE_THIN_REF_PX_S)));
+        let v = Math.round(TRACE_FULL * filmEta(p, (b - a) / dt) / FILM_ETA_MAX);
+        if (v < TRACE_MIN) v = 0;
         const lo = Math.max(0, Math.round(a)), hi = Math.min(TUBE_LENGTH_PX, Math.round(a + Math.min(b - a, TRACE_DEPOSIT_MAX_PX)));
-        for (let x = lo; x < hi; x++) s.trace[x] = v;
-        if (hi > lo) { if (lo < s.traceLo) s.traceLo = lo; if (hi > s.traceHi) s.traceHi = hi; }
+        for (let x = lo; x < hi; x++) s.trace[x] = s.traceWet[x] = v;
+        if (v && hi > lo) { if (lo < s.traceLo) s.traceLo = lo; if (hi > s.traceHi) s.traceHi = hi; }
       };
       if (mir) dep(s.xtPrev, xt); else dep(xt, s.xtPrev);
       if (p.freeLiquid) { if (mir) dep(xh, s.xhPrev); else dep(s.xhPrev, xh); }
     }
     s.xtPrev = xt; s.xhPrev = xh;
+    // gravity along the tube as the pose sees it (no artistic gain or deadzone)
+    drainTrace(s, p, Math.max(-1, Math.min(1, poseAlong)), dt);
+    // film that ran into the liquid (or that the liquid ran over) rejoins it; the columns under the
+    // liquid are [round(lo), round(hi)), the complement of where dep() lays its deposits
+    const lo = Math.min(xt, xh), hi = Math.max(xt, xh);
+    for (let x = Math.max(s.traceLo, Math.round(lo)), x1 = Math.min(s.traceHi, Math.round(hi)); x < x1; x++) {
+      s.trace[x] -= s.traceWet[x]; s.traceWet[x] = 0;
+    }
     // Linearised rates (dt·rate ≪ 1 always: caps below). Math.floor, not round-to-nearest — with a
     // slow traceDry the per-tick decrement is under half an LSB and rounding would stall forever;
     // floor keeps the decay monotone (worst case 1 LSB/tick ⇒ even the faintest stain clears).
-    const lo = Math.min(xt, xh), hi = Math.max(xt, xh);
-    const dryTilt = 1 + TRACE_TILT_DRY * Math.abs(along);   // a tilted tube drains its film faster
-    const dryK = Math.min(0.5, dt * dryTilt / Math.max(0.05, p.traceDry)), folK = p.traceFollow * dt / TRACE_FOLLOW_REF_PX;
+    const dryK = Math.min(0.5, dt / Math.max(0.05, p.traceDry));
     let nLo = TUBE_LENGTH_PX, nHi = 0;   // the occupied range re-tightens as columns dry out
     for (let x = s.traceLo; x < s.traceHi; x++) {
-      let v = s.trace[x];
+      const v = s.trace[x];
       if (!v) continue;
-      const h = traceUneven(x), u = 0.75 + 0.5 * ((h >>> 16) / 65535);
-      const stain = TRACE_FULL * p.traceStain * (0.7 + 0.3 * ((h & 0xffff) / 65535));
-      const dist = x < lo ? lo - x : x > hi ? x - hi : 0;
-      // two phases: the wet excess settles ONTO the stain (drain-back + drying), and only the
-      // stain itself dries toward zero — so traceStain is the plateau the fade visibly pauses at
-      if (v > stain) v = stain + (v - stain) * Math.max(0, 1 - u * (folK * dist + dryK));
-      else v *= 1 - u * dryK;
-      if (v < TRACE_MIN) { s.trace[x] = 0; continue; }
-      s.trace[x] = Math.floor(v);
+      const h = traceUneven(x), k = dryK * (0.75 + 0.5 * ((h >>> 16) / 65535));
+      const stain = p.traceStain * (0.7 + 0.3 * ((h & 0xffff) / 65535));
+      // the wet film evaporates, leaving `stain` of itself on the glass; the stain fades
+      const w = s.traceWet[x], dw = w * k;
+      const nw = Math.floor(w - dw), nv = Math.floor(nw + (v - w) * (1 - k) + stain * dw);
+      // only a dry column counts as gone below TRACE_MIN: a draining film splits into thin columns at its
+      // front, and deleting those would make a tilted film vanish (the wet part evaporates 1 LSB a tick anyway)
+      if (nw === 0 && nv < TRACE_MIN) { s.trace[x] = s.traceWet[x] = 0; continue; }
+      s.trace[x] = nv; s.traceWet[x] = nw;
       if (x < nLo) nLo = x;
       nHi = x + 1;
     }
     s.traceLo = nLo; s.traceHi = nHi;
-  } else if (s.traceInit) { s.traceInit = false; s.trace.fill(0); s.traceLo = TUBE_LENGTH_PX; s.traceHi = 0; }
+  } else if (s.traceInit) { s.traceInit = false; s.trace.fill(0); s.traceWet.fill(0); s.traceLo = TUBE_LENGTH_PX; s.traceHi = 0; }
 
   // Front skew: the screen is the tube's cross-section plane, so only the across component of
   // gravity (the one fizz rises against) tilts the front on screen. Along-tilt is out of plane.

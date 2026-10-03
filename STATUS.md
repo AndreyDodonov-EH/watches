@@ -487,6 +487,7 @@ else `display_init` fails at boot before `ble_init`.
   47 fps. BLE-push re-verification pending (Windows radio was off).
 
 ## Traces on glass (2026-09-01, sim + firmware, bit-exact pipeline)
+_Deposit law, colour and drainage superseded by "Residue physics (2026-10-02)" below._
 - A receding edge leaves a **residue** on the glass where the liquid has been (blood smear, syrup
   coating, legs); the wet part **drains back after the liquid**, the stain dries: `traces` (bool),
   `traceAmount` 0..2 (>1 boosts through the attenuation, clamped per pixel), `traceDry` 0.1–2 s
@@ -651,6 +652,35 @@ else `display_init` fails at boot before `ble_init`.
   +2–5 % otherwise. Device parity 218 px > 12/255, but host = sim exactly (0 px) on the dumped state: the rest is
   frame/state skew of the moving slug, which the gradual warp makes ~2× more visible to the count (0.25 px skew:
   43 → 97 px).
+
+## Residue physics (2026-10-02, sim + firmware; docs/residue-physics-handoff.md)
+- Deposit = the film the receding line leaves: `filmEta(p, U)` (Bretherton, η = 1.34 Ca^⅔/(1 + 3.35 Ca^⅔),
+  Ca = θ_dyn³/(9·9.2) · U/25, cap 0.1), stored as η/0.1 in `trace`. Watery: microns, ∝ U^⅔ (barely stains);
+  syrup: near the cap whatever the speed. Uncovered columns below `TRACE_MIN` are cleared (the liquid dissolved
+  them). `traceThin` retired (Params v26).
+- Colour: a dye stain is a Beer–Lambert tint, B^(1−τ)·C^τ (tube back → body row, linear light, `FILM_LG`/`FILM_EX`),
+  τ = traceAmount × the coat's annular path fraction (the wet film's law): per column A = η(2−η)·2^16 (η from the
+  stored thickness, scattered by the streak), per row K = 256/(1 − u²) capped at 2^18, f = `FILM_PHI[(A·K + 2^15) >> 16]`,
+  T = min(256, f·G/256) — the same integers on both sides; ≤ 1 = the body row, so no smear reads denser than the
+  column. A watery coat is wall lines; a syrup ~0.1 at the centre plus legs. Near a receding line the coat and the
+  wet film count once (the deeper of the two). `traceFilm` = a share of the cap thickness (no gamma, no cap). The
+  palette's opaque `traceRows` and the 0.65 trace gamma LUT are gone. Firmware: `ResidueTint` (depthT / depthF) in
+  `traceFillRow` / `traceShearRow` / the zone loop; `check_residue.py` checks the tint vs the sim's `filmMix` and the
+  depth law vs a reference.
+- Drainage: wet part `traceWet` (≤ trace; sim `Uint16Array`, fw PSRAM from `physics_init`). Gravity (pose
+  along, ±1 g) runs it down the tube: upwind flux c·w, c = traceDrain·|g|·(w/TRACE_FULL)², capped 48 px/s, 3
+  substeps, integer and exactly conservative; into the liquid it rejoins it, at a tube end it pools. `traceDrain`
+  (Params v27, replaces `traceFollow`) = ρg(R/10)²/3μ in px/s, the speed of a film at the thin-film cap: derived from
+  density, viscosity and bore (water ~1600, olive oil ~17, honey ~0.2); hand-made presets take `legacyTraceDrain`
+  (ρg/μ from capLength and contactDyn's Ca). A watery film of microns or a syrup barely moves before it dries; a
+  fast oily film sags. Drying: wet evaporates at u/traceDry leaving `traceStain` of itself as stain, which fades at
+  the same rate. `TRACE_TILT_DRY` and the distance drain-back are gone. Only a dry column below `TRACE_MIN` is
+  dropped (a draining film's thin front stays). `check:imu` covers deposit vs speed, a drop's profile, upright
+  drain, a thin film's mass while it drains, conservation/pooling, flat, tilt-independent drying.
+- Device `x` dump: new `WET` line (compare-device / render-ref parse it; the render reads `trace` only).
+- Perf: `traceFillRow` builds a per-row colour LUT (per Tube, static) when the span's depths fall in a narrow band
+  (a uniform `traceFilm`), else tints per pixel; byte-identical to the per-pixel path. Physics loops use inline min /
+  truncation (libm `fminf`/`floorf` per column cost ~1 ms a step under the sweep stress). Board A/B after the review fixes: pending (board detached 2026-10-03).
 
 ## Measurements
 - CPU 240 MHz, PSRAM 8192 KB, free heap 332 KB at boot.

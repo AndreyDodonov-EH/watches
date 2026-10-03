@@ -48,9 +48,8 @@ struct Params {
   bool traces;
   float traceAmount;
   float traceDry;
-  float traceFollow;
+  float traceDrain;
   float traceStain;
-  float traceThin;
   float traceFilm;
   float edgeSoft;
   float frontBright;
@@ -183,8 +182,8 @@ struct Params {
   float ambientLight;
 };
 
-#define PARAMS_NUM_FIELDS 177
-#define PARAMS_SCHEMA_CRC 0x27565efeu  // field names+types; guards the NVS blob
+#define PARAMS_NUM_FIELDS 176
+#define PARAMS_SCHEMA_CRC 0xee478e2cu  // field names+types; guards the NVS blob
 
 // Field table for serial/GATT/JSON access: name, type code (i/f/b/c), byte offset
 struct ParamField { const char *name; char type; uint16_t off; };
@@ -233,9 +232,8 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
   {"traces", 'b', (uint16_t)offsetof(Params, traces)},
   {"traceAmount", 'f', (uint16_t)offsetof(Params, traceAmount)},
   {"traceDry", 'f', (uint16_t)offsetof(Params, traceDry)},
-  {"traceFollow", 'f', (uint16_t)offsetof(Params, traceFollow)},
+  {"traceDrain", 'f', (uint16_t)offsetof(Params, traceDrain)},
   {"traceStain", 'f', (uint16_t)offsetof(Params, traceStain)},
-  {"traceThin", 'f', (uint16_t)offsetof(Params, traceThin)},
   {"traceFilm", 'f', (uint16_t)offsetof(Params, traceFilm)},
   {"edgeSoft", 'f', (uint16_t)offsetof(Params, edgeSoft)},
   {"frontBright", 'f', (uint16_t)offsetof(Params, frontBright)},
@@ -370,7 +368,7 @@ static const ParamField PARAM_FIELDS[PARAMS_NUM_FIELDS] = {
 
 // from presets/1.json
 static const Params PRESET_1 = {
-  25, // v
+  27, // v
   72.0f, // tubeHeight
   0.0f, // hoursY
   168.0f, // minutesY
@@ -414,9 +412,8 @@ static const Params PRESET_1 = {
   false, // traces
   0.6f, // traceAmount
   1.0f, // traceDry
-  0.25f, // traceFollow
+  2376.82f, // traceDrain
   0.3f, // traceStain
-  1.0f, // traceThin
   0.0f, // traceFilm
   2.6f, // edgeSoft
   21.0f, // frontBright

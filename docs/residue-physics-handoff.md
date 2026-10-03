@@ -1,5 +1,7 @@
 # Residue physics hand-off — deposit, colour, drainage
 
+_Executed 2026-10-02: see STATUS.md "Residue physics" and KAIZEN "Residue physics" (what was left out)._
+
 _Follows the 2026-10-02 "imminent residue" change (render-only, step 3d). That change made the smear
 right behind a receding line follow the contact line and hand over to the liquid; it deliberately left
 the residue's own physics alone. This pass fixes that physics. Sim first, firmware mirrors._

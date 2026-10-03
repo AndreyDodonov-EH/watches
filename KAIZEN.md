@@ -507,9 +507,20 @@ _Added 2026-08-21 with Transport 0 (Web Serial)._
 ## Imminent residue (2026-10-02)
 - Hand-off for the residue physics items below (deposit law, dried colour, drainage): `docs/residue-physics-handoff.md`.
 - Residue deposit skew is not stored: physics lays each deposit at the edge's mid-row centre, the renderer only bends the smear onto the contact line within Z of it. A per-column skew byte (tanA at deposit time) would keep an old smear slanted where it was laid; it costs the plain-residue fast path a per-row gather.
-- `traceThin` makes fast recession deposit less; entrained films go the other way (Bretherton, h ∝ Ca^⅔). Flipping it with traceAmount 2 painted the whole smear opaque green: the dried endpoint `traceRows` (opaque shading × 0.85) reads denser than the column; a dried dye stain is a Beer–Lambert tint too.
-- Upright tubes dry the residue up to 5× faster (`TRACE_TILT_DRY`); gravity drains a film (signed flux toward the low end, conservative), it does not evaporate it. Drain-back by distance (`traceFollow`) ignores gravity's sign.
+- ~~`traceThin` makes fast recession deposit less; entrained films go the other way (Bretherton, h ∝ Ca^⅔). Flipping it with traceAmount 2 painted the whole smear opaque green: the dried endpoint `traceRows` (opaque shading × 0.85) reads denser than the column; a dried dye stain is a Beer–Lambert tint too.~~ — done 2026-10-02: deposit = `filmEta(p, U)`, stain = B^(1−τ)·C^τ, `traceThin` retired (v26).
+- ~~Upright tubes dry the residue up to 5× faster (`TRACE_TILT_DRY`); gravity drains a film (signed flux toward the low end, conservative), it does not evaporate it. Drain-back by distance (`traceFollow`) ignores gravity's sign.~~ — done 2026-10-02: `traceWet` + `drainTrace` (upwind, h³, integer-conservative); drying tilt-independent.
 - The wet film rides the edge's `film*` follower (one value per edge, decays 2/s once the line stops); a per-column film thickness (L × u16) would let a stopped film thin from the top down instead of all at once.
 - Sweep mode (`minutes sweep`) moves the edge through `fillTarget`, which `edgeVel` does not see: no wet film, no pull, no dynamic angle during a sweep drain.
 - Step 3c (traces off) still draws the old faint 0.35 · film band instead of the film law.
 - e2e.sh `--ref` copies `.pio/libdeps` into the temp worktree, yet PlatformIO still reinstalls the libraries there on every ref build (seen 2026-10-02).
+
+## Residue physics (2026-10-02)
+- Flat watch: no capillary pull toward the meniscus, so the wet film now dries in place (it used to drain back by distance). A short-range pull near the line would bring that back.
+- One colour law for every liquid (Beer–Lambert). A scattering one (blood, milk) would want coverage or Kubelka–Munk; Params carries no scattering key to choose by.
+- ~~`traceFilm` keeps its `(1 − liquidTransparency) / traceAmount` cap~~ / ~~`traceGamma` (0.65) lifts a physical thickness~~ — done (Astra review): the stain depth is the coat's annular path × traceAmount; gamma and cap gone.
+- The stain fades at the solvent's drying rate (Astra: a non-volatile dye would stay). Kept by choice: a separate, slower fade or a stain that waits for the liquid are the options.
+- Hand-made presets get `legacyTraceDrain` from contactDyn/capLength: contactDyn tops out at 90°, so a syrup drains ~5× faster than its material would (honey 1.16 vs 0.19 px/s), and a hand-made "glycerol" with contactDyn 8° drains like water.
+- The drain flux is floor-quantised: films thinner than ~(TRACE_FULL² / (traceDrain·dt/3))^⅓ never move (a honey film below ~22 % of the cap; at 0.2 px/s it would not move visibly anyway). They dry in place.
+- The dry stain under an advancing liquid is not dissolved (only the wet part merges). It is hidden by the body and overwritten when that column is uncovered again.
+- The user's repro preset (contactDyn 8°) is watery by its own dynamics: its residue is now wall lines at most, mostly invisible.
+- `docs/residue-physics/tiltshot.mjs` is wall-clock timed, so before/after shots of a sliding slug never line up. A fixed-step replay would make A/B frames comparable.

@@ -1,5 +1,5 @@
 {
-  "v": 25,
+  "v": 27,
   "tubeHeight": 54,
   "hoursY": 0,
   "minutesY": 185,
@@ -43,9 +43,8 @@
   "traces": true,
   "traceAmount": 0.98,
   "traceDry": 1.8,
-  "traceFollow": 0.2817576891356456,
+  "traceDrain": 335.00035227272735,
   "traceStain": 0.31,
-  "traceThin": 1.2739868787872872,
   "traceFilm": 0.005022513804726952,
   "edgeSoft": 2.4,
   "frontBright": 0,

@@ -1,4 +1,5 @@
 // All tunables live here. Colours are RGB888 hex strings but are quantised to RGB565 at render time.
+import { legacyTraceDrain } from './physics';
 // Export/import as JSON from the control panel; the exported file is the contract for Phase 3 (spec/params.h).
 
 export interface Params {
@@ -48,11 +49,10 @@ export interface Params {
   meniscusInertia: number; // 0..10 how much edge forcing (flick kick, slug acceleration) bulges the surface centre ahead of the contact lines
   wetFilm: number;       // px trailing wet film a receding edge leaves on the glass
   traces: boolean;       // a receding edge leaves a residue on the glass (blood smear, syrup coating, legs)
-  traceAmount: number;   // 0..2 residue opacity boost at the wall rows, independent of liquidTransparency
-  traceDry: number;      // s, drying time constant of the residue's stain when flat (tilting dries up to 5× faster)
-  traceFollow: number;   // 1/s, drain-back rate of the wet smear toward the liquid at 25 px away (0 = residue stays put)
-  traceStain: number;    // 0..1 fraction of a fresh deposit the drain-back leaves behind as stain (0 = drains away completely)
-  traceThin: number;     // 0..3 how much edge speed thins the deposit (at 1, 100 px/s halves it): fast smears come out faint, dense near the liquid
+  traceAmount: number;   // 0..2 residue depth gain: the stain's Beer–Lambert depth relative to its film (clamped at the bulk chord)
+  traceDry: number;      // s, drying time constant of the residue: the wet film evaporates, its stain fades
+  traceDrain: number;    // px/s a wet film at the thin-film cap (h = R/10) runs down under 1 g, ρgh²/3μ (thinner films ∝ h²; 0 = stays put)
+  traceStain: number;    // 0..1 share of a drying film left on the glass as stain (0 = it evaporates without a trace)
   traceFilm: number;     // 0..1 permanent thin film over the whole glass, as a residue level (0 = bare glass between smears)
   edgeSoft: number;      // px, anti-aliased edge width (0 = hard pixel edge)
   frontBright: number;   // px, band just behind the fill edge blended toward liquidHi (bright convex cap look)
@@ -196,7 +196,7 @@ export interface Params {
   ambientLight: number;  // 0..1: liquid colours brighter than the diffuse body desaturate toward neutral — reflections of white room light instead of the liquid glowing in its own colour
 }
 
-export const PARAMS_VERSION = 25;
+export const PARAMS_VERSION = 27;
 
 export const DEFAULT_PARAMS: Params = {
   v: PARAMS_VERSION,
@@ -243,9 +243,8 @@ export const DEFAULT_PARAMS: Params = {
   traces: false,
   traceAmount: 0.6,
   traceDry: 1,
-  traceFollow: 0.25,
+  traceDrain: 2376.8,   // legacyTraceDrain of these defaults (water: contactDyn 8°, capLength 2.7 mm, this bore)
   traceStain: 0.3,
-  traceThin: 1,
   traceFilm: 0,
   edgeSoft: 2.6,
   frontBright: 21,
@@ -501,7 +500,7 @@ export const PRESET_BLOOD: Partial<Params> = {
   liquid: '#6e0b16', liquidHi: '#c8443f', liquidLo: '#1c0306', tubeBack: '#050203', tubeBack2: '#0a0405', bubbleRim: '#e08a80',
   glassHi: '#93a2ae', glassBody: 0.06, glassHiBright: 0.3, glassReflect: 0.14, glassRim: 0.5, glassOverLiquid: 0.22,
   highlightH: 10, highlightBright: 0.5, highlightSharp: 2, shadeDepth: 0.86,
-  traces: true, traceAmount: 1.1, traceDry: 1.5, traceFollow: 0.25, traceStain: 0.35, traceThin: 0.8,   // blood smears the wall, crawls back, dries last
+  traces: true, traceAmount: 1.1, traceDry: 1.5, traceStain: 0.35,   // blood smears the wall, crawls back, dries last
   liquidTransparency: 0.05,
   digitFont: 9, digitTintAmount: 0, digitTone: 0,
   digitScaleX: 3.25, digitScaleY: 3.25, digitBottom: 5, digitHourStep: 3,
@@ -548,7 +547,7 @@ export const PRESET_HONEY: Partial<Params> = {
   liquid: '#7a4206', liquidHi: '#f0c060', liquidLo: '#3d1c03', tubeBack: '#0c0703', tubeBack2: '#1c1208', bubbleRim: '#ffd890',
   glassHi: '#f0dcb0', glassBody: 0.08, glassHiBright: 0.45, glassReflect: 0.25, glassRim: 0.6,
   highlightH: 14, highlightBright: 0.4, highlightSharp: 1.8, shadeDepth: 0.78,
-  traces: true, traceAmount: 0.7, traceDry: 2, traceFollow: 0.08, traceStain: 0.45, traceThin: 0.3,   // syrup coats thickly whatever the speed, crawls back slowly
+  traces: true, traceAmount: 0.7, traceDry: 2, traceStain: 0.45,   // syrup coats thickly whatever the speed, crawls back slowly
   liquidTransparency: 0.32,
   tickColorH: '#4a3210', tickMajorColorH: '#5a3e14', tickColorM: '#4a3210', tickMajorColorM: '#5a3e14',
   digitFont: 6, digitTint: '#d4923a', digitTintAmount: 0.5, digitTone: 0,
@@ -575,7 +574,7 @@ export const PRESET_MALT: Partial<Params> = {
   glassHi: '#f2e0b4', glassBody: 0.1, glassHiBright: 0.5, glassReflect: 0.3, glassRim: 0.7, glassOverLiquid: 0.45,
   highlightH: 12, highlightBright: 0.5, highlightSharp: 1.6, shadeDepth: 0.78,
   wetFilm: 18,
-  traces: true, traceAmount: 0.45, traceDry: 0.6, traceFollow: 0.35, traceStain: 0.2, traceThin: 1.2,   // thin legs crawl down and dry quickly
+  traces: true, traceAmount: 0.45, traceDry: 0.6, traceStain: 0.2,   // thin legs crawl down and dry quickly
   liquidTransparency: 0.42, markContrast: 24,
   ticksOnTop: true, tickLens: 0, tickParallax: 0, tickEmboss: 0.5,
   tickMinorWidthH: 1, tickMajorWidthH: 2, tickMinorWidthM: 1, tickMajorWidthM: 2, tickMajorEveryH: 3, tickMajorEveryM: 15,
@@ -616,7 +615,7 @@ export const PRESET_INK: Partial<Params> = {
   liquid: '#0e1428', liquidHi: '#5a70a0', liquidLo: '#03040c', tubeBack: '#000000', tubeBack2: '#000000', bubbleRim: '#4a5a78',
   glassHi: '#8c9bb5', glassBody: 0.05, glassHiBright: 0.3, glassReflect: 0.2, glassRim: 0.45, glassOverLiquid: 0.3,
   highlightH: 7, highlightBright: 0.8, highlightSharp: 2.6, shadeDepth: 0.9,
-  traces: true, traceAmount: 0.5, traceDry: 1.2, traceFollow: 0.5, traceStain: 0.4, traceThin: 1.5,   // thin ink drains back fast, the stain lingers a beat
+  traces: true, traceAmount: 0.5, traceDry: 1.2, traceStain: 0.4,   // thin ink drains back fast, the stain lingers a beat
   liquidTransparency: 0,
   tickMinorWidthH: 1, tickMajorWidthH: 1, tickMinorWidthM: 1, tickMajorWidthM: 1,
   tickColorH: '#5c6470', tickMajorColorH: '#e8e4d8', tickColorM: '#5c6470', tickMajorColorM: '#e8e4d8',
@@ -718,7 +717,7 @@ const PRESET_OLIVE_OIL: Partial<Params> = {
   highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25, liquidThin: 0.6,
   meniscusLens: 0,
   meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, wetFilm: 15,
-  traces: true, traceAmount: 2, traceDry: 2, traceFollow: 0.66, traceStain: 1, traceThin: 1.9,
+  traces: true, traceAmount: 2, traceDry: 2, traceStain: 1,
   edgeSoft: 3.7, frontBright: 0, edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55,
   bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
   bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.12,
@@ -757,7 +756,7 @@ const PRESET_PINOT: Partial<Params> = {
   highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.5, liquidThin: 0.15,
   meniscusLens: 0.05,
   meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 18, traces: true,
-  traceAmount: 1, traceDry: 1.5, traceFollow: 0.15, traceStain: 0.3, traceThin: 1, traceFilm: 0.03,
+  traceAmount: 1, traceDry: 1.5, traceStain: 0.3, traceFilm: 0.03,
   edgeSoft: 4, frontBright: 0, surfaceBand: 0.3, surfaceRim: 0.35, surfaceWidth: 4, surfaceTone: -0.1,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
   bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0,
@@ -793,7 +792,7 @@ const PRESET_SPRITZ: Partial<Params> = {
   highlightSharp: 2, highlightInset: 0, shadeDepth: 0.4, liquidThin: 0.4,
   meniscusLens: 0.05, meniscusK: 685,
   meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 14, traces: false, traceAmount: 0,
-  traceDry: 1, traceFollow: 0.5, traceStain: 0.2, traceThin: 1.5, traceFilm: 0, edgeSoft: 4, frontBright: 0,
+  traceDry: 1, traceStain: 0.2, traceFilm: 0, edgeSoft: 4, frontBright: 0,
   surfaceBand: 0.3, surfaceRim: 0.35, surfaceWidth: 4, surfaceTone: 0, edgeGlow: 0, glowStrength: 0,
   cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
   bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0,
@@ -829,7 +828,7 @@ const PRESET_CUVEE: Partial<Params> = {
   highlightSharp: 2.8, highlightInset: 0, shadeDepth: 0.36, liquidThin: 0.46,
   meniscusLens: 0.05, meniscusK: 685,
   meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 16, traces: false, traceAmount: 0,
-  traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0, edgeSoft: 2.4, frontBright: 0,
+  traceDry: 1.15, traceStain: 1, traceFilm: 0, edgeSoft: 2.4, frontBright: 0,
   surfaceBand: 0.18, surfaceRim: 0.24, surfaceWidth: 3, surfaceTone: -0.08, edgeGlow: 0, glowStrength: 0,
   cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28,
   bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.3,
@@ -865,7 +864,7 @@ const PRESET_NOCTURNE: Partial<Params> = {
   highlightBright: 0.62, highlightSharp: 2.5, highlightInset: 0, shadeDepth: 0.72, liquidThin: 0.3,
   meniscusLens: 0.05,
   meniscusK: 300, meniscusDamp: 24, meniscusInertia: 3, wetFilm: 18, traces: true,
-  traceAmount: 0.9, traceDry: 1.8, traceFollow: 0.3, traceStain: 0.5, traceThin: 1, traceFilm: 0,
+  traceAmount: 0.9, traceDry: 1.8, traceStain: 0.5, traceFilm: 0,
   edgeSoft: 2.2, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.48, surfaceWidth: 3, surfaceTone: -0.15,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
   bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.3,
@@ -903,7 +902,7 @@ const PRESET_TIDE: Partial<Params> = {
   highlightH: 10, highlightBright: 0.45, highlightSharp: 1.6, highlightInset: 0, shadeDepth: 0.6,
   liquidThin: 0.2,
   meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 12,
-  traces: false, traceAmount: 0, traceDry: 1, traceFollow: 0.5, traceStain: 0.2, traceThin: 1.5, traceFilm: 0,
+  traces: false, traceAmount: 0, traceDry: 1, traceStain: 0.2, traceFilm: 0,
   edgeSoft: 4, frontBright: 10, surfaceBand: 0.35, surfaceRim: 0.5, surfaceWidth: 4, surfaceTone: 0.2,
   edgeGlow: 26, glowStrength: 0.6, cornerR: 0, edgeLightGain: 0.3, bubble: false, bubbleW: 27, bubbleH: 20,
   bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0,
@@ -1052,7 +1051,7 @@ const PRESET_ABSINTHE: Partial<Params> = {
   highlightH: 16, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.68,
   liquidThin: 0.4, contactAngle: 76.8361, contactHyst: 12.1639, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
   meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 20, traces: true, traceAmount: 1.55,
-  traceDry: 0.95, traceFollow: 0.64, traceStain: 0.65, traceThin: 2.15, traceFilm: 0, edgeSoft: 3.6,
+  traceDry: 0.95, traceStain: 0.65, traceFilm: 0, edgeSoft: 3.6,
   frontBright: 0, surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1,
   surfaceBlick: 0, edgeGlow: 17, glowStrength: 0.3, cornerR: 0, edgeLightGain: -0.2, bubble: false,
   bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14,
@@ -1084,7 +1083,7 @@ const PRESET_CHARTREUSE: Partial<Params> = {
   highlightH: 17, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.68,
   liquidThin: 0.4, contactAngle: 67.8596, contactHyst: 18, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
   meniscusK: 475, meniscusDamp: 15.5, meniscusInertia: 2.1, wetFilm: 15, traces: false, traceAmount: 0.6,
-  traceDry: 1, traceFollow: 0.25, traceStain: 0.3, traceThin: 1, traceFilm: 0, edgeSoft: 3.1, frontBright: 0,
+  traceDry: 1, traceStain: 0.3, traceFilm: 0, edgeSoft: 3.1, frontBright: 0,
   surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0,
   edgeGlow: 17, glowStrength: 0.3, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
   bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.38, ticksH: true,
@@ -1115,8 +1114,7 @@ const PRESET_BOTTLE: Partial<Params> = {
   rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.22, lens: 0.1, lensCurve: -1.3, bubbleRim: '#0c1f05',
   highlightH: 10, highlightBright: 0, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.86, liquidThin: 0.4,
   contactAngle: 75.5715, contactHyst: 13.4285, contactDyn: 8, capLength: 2.7, meniscusLens: 0, meniscusK: 280,
-  meniscusDamp: 16, meniscusInertia: 2, wetFilm: 15, traces: true, traceAmount: 0.55, traceDry: 0.55,
-  traceFollow: 1, traceStain: 0.6, traceThin: 2, traceFilm: 0, edgeSoft: 1.9, frontBright: 0, surfaceBand: 0.5,
+  meniscusDamp: 16, meniscusInertia: 2, wetFilm: 15, traces: true, traceAmount: 0.55, traceDry: 0.55, traceStain: 0.6, traceFilm: 0, edgeSoft: 1.9, frontBright: 0, surfaceBand: 0.5,
   surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0, edgeGlow: 14,
   glowStrength: 0.06, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28,
   bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.26, ticksH: true, tickStepH: 1,
@@ -1148,7 +1146,7 @@ const PRESET_CLARET: Partial<Params> = {
   highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
   liquidThin: 0.6, contactAngle: 72.6537, contactHyst: 0, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
   meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, wetFilm: 0, traces: false, traceAmount: 0.25,
-  traceDry: 1.7, traceFollow: 0.58, traceStain: 0.35, traceThin: 1.25, traceFilm: 0, edgeSoft: 3.2,
+  traceDry: 1.7, traceStain: 0.35, traceFilm: 0, edgeSoft: 3.2,
   frontBright: 1, surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1,
   surfaceBlick: 0, edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55, bubble: false,
   bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14,
@@ -1180,7 +1178,7 @@ const PRESET_OLIVE_WHITE: Partial<Params> = {
   highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
   liquidThin: 0.6, contactAngle: 72.6537, contactHyst: 11.4, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
   meniscusK: 685, meniscusDamp: 38, meniscusInertia: 10, wetFilm: 15, traces: true, traceAmount: 2,
-  traceDry: 1.7, traceFollow: 1, traceStain: 1, traceThin: 2.1, traceFilm: 0, edgeSoft: 4, frontBright: 1,
+  traceDry: 1.7, traceStain: 1, traceFilm: 0, edgeSoft: 4, frontBright: 1,
   surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0,
   edgeGlow: 27, glowStrength: 0.34, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
   bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.43, ticksH: true,
@@ -1212,7 +1210,7 @@ const PRESET_MENTHE: Partial<Params> = {
   highlightH: 8, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.56,
   liquidThin: 0.6, contactAngle: 60, contactHyst: 14.5, contactDyn: 27, capLength: 2.1, meniscusLens: -0.3,
   meniscusK: 355, meniscusDamp: 21.5, meniscusInertia: 5.3, wetFilm: 13, traces: false, traceAmount: 0.6,
-  traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0.88, edgeSoft: 4, frontBright: 0,
+  traceDry: 1.15, traceStain: 1, traceFilm: 0.88, edgeSoft: 4, frontBright: 0,
   surfaceBand: 0.3, surfaceRim: 0.25, surfaceWidth: 6.5, surfaceTone: 0, surfaceFill: 0.45, surfaceBlick: 0,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
   bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.32, ticksH: true,
@@ -1243,7 +1241,7 @@ const PRESET_LIME: Partial<Params> = {
   bubbleRim: '#b9c4b3', highlightH: 14, highlightBright: 1, highlightSharp: 2, highlightInset: 0,
   shadeDepth: 0.4, liquidThin: 1, contactAngle: 70, contactHyst: 8.5, contactDyn: 5.1794, capLength: 6.279,
   meniscusLens: 0.05, meniscusK: 550, meniscusDamp: 8.8728, meniscusInertia: 2.9786, wetFilm: 8, traces: true,
-  traceAmount: 0.4377, traceDry: 1, traceFollow: 0.4709, traceStain: 0.167, traceThin: 1.4807,
+  traceAmount: 0.4377, traceDry: 1, traceStain: 0.167,
   traceFilm: 0.0002, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
   surfaceTone: 0, surfaceFill: 0.505, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.055, cornerR: 0,
   edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
@@ -1275,8 +1273,7 @@ const PRESET_PATRICK: Partial<Params> = {
   rimLight: 0, rimTint: '#000000', glassOverLiquid: 0.64, lens: -0.2, lensCurve: 0.2, bubbleRim: '#2d3319',
   highlightH: 9, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.25,
   liquidThin: 0.4, contactAngle: 159.5921, contactHyst: 1.2, contactDyn: 8, capLength: 2.7, meniscusLens: 0,
-  meniscusK: 360, meniscusDamp: 3, meniscusInertia: 10, wetFilm: 0, traces: false, traceAmount: 2, traceDry: 2,
-  traceFollow: 0.66, traceStain: 1, traceThin: 0.1, traceFilm: 0, edgeSoft: 4, frontBright: 0,
+  meniscusK: 360, meniscusDamp: 3, meniscusInertia: 10, wetFilm: 0, traces: false, traceAmount: 2, traceDry: 2, traceStain: 1, traceFilm: 0, edgeSoft: 4, frontBright: 0,
   surfaceBand: 0.5, surfaceRim: 0.6, surfaceWidth: 4, surfaceTone: 0, surfaceFill: 1, surfaceBlick: 0,
   edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27, bubbleH: 20,
   bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.12, ticksH: true,
@@ -1307,7 +1304,7 @@ const PRESET_SELTZER: Partial<Params> = {
   highlightH: 0, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.31,
   liquidThin: 0.42, contactAngle: 77.0824, contactHyst: 10.5, contactDyn: 8, capLength: 2.7,
   meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 16, traces: false,
-  traceAmount: 0, traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0, edgeSoft: 4,
+  traceAmount: 0, traceDry: 1.15, traceStain: 1, traceFilm: 0, edgeSoft: 4,
   frontBright: 0, surfaceBand: 0.1, surfaceRim: 0.2, surfaceWidth: 6, surfaceTone: 0.05, surfaceFill: 1,
   surfaceBlick: 0, edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55, bubble: false, bubbleW: 27,
   bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5, bubbleTiltGain: 14, bubbleDark: 0.06,
@@ -1339,7 +1336,7 @@ const PRESET_GLYCEROL: Partial<Params> = {
   highlightH: 1, highlightBright: 0.35, highlightSharp: 2, highlightInset: 0, shadeDepth: 0.31,
   liquidThin: 0.42, contactAngle: 72.8328, contactHyst: 10.5, contactDyn: 8, capLength: 2.7,
   meniscusLens: 0.05, meniscusK: 685, meniscusDamp: 38, meniscusInertia: 5.6, wetFilm: 16, traces: true,
-  traceAmount: 0.35, traceDry: 1.15, traceFollow: 1, traceStain: 1, traceThin: 2.65, traceFilm: 0.21,
+  traceAmount: 0.35, traceDry: 1.15, traceStain: 1, traceFilm: 0.21,
   edgeSoft: 4, frontBright: 14, surfaceBand: 0.25, surfaceRim: 0.95, surfaceWidth: 4, surfaceTone: -0.05,
   surfaceFill: 1, surfaceBlick: 0, edgeGlow: 0, glowStrength: 0, cornerR: 0, edgeLightGain: 0.55,
   bubble: false, bubbleW: 27, bubbleH: 20, bubbleGap: 28, bubbleY: 0.28, bubbleRollGain: 0.5,
@@ -1372,7 +1369,7 @@ const PRESET_GLYCEROL_DARK: Partial<Params> = {
   bubbleRim: '#b4b4b4', highlightH: 6, highlightBright: 1, highlightSharp: 2, highlightInset: 0,
   shadeDepth: 0.3, liquidThin: 1, contactAngle: 20, contactHyst: 12, contactDyn: 90, capLength: 2.2131,
   meniscusLens: 0.05, meniscusK: 105.7451, meniscusDamp: 28.1531, meniscusInertia: 1.8478, wetFilm: 24.534,
-  traces: true, traceAmount: 0.3317, traceDry: 2, traceFollow: 0.1258, traceStain: 0.18, traceThin: 0.5193,
+  traces: true, traceAmount: 0.3317, traceDry: 2, traceStain: 0.18,
   traceFilm: 0.01, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
   surfaceTone: 0, surfaceFill: 0.1838, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.0726, cornerR: 0,
   edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
@@ -1404,7 +1401,7 @@ const PRESET_PROSECCO: Partial<Params> = {
   bubbleRim: '#b4b2ad', highlightH: 6, highlightBright: 1, highlightSharp: 2, highlightInset: 0,
   shadeDepth: 0.4, liquidThin: 1, contactAngle: 20, contactHyst: 10, contactDyn: 10.1656, capLength: 2.2069,
   meniscusLens: 0.05, meniscusK: 400, meniscusDamp: 9.718, meniscusInertia: 2.9578, wetFilm: 12.7417,
-  traces: false, traceAmount: 0.3, traceDry: 1, traceFollow: 0.4427, traceStain: 0.05, traceThin: 1.462,
+  traces: false, traceAmount: 0.3, traceDry: 1, traceStain: 0.05,
   traceFilm: 0, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
   surfaceTone: 0, surfaceFill: 0.505, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.044, cornerR: 0,
   edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
@@ -1438,7 +1435,7 @@ const PRESET_SUBTLE_SODA: Partial<Params> = {
   bubbleRim: '#b8ccad', highlightH: 8, highlightBright: 0.05, highlightSharp: 2, highlightInset: 0,
   shadeDepth: 0.4, liquidThin: 1, contactAngle: 70, contactHyst: 9, contactDyn: 5.1794, capLength: 5.4,
   meniscusLens: 0.05, meniscusK: 550, meniscusDamp: 8.8728, meniscusInertia: 2.9786, wetFilm: 8, traces: true,
-  traceAmount: 0.4377, traceDry: 1, traceFollow: 0.4709, traceStain: 0.167, traceThin: 1.4807,
+  traceAmount: 0.4377, traceDry: 1, traceStain: 0.167,
   traceFilm: 0.0002, edgeSoft: 2.4, frontBright: 0, surfaceBand: 0.35, surfaceRim: 0.45, surfaceWidth: 4,
   surfaceTone: 0, surfaceFill: 0.505, surfaceBlick: 0.9, edgeGlow: 19, glowStrength: 0.055, cornerR: 0,
   edgeLightGain: 0.55, bubble: false, bubbleW: 16, bubbleH: 19, bubbleGap: 22, bubbleY: 0.2,
@@ -1512,7 +1509,10 @@ PRESETS.push({ id: 'subtle-soda', name: 'Subtle soda', note: 'muted lime over wa
 /** Presets are whole looks: apply over the defaults, not over the current edit. `gas` defaults to the
  *  preset's signature (its first fitting model). */
 export function presetParams(e: PresetEntry, gas: GasId = e.gas[0]): Params {
-  return { ...structuredClone(DEFAULT_PARAMS), ...e.p, ...gasParams(gas) };
+  const p = { ...structuredClone(DEFAULT_PARAMS), ...e.p, ...gasParams(gas) };
+  // hand-made presets carry no material: their film's drain speed follows from their own contact params
+  if (!('traceDrain' in e.p)) p.traceDrain = legacyTraceDrain(p);
+  return p;
 }
 
 export type ParamKey = keyof Params;
@@ -1571,6 +1571,10 @@ export function migrateParams(o: Record<string, unknown>): Partial<Params> {
   if (from < 23) { r.fizzDepth = DEFAULT_PARAMS.fizzDepth; r.fizzBlick = DEFAULT_PARAMS.fizzBlick; }
   if (from < 24) { r.rimLight = DEFAULT_PARAMS.rimLight; r.rimTint = DEFAULT_PARAMS.rimTint; }
   if (from < 25) r.wallWet = DEFAULT_PARAMS.wallWet;
+  // v26: the deposit follows the film law (filmEta), so the inverted speed-thinning knob traceThin is gone.
+  // v27: the artistic drain-back rate traceFollow gives way to the film's physical drain speed traceDrain,
+  // here from the preset's own contact params (legacyTraceDrain)
+  if (from < 27 && !('traceDrain' in r)) r.traceDrain = legacyTraceDrain({ ...DEFAULT_PARAMS, ...r } as Params);
   for (const k of Object.keys(r)) if (!(k in DEFAULT_PARAMS)) delete r[k];
   r.v = PARAMS_VERSION;
   return r as Partial<Params>;
@@ -1623,13 +1627,12 @@ export const PARAM_META: Record<string, { group: string; label?: string; help?: 
   meniscusDamp: { help: 'Damping of the surface wobble, 1/s. Below ~2·√K it rings after a flick.', group: 'Meniscus dynamics', label: 'surface damping', min: 0, max: 60, step: 0.5 },
   meniscusInertia: { help: 'How much the forcing on the edge (flick kick, free-slug acceleration) bulges the surface centre ahead of the contact lines: a flick makes the cap bulge, then ring at the surface spring. Hard-capped at 12 px.', group: 'Meniscus dynamics', label: 'bulge per edge forcing', min: 0, max: 10, step: 0.1 },
   wetFilm: { help: 'Trailing wet film a receding edge leaves on the glass, px at full speed (25 px/s); brightest at the walls, drains in ~0.5 s. With traces on it is the band over which the liquid thins out into its residue (full liquid at the edge, residue this many px out).', group: 'Meniscus dynamics', label: 'wet film px', min: 0, max: 30, step: 1 },
-  traces: { help: 'A receding edge leaves a residue on the glass where the liquid has been (blood smear, syrup coating, legs); the wet part drains back after the liquid, the stain dries out slowly.', group: 'Meniscus dynamics' },
-  traceAmount: { help: 'Opacity of the dried residue at the wall rows (weaker at mid-height), independent of liquid transparency. Values over 1 boost through the streak/height attenuation toward fully opaque (clamped per pixel).', group: 'Meniscus dynamics', label: 'residue amount', min: 0, max: 2, step: 0.05 },
-  traceDry: { help: 'Drying time constant of the residue\'s stain, s: it fades to 37% in this many seconds when the watch is flat; tilting the tube along its axis drains the film up to 5× faster.', group: 'Meniscus dynamics', label: 'drying time s', min: 0.1, max: 2, step: 0.05 },
-  traceFollow: { help: 'Drain-back: the wet part of the smear is pulled back toward the liquid at this rate (1/s at 25 px away, faster further out), so the residue follows a receded edge before its stain dries in place. 0 = residue stays where deposited. Thin liquids drain fast, syrup barely.', group: 'Meniscus dynamics', label: 'drain-back rate', min: 0, max: 1, step: 0.02 },
-  traceStain: { help: 'How intense the leftover stain is: the fraction of a fresh deposit the drain-back leaves behind (scattered 0.7–1 per column), which then dries over traceDry. 0 = the smear drains away completely, 1 = it never thins. On-screen stain opacity ≈ traceStain × traceAmount.', group: 'Meniscus dynamics', label: 'stain intensity', min: 0, max: 1, step: 0.05 },
-  traceThin: { help: 'How much the edge\'s speed thins the deposit (at 1, an edge receding at 100 px/s leaves half density). A fast slosh smears a faint film at its far end and the residue densifies toward where the edge slowed — toward the liquid. 0 = every deposit is full density.', group: 'Meniscus dynamics', label: 'speed thinning', min: 0, max: 3, step: 0.05 },
-  traceFilm: { help: 'Permanent thin film over the whole glass, as a residue level: the tube never looks perfectly clean between smears. Rendered exactly like residue that has dried to this level — streaked, strongest at the wall rows, under the liquid, wet band at the edge — so fresh smears stand out above it and its opacity at the walls ≈ traceFilm^0.65 × residue amount (0.05 → ~14% of the residue amount), capped at the liquid\'s own opacity (1 − transparency) so a clear liquid never reads thinner than its film. 0 = bare glass. Needs traces on.', group: 'Meniscus dynamics', label: 'film everywhere', min: 0, max: 1, step: 0.01 },
+  traces: { help: 'A receding edge leaves its film on the glass where the liquid has been (blood smear, syrup coating, legs): thicker the faster the line went and the more viscous the liquid (the wet-film law of contactDyn; a watery line leaves microns, a syrup coats). Gravity runs the wet film down the tube, into the liquid where it reaches it; it dries into a fading stain.', group: 'Meniscus dynamics' },
+  traceAmount: { help: 'Depth of the residue\'s tint: a stain is a Beer–Lambert tint of the tube back toward the liquid\'s own colour, this many times its film\'s depth (strongest at the wall rows, weaker at mid-height), clamped at the full chord — no smear reads denser than the column.', group: 'Meniscus dynamics', label: 'residue amount', min: 0, max: 2, step: 0.05 },
+  traceDry: { help: 'Drying time constant of the residue, s: the wet film evaporates to 37% in this many seconds, leaving its stain, which fades at the same rate. Tilt does not change it (gravity moves a wet film, it does not dry it).', group: 'Meniscus dynamics', label: 'drying time s', min: 0.1, max: 2, step: 0.05 },
+  traceDrain: { help: 'Drainage: the speed, px/s, at which gravity (1 g along the tube) runs a wet film at the thin-film cap (h = R/10) down the bore — ρgh²/3μ, so a film half as thick runs a quarter as fast. The film flows toward the tube\'s low end: into the liquid when that is downhill, onto the end otherwise. Water ~2000, olive oil ~15, honey ~0.2: a watery film of microns or any syrup barely moves before it dries; a fast, thick oily film sags. 0 = the film stays where it was laid. Derived from density, viscosity and bore for material presets.', group: 'Meniscus dynamics', label: 'drain speed px/s', min: 0, max: 20000, step: 0.01 },
+  traceStain: { help: 'Share of a drying film left on the glass as stain (scattered 0.7–1 per column), which then fades over traceDry. 0 = the film evaporates without a trace, 1 = all of it stays.', group: 'Meniscus dynamics', label: 'stain intensity', min: 0, max: 1, step: 0.05 },
+  traceFilm: { help: 'Permanent thin film over the whole glass, as a residue level: the tube never looks perfectly clean between smears. Rendered exactly like residue that has dried to this level — streaked, strongest at the wall rows, under the liquid, wet band at the edge — so fresh smears stand out above it and its depth at the walls ≈ traceFilm^0.65 × residue amount (0.05 → ~14% of the residue amount), capped at the liquid\'s own opacity (1 − transparency). 0 = bare glass. Needs traces on.', group: 'Meniscus dynamics', label: 'film everywhere', min: 0, max: 1, step: 0.01 },
   edgeSoft: { help: 'Soft edge: anti-aliased ramp width in px, centred on the edge (0 = hard pixel edge, 1 = classic 1-px AA).', group: 'Shape', min: 0, max: 4, step: 0.1 },
   frontBright: { help: 'Band just behind the fill edge blended toward liquidHi (bright convex cap), px.', group: 'Shape', min: 0, max: 40, step: 1 },
   surfaceBand: { help: 'Intensity of the visible meniscus surface. A concave surface grades from a darker inner shoulder to a lit rim and closes at the walls. It never fades as the liquid settles: a receding edge clings and deepens the dish, an advancing one flattens it, and it springs back as the edge settles. While an edge recedes fast (zero contact angle) the surface is liquid thinning into the wet trail, without shoulder or rim; both return as soon as it stops. A convex nose thins toward whatever is behind it (tube back, or the wet film a receding edge left), with a highlight tint for clear liquids. 0 disables surface shading.', group: 'Shape', label: 'surface band', min: 0, max: 1, step: 0.05 },

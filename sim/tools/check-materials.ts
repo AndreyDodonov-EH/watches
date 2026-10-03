@@ -196,16 +196,15 @@ expect('plasma traces on', 'xenon', { traces: true }, [TRACES_WET]);
 expect('wetting plasma traces on', 'xenon', { traces: true, contactAngle: 40 }, [TRACES_WET], { wetting: true });
 expect('wetting plasma traces off', 'xenon', { contactAngle: 40 }, [], { wetting: true });
 expect('wetting traces off', 'urine', { traces: false }, []);
-expect('wetting traces off ignores out-of-range trace knobs', 'urine', { traces: false, traceAmount: 5, traceFollow: -1 }, []);
+expect('wetting traces off ignores out-of-range trace knobs', 'urine', { traces: false, traceAmount: 5, traceDrain: -1 }, []);
 range('traces', 'blood', 'traceAmount', 0.2, 2, 0.01, (x) => `traceAmount ${x} not in [0.2, 2]`);
 range('traces', 'blood', 'traceDry', 0.1, 2, 0.01, (x) => `traceDry ${x} not in [0.1, 2]`);
-range('traces', 'blood', 'traceFollow', 0, 1, 0.01, (x) => `traceFollow ${x} not in [0, 1]`);
+range('traces', 'blood', 'traceDrain', 0, 20000, 0.01, (x) => `traceDrain ${x} not in [0, 20000]`);
 range('traces', 'blood', 'traceStain', 0.05, 0.7, 0.01, (x) => `traceStain ${x} not in [0.05, 0.7]`);
-range('traces', 'blood', 'traceThin', 0, 3, 0.01, (x) => `traceThin ${x} not in [0, 3]`);
 range('traces', 'blood', 'traceFilm', 0, 1, 0.01, (x) => `traceFilm ${x} not in [0, 1]`);
-range('traces viscous', 'honey', 'traceFollow', null, 0.15, 0.01, (x) => `viscous: traceFollow ${x} > 0.15`);
-range('traces watery', 'urine', 'traceFollow', 0.2, null, 0.01, (x) => `watery: traceFollow ${x} < 0.2`, { traces: true });
-expect('traces medium traceFollow 0 and 1 both fine', 'blood', { traceFollow: 0 }, []);
+range('traces viscous', 'honey', 'traceDrain', null, 20, 0.01, (x) => `viscous: traceDrain ${x} > 20`);
+range('traces watery', 'urine', 'traceDrain', 100, null, 0.01, (x) => `watery: traceDrain ${x} < 100`, { traces: true });
+expect('traces medium traceDrain 0 fine', 'blood', { traceDrain: 0 }, []);
 
 // ---------------------------------------------------------------------------------------------
 // 6. Gas
@@ -409,7 +408,7 @@ const FIXTURES: Fixture[] = [
       ['glassOverLiquid', '0.5', 'w'],
       ['freeDamp', '3.35', 'd'], ['freeBounce', 0.05, 'x'], ['meniscusK', 200, 'x'], ['meniscusDamp', '20.8', 'd'], ['contactDyn', '47', 'd'],
       ['capLength', '1.51', 'd'], ['angleTiltGain', '3.64', 'd'], ['angleGyroGain', '0.20', 'd'],
-      ['wetFilm', '18.8', 'd'], ['traces', true, 'x'], ['traceAmount', '0.57', 'd'], ['traceStain', '0.24', 'd'], ['traceFollow', '0.20', 'd'], ['glowStrength', '0.04', 'd'],
+      ['wetFilm', '18.8', 'd'], ['traces', true, 'x'], ['traceAmount', '0.57', 'd'], ['traceStain', '0.24', 'd'], ['traceDrain', '17.4', 'd'], ['glowStrength', '0.04', 'd'],
     ] },
   { name: 'honey', m: mat({ viscosity: 10000, density: 1420, surfaceTension: 70, ior: 1.49, absorptionR: 0.06, absorptionG: 0.18, absorptionB: 0.7, contactAngle: 25, contactHysteresis: 20, solidsFraction: 0.8, dryingTime: 2, gasMode: 3, gasLevel: 0.04, bubbleRadius: 0.12, foamStability: 20 }),
     d: fdesign('#0c0703', REAR24), want: [
@@ -418,7 +417,7 @@ const FIXTURES: Fixture[] = [
       ['liquidThin', '1.0', 'w'], ['shadeDepth', '0.4', 'w'], ['highlightBright', '0.53', 'w'], ['glassWallGlow', '0.27', 'w'],
       ['freeDamp', '8.65', 'd'], ['freeBounce', 0, 'x'], ['meniscusK', '79', 'd'], ['meniscusDamp', '33', 'd'], ['contactDyn', 90, 'x'],
       ['capLength', '1.79', 'd'], ['angleTiltGain', '1.62', 'd'], ['angleGyroGain', '0.07', 'd'],
-      ['wetFilm', '28.3', 'd'], ['traces', true, 'x'], ['traceAmount', '1.32', 'd'], ['traceStain', '0.57', 'd'], ['traceFollow', '0.07', 'd'],
+      ['wetFilm', '28.3', 'd'], ['traces', true, 'x'], ['traceAmount', '1.32', 'd'], ['traceStain', '0.57', 'd'], ['traceDrain', '0.23', 'd'],
       ['fizz', true, 'x'], ['fizzSize', '2.31', 'd'], ['fizzSpeed', 0, 'x'], ['fizzCount', 5, 'x'],
     ] },
   { name: 'mercury', m: mat({ metallic: 1, metalReflectance: 0.75, viscosity: 1.55, density: 13546, surfaceTension: 485, contactAngle: 140, contactHysteresis: 15 }),
@@ -445,7 +444,7 @@ const FIXTURES: Fixture[] = [
       ['liquid', [120, 35, 31], 'c'], ['liquidLo', [49, 9, 7], 'c'], ['liquidHi', [247, 168, 166], 'c'], ['residual', '0', 'c'], ['shadeDepth', '0.95', 'w'], ['highlightBright', '0.63', 'w'], ['glassOverLiquid', '0.53', 'w'],
       ['freeDamp', '1.87', 'd'], ['freeBounce', '0.10', 'd'], ['meniscusK', '288', 'd'], ['meniscusDamp', '14.8', 'd'], ['contactDyn', '14.1', 'd'],
       ['capLength', '1.89', 'd'], ['angleTiltGain', '4.85', 'd'], ['angleGyroGain', '0.29', 'd'],
-      ['wetFilm', '15.3', 'd'], ['traces', true, 'x'], ['traceAmount', '1.06', 'd'], ['traceStain', '0.34', 'd'], ['traceFollow', '0.29', 'd'],
+      ['wetFilm', '15.3', 'd'], ['traces', true, 'x'], ['traceAmount', '1.06', 'd'], ['traceStain', '0.34', 'd'], ['traceDrain', '423', 'd'],
     ] },
   { name: 'milk', m: mat({ viscosity: 2.9, density: 1030, surfaceTension: 45, ior: 1.35, absorptionR: 0.001, absorptionG: 0.001, absorptionB: 0.001, scattering: 3, contactAngle: 30, contactHysteresis: 15 }),
     d: fdesign('#000000'), want: [
@@ -773,7 +772,7 @@ for (const e of [0.02, 0.021]) {
   if (w && m0 && m1 && m2 && v0 && v1) {
     report('μ_eff 2.49 / 2.5 / 2.51: watery / medium / medium', [w, m0, m1].map((r) => r.classes.viscosity).join() === 'watery,medium,medium' ? [] : [[w, m0, m1].map((r) => r.classes.viscosity).join()], []);
     report('μ_eff 499.99 / 500 / 500.01: medium / viscous / viscous', [m2, v0, v1].map((r) => r.classes.viscosity).join() === 'medium,viscous,viscous' ? [] : [[m2, v0, v1].map((r) => r.classes.viscosity).join()], []);
-    report(`μ_eff 500: traces on, traceFollow ${v0.params.traceFollow} ≤ 0.15`, v0.params.traces && v0.params.traceFollow <= 0.15 ? [] : [`${v0.params.traces} ${v0.params.traceFollow}`], []);
+    report(`μ_eff 500: traces on, traceDrain ${v0.params.traceDrain} ≤ 20`, v0.params.traces && v0.params.traceDrain <= 20 ? [] : [`${v0.params.traces} ${v0.params.traceDrain}`], []);
     report(`freeDamp jumps up at 2.5 (${w.params.freeDamp.toFixed(3)} → ${m0.params.freeDamp}) and at 500 (${m2.params.freeDamp.toFixed(3)} → ${v0.params.freeDamp})`,
       w.params.freeDamp < m0.params.freeDamp && m2.params.freeDamp < v0.params.freeDamp && m0.params.freeDamp <= m1.params.freeDamp && v0.params.freeDamp <= v1.params.freeDamp ? [] : ['jump direction'], []);
   }
@@ -813,7 +812,7 @@ for (const e of [0.02, 0.021]) {
 // 11. Viscosity sweep μ = 0.2 … 1e5 (40 log steps): whole-range monotonicity. (i) the water fixture as
 //     is (dissolved gas: every non-watery point carries exactly rejection 2 and is read from the report);
 //     (ii) the water fixture with trapped gas and solids 0.3 (every point derives and is coherent).
-const DOWN = ['freeBounce', 'meniscusK', 'angleTiltGain', 'angleGyroGain', 'traceFollow', 'traceThin', 'fizzSpeed'] as const;
+const DOWN = ['freeBounce', 'meniscusK', 'angleTiltGain', 'angleGyroGain', 'traceDrain', 'fizzSpeed'] as const;
 const UP = ['freeDamp', 'meniscusDamp', 'contactDyn', 'wetFilm', 'traceFilm'] as const;
 const MUS = Array.from({ length: 40 }, (_, i) => 0.2 * (1e5 / 0.2) ** (i / 39));
 for (const [label, extra] of [['water fixture', {}], ['water + trapped gas + solids 0.3', { gasMode: 3, solidsFraction: 0.3 }]] as const) {
@@ -927,7 +926,7 @@ points('digitBright 10', 11, { design: ['digitBright'] });
   const cases: [string, string[], string[], string[]][] = [
     ['freeDamp = 20 not in [6, 14] for viscous', ['viscosity', 'density', 'surfaceTension', 'innerRadius'], [], ['freeDamp']],
     ['luma(liquid) < luma(liquidHi)', ['absorptionR', 'scattering', 'exposure'], ['tubeBack'], ['liquid', 'liquidHi']],
-    ['traceFollow 0.5 > 0.15 for viscous', ['viscosity', 'solidsFraction', 'dryingTime'], [], ['traceFollow']],
+    ['traceDrain 50 > 20 for viscous', ['solidsFraction', 'dryingTime', 'viscosity', 'density', 'innerRadius'], [], ['traceDrain']],
     ['carbonated: fizz must be on', ['gasMode', 'gasLevel', 'bubbleRadius'], [], ['fizz']],
     ['emissive: glowStrength 0.2 not in [0.4, 0.8]', ['emissionR', 'emissionG', 'emissionB'], [], ['glowStrength']],
     ['emissive: tube back luma 40 ≥ 16', [], ['tubeBack'], []],

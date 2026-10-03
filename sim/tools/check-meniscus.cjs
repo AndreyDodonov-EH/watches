@@ -183,12 +183,13 @@ for (const remaining of [false, true]) {
 }
 // Hard edges (edgeSoft 0): the midpoint blend still spans a pixel. A 0.6 px slug (home edge 100.6, time edge
 // 101.2 in the render frame) with only its time edge's film up: pixel 100 lies on the home side but takes
-// a tenth of the time edge's film, so it must not be painted as plain residue.
+// a tenth of the time edge's film, so it must not be painted as plain residue. No residue under it: the film
+// and a coat are one layer (the deeper counts), and a full coat would hide this thin share of film.
 for (const remaining of [false, true]) {
   const hard = { traces: true, wetFilm: 15, contactDyn: 40, edgeSoft: 0, tubeHeight: 60, contactAngle: 90, remaining };
   const st = { fillTarget: remaining ? 1 - 0.6 / 536 : 0.6 / 536, slugPos: remaining ? 536 - 0.6 - 100.6 : 100.6, filmHome: 0 };
-  const on = render(`hard-slug-film-${remaining}`, hard, { ...st, filmFree: 1 }, base, true);
-  const off = render(`hard-slug-dry-${remaining}`, hard, { ...st, filmFree: 0 }, base, true);
+  const on = render(`hard-slug-film-${remaining}`, hard, { ...st, filmFree: 1 }, base);
+  const off = render(`hard-slug-dry-${remaining}`, hard, { ...st, filmFree: 0 }, base);
   const col = remaining ? 535 - 100 : 100;
   let differs = false;
   for (let y = 0; y < 60; y++) differs ||= on[y * 536 + col] !== off[y * 536 + col];
@@ -213,11 +214,12 @@ for (const H of [4, 80]) for (const fill of [0, 0.001, 1])
 const trailingPreset = { ...DEFAULT_PARAMS,
   ...migrateParams(JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/meniscus-trailing.json')))),
   fizz: false, bubble: false, digits: false, ticksH: false, ticksM: false };
-// A saturated residue (traceAmount 4: alpha 1 on every row, whatever the streak) under a fully wet receding
+// A saturated residue (traceAmount 16: a full coat's centre-row path fraction ≥ 0.082 reaches the chord on every
+// row, whatever the streak) under a fully wet receding
 // line is, at the line, liquid of the full chord — the body colour — so the inner half of the body AA and
 // the backing are the same colour. Their junction must not expose the white tube back.
 for (const remaining of [false, true]) {
-  const changes = { remaining, surfaceBand: 0, lens: 0, traceAmount: 4 };
+  const changes = { remaining, surfaceBand: 0, lens: 0, traceAmount: 16 };
   const p = { ...trailingPreset, ...changes };
   const joined = render(`wet-junction-${remaining}`, changes, { filmHome: 1, filmFree: 1 }, trailingPreset, true);
   const pal = R.buildPalette(p, 0);

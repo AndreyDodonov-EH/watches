@@ -24,7 +24,7 @@ export const DERIVED_KEYS = [
   'tickLens', 'bottomLens', 'bubbleRim', 'bubbleDark', 'edgeGlow', 'glowStrength', 'frontBright', 'edgeLightGain', 'edgeSoft',
   'surfaceFill', 'surfaceBlick', 'contactAngle', 'contactHyst', 'contactDyn', 'capLength', 'freeDamp', 'freeBounce', 'meniscusK',
   'meniscusDamp', 'meniscusInertia', 'angleTiltGain', 'angleGyroGain', 'angleMax', 'wetFilm', 'traces', 'traceAmount', 'traceDry',
-  'traceFollow', 'traceStain', 'traceThin', 'traceFilm', 'fizz', 'fizzCount', 'fizzSize', 'fizzSpeed', 'fizzFoamLife', 'fizzFlatRise',
+  'traceDrain', 'traceStain', 'traceFilm', 'fizz', 'fizzCount', 'fizzSize', 'fizzSpeed', 'fizzFoamLife', 'fizzFlatRise',
   'fizzEdgeRise', 'fizzDriftGain',
 ] as const satisfies readonly (keyof Params)[];
 export type DerivedKey = (typeof DERIVED_KEYS)[number];
@@ -93,8 +93,6 @@ const GYRO: Record<Band, readonly Anchor[]> = {
 const FREE_BOUNCE: readonly Anchor[] = [[-3.5, 0.55], [-2.6, 0.2], [-2.0, 0.1], [-1.0, 0.03], [-0.5, 0]];
 const INERTIA: readonly Anchor[] = [[0, 3], [X_V, 2], [5, 1]];
 const WET_FILM: readonly Anchor[] = [[-5, 8], [-4.5, 10], [-3.9, 15], [-2.3, 18], [-1, 26], [0, 30]];
-const TRACE_FOLLOW: readonly Anchor[] = [[0, 0.5], [X_W, 0.3], [X_V, 0.15], [4, 0.06], [5, 0.03]];
-const TRACE_THIN: readonly Anchor[] = [[0, 1.5], [X_V, 0.6], [4, 0.3]];
 const FIZZ_SPEED: readonly Anchor[] = [[-1, 0], [0.5, 3], [1.5, 20], [2, 40], [2.5, 55], [3, 60]];
 const GLOW: readonly Anchor[] = [[0.02, 0.4], [1, 0.8]];
 const GAS: readonly MaterialClass['gas'][] = ['none', 'carbonated', 'boiling', 'trapped'];
@@ -159,14 +157,14 @@ const EMISSION_KEYS: readonly MaterialKey[] = ['emissionR', 'emissionG', 'emissi
 const ABSORPTION_KEYS: readonly MaterialKey[] = ['absorptionR', 'absorptionG', 'absorptionB'];
 /** The material drivers of a derived legacy key (rejection 11 names derived values; the user edits these). */
 const DRIVERS: readonly { keys: readonly (keyof Params)[]; material: readonly MaterialKey[]; design?: readonly DesignKey[] }[] = [
-  { keys: ['freeDamp', 'freeBounce', 'meniscusK', 'meniscusDamp', 'angleTiltGain', 'angleGyroGain', 'wetFilm', 'traceFollow', 'traceThin'],
+  { keys: ['freeDamp', 'freeBounce', 'meniscusK', 'meniscusDamp', 'angleTiltGain', 'angleGyroGain', 'wetFilm'],
     material: ['viscosity', 'density', 'surfaceTension', 'innerRadius'] },
   { keys: ['liquidTransparency', 'liquid', 'liquidHi', 'liquidLo', 'shadeDepth', 'liquidThin'],
     material: [...ABSORPTION_KEYS, 'scattering', 'exposure', 'ambient'], design: ['tubeBack'] },
   { keys: ['glowStrength', 'edgeGlow', 'lightPhys', 'liquidBright', 'glassOverLiquid'], material: EMISSION_KEYS },
   { keys: ['contactAngle', 'contactHyst'], material: ['contactAngle', 'contactHysteresis'] },
-  { keys: ['wetFilm', 'traces', 'traceAmount', 'traceDry', 'traceFollow', 'traceStain', 'traceThin', 'traceFilm'],
-    material: ['solidsFraction', 'dryingTime', 'viscosity'] },
+  { keys: ['wetFilm', 'traces', 'traceAmount', 'traceDry', 'traceDrain', 'traceStain', 'traceFilm'],
+    material: ['solidsFraction', 'dryingTime', 'viscosity', 'density', 'innerRadius'] },
   { keys: ['fizz', 'fizzCount', 'fizzSize', 'fizzSpeed', 'fizzFoamLife', 'fizzFlatRise', 'fizzEdgeRise', 'fizzDriftGain'],
     material: ['gasMode', 'gasLevel', 'bubbleRadius', 'foamStability', 'viscosity'] },
   { keys: ['highlightBright'], material: ['lightIntensity', 'lightElevation', 'lightSize'] },
@@ -399,9 +397,9 @@ export function deriveReport(material: Material, design: Design): DeriveReport {
     traces: wetting && m.solidsFraction > 0,
     traceAmount: 0.3 + 1.7 * m.solidsFraction * (1 - Tsnap),
     traceDry: clamp(m.dryingTime, 0.1, 2),
-    traceFollow: anchored(x, TRACE_FOLLOW),
+    // a wall film at the thin-film cap (h = r/10) runs down at ρgh²/3μ under 1 g (physics drainTrace), px/s
+    traceDrain: rho * g * (0.1 * r * 1e-3) ** 2 / (3 * mu) * 1000 * pxPerMm,
     traceStain: 0.05 + 0.65 * m.solidsFraction,
-    traceThin: anchored(x, TRACE_THIN),
     traceFilm: 0.05 * m.solidsFraction * clamp(x / X_V),
     fizz: gas !== 'none',
     fizzCount,

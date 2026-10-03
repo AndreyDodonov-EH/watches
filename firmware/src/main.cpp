@@ -446,13 +446,14 @@ static void handleLine(char *line) {
                    t.lineVFree, t.lineVHome);
       };
       out.print("STATE"); dumpState(tubeH); dumpState(tubeM); out.println();
-      static char thex[TUBE_LENGTH_PX * 4 + 1];   // dried-trace residue, hex per tube (see compare-device.py)
-      auto dumpTrace = [&](const TubeState &t) {
-        if (t.trace) for (int x = 0; x < TUBE_LENGTH_PX; x++) sprintf(thex + x * 4, "%04x", t.trace[x]);
+      static char thex[TUBE_LENGTH_PX * 4 + 1];   // dried-trace residue and its wet part, hex per tube (see compare-device.py)
+      auto dumpTrace = [&](const uint16_t *v) {
+        if (v) for (int x = 0; x < TUBE_LENGTH_PX; x++) sprintf(thex + x * 4, "%04x", v[x]);
         else thex[0] = 0;
         out.print(thex); out.print(' ');
       };
-      out.print("TRACE "); dumpTrace(tubeH); dumpTrace(tubeM); out.println();
+      out.print("TRACE "); dumpTrace(tubeH.trace); dumpTrace(tubeM.trace); out.println();
+      out.print("WET "); dumpTrace(tubeH.traceWet); dumpTrace(tubeM.traceWet); out.println();
       for (int t = 0; t < 2; t++) for (int y = 0; y < tubeLayout(params).H; y++) {
         const uint16_t *row = strip[t] + y * PANEL_W; char *o = dumpHex;
         for (int x = 0; x < PANEL_W; x++) { uint16_t c = __builtin_bswap16(row[x]); o += sprintf(o, "%04x", c); }
@@ -484,7 +485,9 @@ void setup() {
   if (!fb.buf) { out.println("FATAL: framebuffer alloc failed"); }
   if (!display_init()) out.println("display init FAILED");
   if (!render_init()) out.println("render init FAILED (glyph pools / mark tables / film tables, PSRAM)");
+  if (!physics_init()) out.println("physics init FAILED (wet-film buffers, PSRAM): no residue");
   tubeH.trace = traceBuf(0); tubeM.trace = traceBuf(1);   // static dried-trace buffers (see physics.h)
+  tubeH.traceWet = traceWetBuf(0); tubeM.traceWet = traceWetBuf(1);   // their wet parts (PSRAM, physics_init)
   strip[0] = display_strip(0); strip[1] = display_strip(1);
   workerStart();
 #ifdef NO_IMU   // perf-baseline build (tools/e2e.sh --bare): no I2C polling, tilt stays 0

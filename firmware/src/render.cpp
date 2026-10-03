@@ -63,52 +63,74 @@ static inline uint16_t blend565T(uint16_t a, uint16_t b, int T) {
 static inline uint16_t blend565(uint16_t a, uint16_t b, float t) {
   return blend565T(a, b, (int)(t * 256 + 0.5f));
 }
-// Dried-trace fill of one strip row over [x0, x1): one colour, alpha traceA[x] * rowW / 256 per
-// column. Bit-identical to pxaT/blend565T — a + (((b - a) * T + 128) >> 8) equals
-// floor((a * (256 - T) + b * T + 128) / 256) — at a fraction of the work: r and b ride as two 16-bit
-// lanes of one 32-bit word (a lane peaks at 255 * 256 + 128, never carrying into the other), the
-// foreground expands once, and the pixel is read and written in the strip's byte-swapped layout
-// (r5 at bits 3-7, b5 at 8-12, g6 split: low 3 bits at 13-15, high 3 at 0-2), so no bswap per pixel.
+// The residue of one strip row (drawTube step 3d). Depth: a coat of film path coefficient A = eta (2 - eta) 2^16
+// (per column) crossed by this row's rays (path weight K = 256 / (1 - u^2), capped) takes the annular path
+// fraction f = FILM_PHI[(A K + 2^15) >> 16] of the chord, times traceAmount (G, 1/256): T = min(256, f G / 256),
+// the same integers as the sim. Colour: a dried dye stain is a Beer-Lambert tint of the tube back B toward the
+// body row C, B^(1-T/256) C^(T/256) per channel in linear light, from the two rows' logs (FILM_LG); same index math
+// as the sim's filmMix: lgB + ((dl T + 128) >> 8) == (lgB (256 - T) + lgC T + 128) >> 8. T >= 256 = the body row.
+struct ResidueTint {
+  int lgB0, lgB1, lgB2, dl0, dl1, dl2;   // log of B, log C - log B per channel (Q8)
+  const uint8_t *ex;                     // FILM_EX
+  const uint16_t *phi;                   // FILM_PHI
+  uint32_t K; int G;                     // row path weight (1/256, capped at 2^18), traceAmount (1/256)
+  float kq;                              // K / 2^16, for interpolated A
+  uint16_t full;                         // C (rgb565)
+  uint16_t at(int T) const {             // 0 < T
+    if (T >= 256) return full;
+    return rgb565(ex[lgB0 + ((dl0 * T + 128) >> 8)], ex[lgB1 + ((dl1 * T + 128) >> 8)], ex[lgB2 + ((dl2 * T + 128) >> 8)]);
+  }
+  int depthT(uint32_t A) const {         // stain depth 1/256 of a column's coat (sim: Math.floor(depth(A) + 0.5))
+    const uint32_t i = (A * K + 32768u) >> 16;
+    const int T = ((i >= 256 ? 256 : phi[i]) * G + 128) >> 8;
+    return T < 256 ? T : 256;
+  }
+  float depthF(float A) const {          // the same for A interpolated between columns, unrounded (sim depth)
+    const float i = A * kq;
+    return fmn(256, (i >= 255.5f ? 256 : phi[(int)(i + 0.5f)]) * G * (1.0f / 256));
+  }
+};
+// Dried-trace fill of one strip row over [x0, x1) over the tube back (the only layer under it), written in the
+// strip's byte-swapped layout. aLo / aHi = the smallest non-zero / largest traceA of the span, so every depth
+// lies in [depthT(aLo), depthT(aHi)] (monotone in A): when that is a narrow band (a uniform traceFilm: the
+// streak spans 18 %) and the span is long, the row's colours come from a LUT built once, otherwise per pixel.
 // noinline: inside drawTube the loop shared a register file with hundreds of locals and spilled every
-// iteration; on its own it stays in registers (17.8 -> 5.7 ms for a fully smeared tube).
-static void __attribute__((noinline)) traceFillRow(uint16_t *row, const uint16_t *traceA, int x0, int x1, int rowW, uint16_t fg) {
-  const uint16_t fgBE = __builtin_bswap16(fg);
-  int fr, fgg, fb; expand565(fg, fr, fgg, fb);
-  const uint32_t frb = (uint32_t)fr | ((uint32_t)fb << 16), fgG = (uint32_t)fgg;
+// iteration; on its own it stays in registers.
+#define TRACE_LUT 48
+static void __attribute__((noinline)) traceFillRow(uint16_t *row, const uint16_t *traceA, int x0, int x1, const ResidueTint &tint,
+                                                    int aLo, int aHi, uint16_t *lut) {   // lut: TRACE_LUT entries, the tube's own
+  const ResidueTint t = tint;
+  const int Tlo = t.depthT((uint32_t)aLo), Thi = t.depthT((uint32_t)aHi);
+  if (Thi - Tlo < TRACE_LUT && x1 - x0 > 2 * (Thi - Tlo + 1)) {
+    for (int T = Tlo; T <= Thi; T++) lut[T - Tlo] = T ? __builtin_bswap16(t.at(T)) : 0;
+    for (int x = x0; x < x1; x++) {
+      if (!traceA[x]) continue;
+      const int T = t.depthT(traceA[x]);
+      if (T) row[x] = lut[T - Tlo];
+    }
+    return;
+  }
   for (int x = x0; x < x1; x++) {
-    const int T = (traceA[x] * rowW) >> 8;   // sim: min(1, traceA * rowW)
-    if (T >= 256) { row[x] = fgBE; continue; }
-    if (!T) continue;
-    const uint32_t w = row[x];
-    const uint32_t g6 = ((w & 7) << 3) | (w >> 13);
-    // Position both 5-bit channels together, then replicate their high bits in parallel.
-    const uint32_t rb5 = (w & 0xf8u) | (((w >> 8) & 0x1fu) << 19);
-    const uint32_t rb = rb5 | ((rb5 >> 5) & 0x00070007u);
-    const uint32_t g = (g6 << 2) | (g6 >> 4);
-    // a*(256-T)+b*T == (a<<8)+(b-a)*T, including unsigned wrap of the packed lanes.
-    // One multiply per packed colour instead of two; final lanes and rounding are unchanged.
-    const uint32_t rbo = (rb << 8) + (frb - rb) * (uint32_t)T + 0x00800080u;
-    const uint32_t go = ((g << 8) + (fgG - g) * (uint32_t)T + 128) >> 8;
-    row[x] = (uint16_t)(((rbo >> 8) & 0xF8) | ((rbo >> 27) << 8) | (go >> 5) | (((go >> 2) & 7) << 13));
+    if (!traceA[x]) continue;
+    const int T = t.depthT(traceA[x]);
+    if (T) row[x] = __builtin_bswap16(t.at(T));
   }
 }
 static inline int alphaT(float t) { return (int)(t * 256 + 0.5f); }
 // Sheared dry residue of one strip row over [x0, x1) (drawTube step 3d): the imminent smear past an edge's
 // wet reach, sampled sh * w back (w = 1 - smoothstep(out * invZ), out = px outward of the edge at e),
-// linear between columns, blended exactly as Tube::pxa(traceRows, a) — the general zone loop's result for
-// these pixels, where the midpoint share is 0 / 1 and the wet / film weights are 0. noinline for the same
-// reason as traceFillRow: inside drawTube this loop spilled every iteration.
+// linear between columns, tinted as the general zone loop does these pixels, where the midpoint share is
+// 0 / 1 and the film weight is 0. noinline for the same reason as traceFillRow.
 static void __attribute__((noinline)) traceShearRow(uint16_t *row, const uint16_t *traceA, int a0, int a1, int x0, int x1,
-                                                     int rowW, uint16_t fg, float e, bool home, float sh, float invZ) {
+                                                     const ResidueTint &tint, float e, bool home, float sh, float invZ) {
   for (int x = x0; x < x1; x++) {
     const float o = home ? e - x - 0.5f : x + 0.5f - e;
     const float s = clampf(o * invZ, 0, 1), xf = x - sh * (1 - s * s * (3 - 2 * s));
     const int i0 = (int)ffloor(xf);
     const float ft = xf - i0;
     const float r0 = i0 >= a0 && i0 < a1 ? (float)traceA[i0] : 0.0f, r1 = i0 + 1 >= a0 && i0 + 1 < a1 ? (float)traceA[i0 + 1] : 0.0f;
-    const float a = fmn(1, (r0 + (r1 - r0) * ft) * rowW * (1.0f / 65536.0f));
-    if (a < 1.0f / 255) continue;
-    row[x] = __builtin_bswap16(a >= 1 ? fg : blend565(__builtin_bswap16(row[x]), fg, a));
+    const int T = r0 + r1 > 0 ? (int)(tint.depthF(r0 + (r1 - r0) * ft) + 0.5f) : 0;
+    if (T > 0) row[x] = __builtin_bswap16(tint.at(T));
   }
 }
 // Per-row edge loops of drawTube, noinline for the same reason as traceFillRow (register pressure in the
@@ -290,31 +312,13 @@ static inline float traceStreak(uint32_t n) {
   h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
   return 0.82f + 0.18f * ((h >> 16) * (1.0f / 65535.0f));
 }
-// Value→alpha gamma for the traces (must match sim render.ts): lifts the mid values so a dried
-// stain (~0.2–0.5 of full) stays clearly visible instead of drowning in the opacity stack.
-// Applied through a lerped 256-entry LUT (built in buildLuts) — powf per column per frame is too
-// hot, and the sim indexes the same table, so the two smears stay bit-close.
-#define TRACE_GAMMA 0.65f
-static float LUT_traceGamma[256];
-static inline float traceGamma(float t) {   // t in 0..1
-  const float sc = t * 255.0f;
-  const int i = sc >= 254.0f ? 254 : (int)sc;
-  const float f = sc - i;
-  return LUT_traceGamma[i] + f * (LUT_traceGamma[i + 1] - LUT_traceGamma[i]);
-}
-
-// Wet film (step 3d, see sim filmEta / FILM_PHI): the film a fully drawn receding line leaves, h = eta * R,
-// Bretherton's tube law at the Ca the Cox-Voinov term is calibrated with (Ca ~ theta_dyn^3 / 9 Lambda).
-// Once per frame per tube; cbrtf is fine there.
-static inline float filmEta(const Params &p) {
-  const float dyn = fmx(0, p.contactDyn) * (3.14159265f / 180.0f), ca = dyn * dyn * dyn * (1.0f / (9 * 9.2f));
-  const float c = cbrtf(ca * ca);
-  return fmn(0.1f, 1.34f * c / (1 + 3.35f * c));
-}
+// Wet film (step 3d, see sim): the film a fully drawn receding line leaves, h = eta * R, eta = filmEta(p)
+// (physics.cpp, once per frame per tube).
 // Film tables, immutable once render_init built them (PSRAM: internal RAM has no 5 KB to spare):
 // FILM_PHI[i] = path fraction 1/256 through the annular film at (2 eta - eta^2)/(1 - u^2) = i/256;
 // FILM_LG[v] = -log2 of the decoded sRGB channel v, Q8; FILM_EX[m] = sRGB encoding of 2^(-m/256). Same
 // formulas, rounding and index math as the sim, so D^(1-f) C^f (linear light) comes out the same on both sides.
+// The residue takes the same law, B^(1-tau) C^tau against the tube back (ResidueTint).
 static uint16_t *FILM_PHI = nullptr, *FILM_LG = nullptr;
 static uint8_t *FILM_EX = nullptr;
 static double srgbLin(double c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
@@ -324,7 +328,6 @@ static void buildFilmLuts() {
   for (int v = 0; v < 256; v++) { const double lg = floor(-log2(srgbLin((v < 1 ? 1 : v) / 255.0)) * 256 + 0.5); FILM_LG[v] = (uint16_t)(lg > 4095 ? 4095 : lg); }
   for (int m = 0; m < 4096; m++) FILM_EX[m] = (uint8_t)floor(255 * srgbEnc(pow(2.0, -m / 256.0)) + 0.5);
 }
-static inline int filmMix(int lgD, int lgC, int fT) { return FILM_EX[(lgD * (256 - fT) + lgC * fT + 128) >> 8]; }
 // The film path fraction through a row, 1/256, for thickness eta (sim filmRowT).
 static inline int filmRowT(float eta, float kRow) {
   if (eta <= 0) return 0;
@@ -343,7 +346,6 @@ static void buildLuts() {
     LUT_alphaT16[v] = (uint16_t)alphaT(v / 255.0f);
     LUT_embHi[v] = (uint8_t)jround(clampf((float)v + (255.0f - (float)v) * 0.7f, 0, 255));
     LUT_embLo[v] = (uint8_t)jround(clampf((float)v * 0.25f, 0, 255));
-    LUT_traceGamma[v] = powf(v * (1.0f / 255.0f), TRACE_GAMMA);
   }
 }
 static inline uint16_t embossHi(uint16_t c) { int r, g, b; expand565(c, r, g, b); return rgb565(LUT_embHi[r], LUT_embHi[g], LUT_embHi[b]); }
@@ -368,7 +370,6 @@ struct Tube;
 struct Palette {
   uint16_t rows[TUBE_HEIGHT_MAX], bubbleIn[TUBE_HEIGHT_MAX], tubeBackRows[TUBE_HEIGHT_MAX];
   uint16_t bubbleRimRows[TUBE_HEIGHT_MAX];   // fizz ring colour per row, dimmed by the cylinder's light (scalar bubbleRim: spirit bubble, pinpoint)
-  uint16_t traceRows[TUBE_HEIGHT_MAX]; // dried pigment, independent of bulk liquid transparency
   uint16_t body, tubeBack, bubbleRim;
   float rowK[TUBE_HEIGHT_MAX];   // luma weight per row for front brightening (sim step 3a)
   uint16_t dryT[TUBE_HEIGHT_MAX]; // 1/256: what an empty tube transmits of the back per row (0 inside the wall band); fades rear marks behind air
@@ -653,8 +654,9 @@ struct Tube {
   float fizzShift = 0;                                        // px the liquid frame sits off its home (a free slug that slid away; 0 pinned), set by drawTube
   float springScatter = 0;                                    // share of spring births born scattered instead (0 = all at the spring), advanced by stepFizz
   float springClock = 0;                                      // bubbles the spring may release now (its cadence accrued)
-  uint16_t traceA[TUBE_LENGTH_PX];                            // dried-trace residue alpha per column, 1/256 with headroom (traceAmount > 1)
+  uint16_t traceA[TUBE_LENGTH_PX];                            // dried-trace residue depth per column, 1/256 with headroom (traceAmount > 1)
   uint16_t traceRaw[TUBE_LENGTH_PX];                          // render-frame residue copy, input to the taper blur
+  uint16_t traceLut[TRACE_LUT];                               // traceFillRow's per-row colour table (one per tube: both cores render)
 
   inline bool inStrip(int x, int y) const { return x >= 0 && x < PANEL_W && y >= baseY && y < baseY + H; }
   inline uint16_t rd(int x, int y) const { return __builtin_bswap16(FB[(y - baseY) * PANEL_W + x]); }
@@ -839,9 +841,8 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     // Transparent liquid shows the per-row tube-back gradient. The highlight remains a surface
     // reflection and goes on after it.
     c = scale(c, br);
-    RGB residue = c;
     c = mix(c, scale(back, p.brightness), p.liquidTransparency);
-    // Side-lit rim (sim rimLight/rimTint): rises as u^2 toward the walls; body only, not the residue.
+    // Side-lit rim (sim rimLight/rimTint): rises as u^2 toward the walls.
     if (p.rimLight > 0) {
       float rk = p.rimLight * u * u;
       c = {fmn(255, c.r + rk * rimTint.r), fmn(255, c.g + rk * rimTint.g), fmn(255, c.b + rk * rimTint.b)};
@@ -849,7 +850,6 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     if (y >= hiTop && y < hiTop + p.highlightH) {
       float k = powf(1 - fabsf((y - hiTop) / fmx(1, p.highlightH - 1) - 0.5f) * 2, p.highlightSharp);
       c = mix(c, liquidHiScaled, fmn(1, (0.35f + 0.65f * k) * p.highlightBright));
-      residue = mix(residue, liquidHiScaled, fmn(1, (0.35f + 0.65f * k) * p.highlightBright));
     }
     float gw = glassW(p, y, hiTop, lam);
     float wetK = p.glassOverLiquid + (1 - p.glassOverLiquid) * p.liquidTransparency, glassWet = gw * wetK;
@@ -857,12 +857,9 @@ void Tube::buildPalette(const Params &p, float lightDeg, Palette &pal) const {
     const RGB dryRow = mix(scale(mix(scale(back, dryT), ghi, gw), p.brightness), glassEdge, wall);
     pal.tubeBackRows[y] = q(dryRow);
     // Glass weight rises to the dry-side one with transparency; the grazing rim is the outer surface's
-    // reflection, full weight over liquid and residue alike (sim).
+    // reflection, full weight over the liquid (sim).
     c = ambientize(mix(mix(c, glassHiScaled, glassWet), glassEdge, wetRim), bodyL, ambAmt);
     if (wet < 1) c = mix(c, dryRow, (1 - wet) * (1 - dryT));   // unwetted band: the empty tube's row
-    // Dried pigment uses opaque-liquid shading; traceAmount / drying supply its coverage.
-    residue = ambientize(mix(mix(residue, glassHiScaled, gw * p.glassOverLiquid), glassEdge, wetRim), bodyL, p.ambientLight);
-    pal.traceRows[y] = q(scale(to888(q(residue)), 0.85f));
     pal.rows[y] = q(c);
     pal.bubbleIn[y] = q(mix(c, {0, 0, 0}, p.bubbleDark));
   }
@@ -2042,7 +2039,7 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
   // blend the body AA over that backing once. Masking residue by (1 - coverage)
   // over an already-AA body leaks the bare tube colour at their junction.
   if (traceMode) {
-    const float yc = (H - 1) / 2.0f, hw = softW * 0.5f;
+    const float hw = softW * 0.5f;
     const int N = p.wetFilm > 0 ? (int)fmx(1, jround(p.wetFilm)) : 0;
     const bool bandR = hasLiquid && N > 0 && s.filmFree > 0.02f;
     const bool bandL = hasLiquid && N > 0 && p.freeLiquid && s.filmHome > 0.02f;
@@ -2054,19 +2051,15 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     const float visR = bandR ? ease((0.2f - s.filmFree) * (1.0f / 0.18f)) : 0.0f, visL = bandL ? ease((0.2f - s.filmHome) * (1.0f / 0.18f)) : 0.0f;
     // Columns that may receive residue or band: the occupied residue range (physics keeps
     // [traceLo, traceHi) tight) mirrored into the render frame, plus each band's reach over all rows.
-    // Permanent film (traceFilm, see sim): every column carries residue of at least that level, so
-    // the range is the whole tube and the per-column value floors at the film's gamma-lifted alpha,
-    // capped (after traceAmount) at the body's opacity 1 - liquidTransparency so a clear liquid
-    // never reads thinner than its own film.
-    const float filmCap = 1 - clampf(p.liquidTransparency, 0, 1);
-    const float filmG = p.traceFilm > 0 ? fmn(traceGamma(fmn(1.0f, p.traceFilm)), filmCap / p.traceAmount) : 0.0f;
+    // Permanent film (traceFilm, a share of the thin-film cap, see sim): every column carries residue at least
+    // that thick, so the range is the whole tube and the per-column thickness floors there.
+    const float filmV = p.traceFilm > 0 ? fmn(1.0f, p.traceFilm) : 0.0f;
     int lo = L, hi = 0;
-    if (filmG > 0) { lo = 0; hi = L; }
+    if (filmV > 0) { lo = 0; hi = L; }
     else if (st.traceHi > st.traceLo) { lo = mir ? L - st.traceHi : st.traceLo; hi = mir ? L - st.traceLo : st.traceHi; }
     // Imminent residue (see sim): within Z = 2 max|Delta| px of a liquid edge the residue is sampled
     // Delta * w back, Delta = this row's contact line minus the edge centre physics deposits at, so the
-    // fresh smear hugs the meniscus — only where a deposit lies within reach and on rows with |Delta| >= 1/8;
-    // while the line recedes the deposit within N px is still dissolved in the film: it hands over to the body.
+    // fresh smear hugs the meniscus — only where a deposit lies within reach and on rows with |Delta| >= 1/8.
     float dR = 0, dL = 0, eR0 = L, eR1 = 0, eL0 = L, eL1 = 0;
     for (int ry = 0; ry < H; ry++) {
       dR = fmx(dR, fabsf(edges[ry] - xe)); eR0 = fmn(eR0, edges[ry]); eR1 = fmx(eR1, edges[ry]);
@@ -2077,7 +2070,6 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
     auto nearDep = [depLo, depHi](float e0, float e1, float z) { return depHi > depLo && depLo < e1 + z + 4 && depHi > e0 - z - 4; };
     const bool shearR = hasLiquid && dR >= 0.125f && nearDep(eR0, eR1, ZR);
     const bool shearL = hasLiquid && p.freeLiquid && dL >= 0.125f && nearDep(eL0, eL1, ZL);
-    const float wetR = bandR ? s.filmFree : 0.0f, wetL = bandL ? s.filmHome : 0.0f;
     const float extR = fmx(bandR ? (float)N : 0.0f, shearR ? ZR : 0.0f), extL = fmx(bandL ? (float)N : 0.0f, shearL ? ZL : 0.0f);
     if (extL > 0 || extR > 0) for (int ry = 0; ry < H; ry++) {
       if (extL > 0) { int a = (int)ffloor(edgesL[ry] - extL), b = (int)fceil(edgesL[ry] + hw) + 1; if (a < lo) lo = a; if (b > hi) hi = b; }
@@ -2089,8 +2081,10 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
       const int a0 = lo - 4 < 0 ? 0 : lo - 4, a1 = hi + 4 > L ? L : hi + 4;
       const int c0 = a0 - 4 < 0 ? 0 : a0 - 4, c1 = a1 + 4 > L ? L : a1 + 4;
       for (int x = c0; x < c1; x++) traceRaw[x] = st.trace[mir ? L - 1 - x : x];
+      int aLo = 65535, aHi = 0;   // path coefficient band of the span (traceFillRow's LUT)
       // +-4 px triangular blur before the streak texture (see sim): tapers the smear's outer end
-      // (dense turnaround deposit next to bare glass) into a tide mark instead of a 1-px cliff
+      // (dense turnaround deposit next to bare glass) into a tide mark instead of a 1-px cliff. The streak
+      // scatters the coat's thickness; A = eta (2 - eta) 2^16 is the column's film path coefficient
       for (int x = a0; x < a1; x++) {
         uint32_t acc = 5u * traceRaw[x];
         for (int d = 1; d <= 4; d++) {
@@ -2098,22 +2092,26 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
           acc += (uint32_t)(5 - d) * (traceRaw[m] + traceRaw[q2]);
         }
         const float v = acc * (1.0f / 25.0f);
-        // 1/256 units with headroom: traceAmount may exceed 1 (opacity boost) and the sim clamps only
-        // AFTER the row weight below, so the column value keeps the excess (a uint8 cap here made
-        // heavy residue lighter on the board than in the sim)
-        const float g = fmx(v > 0 ? traceGamma(v * (1.0f / TRACE_FULL)) : 0.0f, filmG);
-        float a = g > 0 ? g * 256.0f * p.traceAmount * traceStreak(x + (uint32_t)idx * 6151u) : 0.0f;
-        traceA[x] = (uint16_t)(fmn(65535.0f, a) + 0.5f);
+        const float eta = FILM_ETA_MAX * fmx(v * (1.0f / TRACE_FULL), filmV) * traceStreak(x + (uint32_t)idx * 6151u);
+        const int ta = (int)(eta * (2 - eta) * 65536.0f + 0.5f);
+        traceA[x] = (uint16_t)ta;
+        if (ta) { if (ta < aLo) aLo = ta; if (ta > aHi) aHi = ta; }
       }
+      const int G = (int)(p.traceAmount * 256 + 0.5f);   // stain depth gain 1/256
       for (int ry = 0; ry < H; ry++) {
-        float d = (ry - yc) / yc;
-        int rowW = (int)((0.4f + 0.6f * d * d) * 256.0f + 0.5f), y = y0 + ry;
+        const int y = y0 + ry;
         const float ex = edges[ry], exL = edgesL[ry], xm = (ex + exL) * 0.5f;
-        // film path weight 1/(1 - u^2) of this row (sim kRow); the outermost rows graze the wall
+        // film path weight 1/(1 - u^2) of this row (sim kRow); the outermost rows graze the wall. K: the same
+        // in 1/256, capped where any coat fills the row (sim)
         const float gr = 1 - rc.rowU2[ry], kRow = gr > 1e-6f ? 1.0f / gr : 1e6f;
-        int Br, Bg, Bb, Pr, Pg, Pb, Cr, Cg, Cb;
-        expand565(pal.tubeBackRows[ry], Br, Bg, Bb); expand565(pal.traceRows[ry], Pr, Pg, Pb); expand565(pal.rows[ry], Cr, Cg, Cb);
-        const int lgC0 = FILM_LG[Cr], lgC1 = FILM_LG[Cg], lgC2 = FILM_LG[Cb];
+        const uint32_t K = kRow >= 1024 ? 262144u : (uint32_t)(kRow * 256 + 0.5f);
+        // the residue is the first layer over the tube back: B^(1-tau) C^tau from the two rows' logs
+        int Br, Bg, Bb, Cr, Cg, Cb;
+        expand565(pal.tubeBackRows[ry], Br, Bg, Bb); expand565(pal.rows[ry], Cr, Cg, Cb);
+        ResidueTint tint;
+        tint.lgB0 = FILM_LG[Br]; tint.lgB1 = FILM_LG[Bg]; tint.lgB2 = FILM_LG[Bb];
+        tint.dl0 = FILM_LG[Cr] - tint.lgB0; tint.dl1 = FILM_LG[Cg] - tint.lgB1; tint.dl2 = FILM_LG[Cb] - tint.lgB2;
+        tint.ex = FILM_EX; tint.phi = FILM_PHI; tint.K = K; tint.G = G; tint.kq = K * (1.0f / 65536); tint.full = pal.rows[ry];
         const int xr = (int)jround(ex), xrL = (int)jround(exL);   // hard edge: liquid where xrL <= x < xr
         // this row's Delta per edge, where the smear is sheared at all
         const float shR = shearR && fabsf(ex - xe) >= 0.125f ? ex - xe : 0.0f, shL = shearL && fabsf(exL - xs) >= 0.125f ? exL - xs : 0.0f;
@@ -2145,10 +2143,10 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
         // strip row directly — y is inside the strip (drawTube's y0 is baseY), [a0, a1) inside [0, PANEL_W).
         static_assert(TUBE_LENGTH_PX <= PANEL_W, "trace columns index the strip row directly");
         uint16_t *const row = FB + ry * PANEL_W;
-        traceFillRow(row, traceA, a0, pl1, rowW, pal.traceRows[ry]);
-        traceFillRow(row, traceA, pr0, a1, rowW, pal.traceRows[ry]);
-        if (zl0 > pl1) traceShearRow(row, traceA, a0, a1, pl1, zl0, rowW, pal.traceRows[ry], exL, true, shL, invZL);
-        if (pr0 > zr1) traceShearRow(row, traceA, a0, a1, zr1, pr0, rowW, pal.traceRows[ry], ex, false, shR, invZR);
+        traceFillRow(row, traceA, a0, pl1, tint, aLo, aHi, traceLut);
+        traceFillRow(row, traceA, pr0, a1, tint, aLo, aHi, traceLut);
+        if (zl0 > pl1) traceShearRow(row, traceA, a0, a1, pl1, zl0, tint, exL, true, shL, invZL);
+        if (pr0 > zr1) traceShearRow(row, traceA, a0, a1, zr1, pr0, tint, ex, false, shR, invZR);
         // a row with no shear and no film up: the zone is only the soft ramp over plain residue
         const bool rowPlain = shL == 0 && shR == 0 && !bandL && !bandR;
         for (int seg = 0; seg < 2; seg++) {
@@ -2163,32 +2161,27 @@ void Tube::drawTube(int y0, const TubeState &st, const Params &p, uint32_t gen, 
               : (x >= xrL && x < xr ? 1.0f : 0.0f);
             if (cov >= 1) continue;
             if (rowPlain) {   // the general path below reduces to exactly this
-              const float a = fmn(1, (float)traceA[x] * rowW * (1.0f / 65536.0f));
-              if (a >= 1.0f / 255) pxa(x, y, pal.traceRows[ry], a);
+              const int T = traceA[x] ? tint.depthT(traceA[x]) : 0;
+              if (T > 0) px(x, y, tint.at(T));
               continue;
             }
             // px outward of each contact line; bt = the time edge's share, 0 / 1 on each half, blended across
             // a softW-wide window at the midpoint (short slug, overlapping ramps: the warps join continuously)
             const float oL = exL - x - 0.5f, oR = x + 0.5f - ex, bt = clampf((x + 0.5f - xm) * invBW + 0.5f, 0, 1);
-            // shift toward the edge centre, wet weight, film weight 1/256; wet and film ease to 0 at N px out,
-            // the film thinning there too (eta * wN: legs) with visibility wN * vis on top (see sim)
-            float sh = 0, wet = 0, fw = 0;
-            if (bt < 1) { const float k = 1 - bt, wN = ease(oL * invN); if (shL != 0) sh += k * shL * ease(oL * invZL); wet += k * wetL * wN; if (etaL > 0) fw += k * filmRowT(etaL * wN, kRow) * wN * visL; }
-            if (bt > 0) { const float wN = ease(oR * invN); if (shR != 0) sh += bt * shR * ease(oR * invZR); wet += bt * wetR * wN; if (etaR > 0) fw += bt * filmRowT(etaR * wN, kRow) * wN * visR; }
+            // shift toward the edge centre and film weight 1/256; the film eases to 0 at N px out, thinning there
+            // too (eta * wN: legs) with visibility wN * vis on top (see sim)
+            float sh = 0, fw = 0;
+            if (bt < 1) { const float k = 1 - bt, wN = ease(oL * invN); if (shL != 0) sh += k * shL * ease(oL * invZL); if (etaL > 0) fw += k * filmRowT(etaL * wN, kRow) * wN * visL; }
+            if (bt > 0) { const float wN = ease(oR * invN); if (shR != 0) sh += bt * shR * ease(oR * invZR); if (etaR > 0) fw += bt * filmRowT(etaR * wN, kRow) * wN * visR; }
             // imminent residue sampled at the shifted column, linear between columns
             const float xf = x - sh;
             const int i0 = (int)ffloor(xf);
             const float ft = xf - i0;
             const float r0 = i0 >= a0 && i0 < a1 ? (float)traceA[i0] : 0.0f, r1 = i0 + 1 >= a0 && i0 + 1 < a1 ? (float)traceA[i0 + 1] : 0.0f;
-            const float a = fmn(1, (r0 + (r1 - r0) * ft) * rowW * (1.0f / 65536.0f));
-            // wet deposit (weight wet * a) and film composed into one Beer-Lambert step from the dried residue D
-            // toward the body (see sim): D^(1-t) C^t, t = 1 - (1 - wet a)(1 - f); monotone, no lighter gap
-            const int T = (int)((1 - (1 - wet * a) * (1 - fw * (1.0f / 256))) * 256 + 0.5f);
-            if (T >= 256) { px(x, y, pal.rows[ry]); continue; }
-            if (T <= 0) { if (a >= 1.0f / 255) pxa(x, y, pal.traceRows[ry], a); continue; }
-            // D = dried residue over the tube back, 888, one write
-            const int E0 = (int)(Br + (Pr - Br) * a + 0.5f), E1 = (int)(Bg + (Pg - Bg) * a + 0.5f), E2 = (int)(Bb + (Pb - Bb) * a + 0.5f);
-            px(x, y, rgb565(filmMix(FILM_LG[E0], lgC0, T), filmMix(FILM_LG[E1], lgC1, T), filmMix(FILM_LG[E2], lgC2, T)));
+            // the residue the line just laid and the wet film behind it are one coat, counted once: the deeper
+            // of the two, never lighter than the residue beside it (see sim)
+            const int T = (int)(fmx(r0 + r1 > 0 ? tint.depthF(r0 + (r1 - r0) * ft) : 0.0f, fw) + 0.5f);
+            if (T > 0) px(x, y, tint.at(T));
           }
         }
       }
